@@ -19,7 +19,30 @@
         <span class="brand-mark">Strix</span>
         <span class="brand-sub">Local Security API</span>
       </div>
-      <div class="topbar-status" id="admissionHint">准入：…</div>
+      <div class="loadboard" id="admissionHint" aria-live="polite">
+        <div class="loadboard-main">
+          <div class="load-meter" title="1 分钟负载">
+            <div class="load-meter-track"><div class="load-meter-fill" id="loadFill"></div></div>
+            <div class="load-meter-meta">
+              <span class="load-label">Load</span>
+              <span class="load-value" id="loadValue">—</span>
+            </div>
+          </div>
+          <div class="load-meter" title="可用内存">
+            <div class="load-meter-track"><div class="load-meter-fill mem" id="memFill"></div></div>
+            <div class="load-meter-meta">
+              <span class="load-label">Mem free</span>
+              <span class="load-value" id="memValue">—</span>
+            </div>
+          </div>
+        </div>
+        <div class="load-stats">
+          <span class="stat" title="运行中"><b id="statRunning">0</b> run</span>
+          <span class="stat" title="排队中"><b id="statQueued">0</b> queue</span>
+          <span class="stat" title="可放行槽位"><b id="statSlots">—</b> slot</span>
+          <span class="admit-pill" id="admitPill">…</span>
+        </div>
+      </div>
       <div class="topbar-auth">
         <input id="apiKey" type="password" placeholder="API Token" autocomplete="off" />
         <button type="button" class="btn" id="saveKey">记住</button>

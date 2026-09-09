@@ -84,6 +84,129 @@ button, input, select, textarea {
   white-space: nowrap;
 }
 
+.loadboard {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.1rem;
+  flex-wrap: wrap;
+}
+
+.loadboard-main {
+  display: flex;
+  gap: 0.85rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.load-meter {
+  display: grid;
+  grid-template-columns: 72px auto;
+  gap: 0.45rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.load-meter-track {
+  height: 6px;
+  border-radius: 999px;
+  background: #dfe4ea;
+  overflow: hidden;
+}
+
+.load-meter-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.35s ease, background-color 0.35s ease;
+}
+
+.load-meter-fill.warn { background: var(--warn); }
+.load-meter-fill.danger { background: var(--danger); }
+.load-meter-fill.mem { background: #2f6fed; }
+.load-meter-fill.mem.warn { background: var(--warn); }
+.load-meter-fill.mem.danger { background: var(--danger); }
+
+.load-meter-meta {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  min-width: 4.5rem;
+}
+
+.load-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.load-value {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.load-stats {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.load-stats .stat {
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.load-stats .stat b {
+  color: var(--text);
+  font-weight: 600;
+  margin-right: 0.15rem;
+}
+
+.admit-pill {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.22rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admit-pill.ok {
+  color: #0b5c3c;
+  background: var(--accent-soft);
+  border-color: #b7dfcd;
+}
+
+.admit-pill.paused {
+  color: #7a4d00;
+  background: #f7e7c5;
+  border-color: #e6c989;
+}
+
+.admit-pill.down {
+  color: #8a1f16;
+  background: #f8d7d4;
+  border-color: #e8b0aa;
+}
+
 .topbar-auth {
   display: flex;
   gap: 0.4rem;
@@ -438,4 +561,7 @@ button, input, select, textarea {
   .chat-compose { grid-template-columns: 1fr; }
   .topbar-auth input { width: 7.5rem; }
   .brand-sub { display: none; }
+  .loadboard { justify-content: flex-start; }
+  .load-meter { grid-template-columns: 56px auto; }
+  .admit-pill { max-width: 8rem; }
 }

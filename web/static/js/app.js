@@ -275,13 +275,77 @@
       const h = await fetch("/health").then((r) => r.json());
       const a = h.admission || {};
       const sys = a.system || {};
-      $("admissionHint").textContent =
-        `queued=${h.queued_tasks} running=${h.running_tasks} ` +
-        `slots=${a.allowed_slots ?? "?"} (${a.reason || "n/a"}) ` +
-        `load=${sys.load_1m ?? "?"} cpus=${sys.cpu_count ?? "?"}`;
+      const cpus = Number(sys.cpu_count) || 1;
+      const load = Number(sys.load_1m);
+      const memTotal = Number(sys.mem_total_bytes) || 0;
+      const memAvail = Number(sys.mem_available_bytes) || 0;
+      const slots = a.allowed_slots;
+      const reason = String(a.reason || "");
+
+      const loadRatio = Number.isFinite(load) ? Math.min(load / Math.max(cpus, 1), 2) / 2 : 0;
+      const loadPct = Math.round(loadRatio * 100);
+      const loadFill = $("loadFill");
+      loadFill.style.width = `${loadPct}%`;
+      loadFill.classList.remove("warn", "danger");
+      if (loadRatio >= 0.85) loadFill.classList.add("danger");
+      else if (loadRatio >= 0.6) loadFill.classList.add("warn");
+      $("loadValue").textContent = Number.isFinite(load)
+        ? `${load.toFixed(2)} / ${cpus}`
+        : "—";
+
+      const memRatio = memTotal > 0 ? memAvail / memTotal : 0;
+      const memFill = $("memFill");
+      memFill.style.width = `${Math.round(memRatio * 100)}%`;
+      memFill.classList.remove("warn", "danger");
+      if (memRatio > 0 && memRatio < 0.12) memFill.classList.add("danger");
+      else if (memRatio > 0 && memRatio < 0.25) memFill.classList.add("warn");
+      $("memValue").textContent = memTotal
+        ? `${formatBytes(memAvail)} · ${Math.round(memRatio * 100)}%`
+        : "—";
+
+      $("statRunning").textContent = String(h.running_tasks ?? 0);
+      $("statQueued").textContent = String(h.queued_tasks ?? 0);
+      $("statSlots").textContent = slots == null ? "—" : String(slots);
+
+      const pill = $("admitPill");
+      const paused = slots === 0 || /pause|pressure|memory|load/i.test(reason);
+      const down = h.status && h.status !== "ok";
+      pill.className = "admit-pill " + (down ? "down" : paused ? "paused" : "ok");
+      pill.textContent = down
+        ? "服务降级"
+        : paused
+          ? humanReason(reason) || "排队等待"
+          : "可调度";
+      pill.title = reason || "";
     } catch (e) {
-      $("admissionHint").textContent = `健康检查失败: ${e.message}`;
+      const pill = $("admitPill");
+      if (pill) {
+        pill.className = "admit-pill down";
+        pill.textContent = "健康检查失败";
+        pill.title = e.message;
+      }
     }
+  }
+
+  function formatBytes(n) {
+    if (!n || n <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let v = n;
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) {
+      v /= 1024;
+      i += 1;
+    }
+    return `${v >= 10 || i === 0 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
+  }
+
+  function humanReason(reason) {
+    const r = String(reason || "");
+    if (/memory/i.test(r)) return "内存不足";
+    if (/load/i.test(r)) return "负载过高";
+    if (/pause/i.test(r)) return "准入暂停";
+    if (/^ok/i.test(r)) return "可调度";
+    return r.replace(/^ok:?/, "").trim() || "";
   }
 
   $("apiKey").value = localStorage.getItem(api.KEY_STORAGE) || "";

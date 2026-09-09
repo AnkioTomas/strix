@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import AliasChoices, Field
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -50,12 +50,6 @@ class Settings(BaseSettings):
     # Admission control: keep tasks queued when the host is under pressure.
     min_free_memory_gb: float = Field(default=2.0, ge=0.0, alias="STRIX_MIN_FREE_MEMORY_GB")
     max_load_per_cpu: float = Field(default=1.5, ge=0.0, alias="STRIX_MAX_LOAD_PER_CPU")
-    # Whole-task wall clock (seconds). STRIX_TIMEOUT is the preferred name.
-    max_task_time_seconds: int = Field(
-        default=1800,
-        ge=60,
-        validation_alias=AliasChoices("STRIX_TIMEOUT", "STRIX_MAX_TASK_TIME"),
-    )
     cancel_grace_seconds: int = Field(default=15, ge=1, alias="STRIX_CANCEL_GRACE")
 
     strix_bin: str = Field(default="strix", alias="STRIX_BIN")

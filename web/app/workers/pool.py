@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import TYPE_CHECKING, Any
 
 from app.db import utc_now
@@ -74,24 +73,9 @@ class WorkerPool:
         for task_id, process in list(self.manager._processes.items()):
             code = process.poll()
             if code is None:
-                task = self.manager.db.get_task(task_id)
-                if task and task.get("started_at"):
-                    started = _parse_ts(task["started_at"])
-                    if started and time.time() - started > self.settings.max_task_time_seconds:
-                        logger.warning("task %s exceeded max time; cancelling", task_id)
-                        process.terminate(self.settings.cancel_grace_seconds)
-                        await asyncio.to_thread(
-                            self.manager.finish_process, task_id, cancelled=False
-                        )
-                        self.manager.db.update_task(
-                            task_id,
-                            status="failed",
-                            error="STRIX_TIMEOUT",
-                        )
-                else:
-                    name = process.refresh_run_name()
-                    if name:
-                        self.manager.db.update_task(task_id, run_name=name)
+                name = process.refresh_run_name()
+                if name:
+                    self.manager.db.update_task(task_id, run_name=name)
                 continue
             task = self.manager.db.get_task(task_id)
             cancelled = bool(task and task["status"] == "cancelling")
@@ -146,13 +130,3 @@ class WorkerPool:
                 error=str(exc),
                 finished_at=utc_now(),
             )
-
-
-def _parse_ts(value: str) -> float | None:
-    from datetime import datetime
-
-    try:
-        text = value.replace("Z", "+00:00")
-        return datetime.fromisoformat(text).timestamp()
-    except ValueError:
-        return None

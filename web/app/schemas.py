@@ -53,6 +53,12 @@ class CreateTaskRequest(BaseModel):
         return self
 
 
+class ResumeTaskRequest(BaseModel):
+    """Optional nudge delivered as Strix ``resume_instruction``."""
+
+    instruction: str | None = None
+
+
 class TaskSummary(BaseModel):
     id: str
     type: TaskType

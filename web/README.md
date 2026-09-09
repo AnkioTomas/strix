@@ -50,10 +50,7 @@ PYTHONPATH=. python -m app
 
 | 变量 | 默认 | 含义 |
 |------|------|------|
-| `STRIX_TIMEOUT` | 1800 | Web 单任务墙钟上限（同义：`STRIX_MAX_TASK_TIME`） |
-| `LLM_TIMEOUT` | 300 | 单次 LLM 请求 |
-| `STRIX_DOCKER_TIMEOUT` | 300 | Docker API / pull |
-| `STRIX_GIT_TIMEOUT` | 300 | git clone / checkout |
+| `LLM_TIMEOUT` | 300 | 所有 AI/LLM 请求超时（秒） |
 
 浏览器根路径是控制台（`web/static/`：`index.html` + `css/` + `js/`）；静态资源在 `/static/*`。漏洞与报告页用 [Penna Markdown](https://penna.ankio.net/guide/getting-started) 只读渲染器（CDN `penna-markdown@0.2.5`）。OpenAPI 在 `/docs`。`GET /health` 返回 `admission`（当前是否放行、load/内存快照）。
 
@@ -67,7 +64,8 @@ PYTHONPATH=. python -m app
 | GET | `/api/v1/tasks` | 列表 |
 | GET | `/api/v1/tasks/{id}` | 详情（含 `viewer_proxy_url`） |
 | POST | `/api/v1/tasks/{id}/cancel` | SIGTERM→SIGKILL |
-| POST | `/api/v1/tasks/{id}/retry` | 同配置重跑 |
+| POST | `/api/v1/tasks/{id}/retry` | 同配置重跑（新 run） |
+| POST | `/api/v1/tasks/{id}/resume` | 原地续跑同一任务（同 `run_name`，需 `agents.json`） |
 | POST | `/api/v1/tasks/{id}/retest` | 带复测指令重跑 |
 | GET | `/api/v1/tasks/{id}/results` | 该任务 Finding |
 | GET | `/api/v1/tasks/{id}/report` | Markdown 报告 |

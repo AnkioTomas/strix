@@ -26,6 +26,7 @@ import contextlib
 import logging
 import os
 import uuid
+from pathlib import Path
 from typing import Any, cast
 
 from agents.sandbox.errors import ExposedPortUnavailableError
@@ -54,16 +55,14 @@ logger = logging.getLogger(__name__)
 
 
 def docker_client_from_env() -> Any:
-    """``docker.from_env`` with ``STRIX_DOCKER_TIMEOUT`` applied.
+    """``docker.from_env`` with a finite HTTP timeout.
 
     Without an explicit timeout, docker-py requests can hang forever on a
     stuck daemon or registry.
     """
     import docker
 
-    from strix.config import load_settings
-
-    return docker.from_env(timeout=load_settings().runtime.docker_timeout)
+    return docker.from_env(timeout=300)
 
 
 _SANDBOX_NETWORK_ENV = "STRIX_DOCKER_SANDBOX_NETWORK"
@@ -401,10 +400,24 @@ class StrixDockerSandboxClient(DockerSandboxClient):
         if bind_mounts:
             mounts = create_kwargs.setdefault("mounts", [])
             for spec in sorted(bind_mounts, key=lambda s: str(s["target"]).count("/")):
+                source = Path(str(spec["source"])).expanduser().resolve()
+                if not source.exists():
+                    # Writable workspace mounts may be created just-in-time;
+                    # read-only source trees must already exist on the host.
+                    if spec.get("read_only", False):
+                        raise FileNotFoundError(
+                            f"Docker bind mount source does not exist: {source}"
+                        )
+                    source.mkdir(parents=True, exist_ok=True)
+                    (source / ".keep").touch(exist_ok=True)
+                if not source.exists():
+                    raise FileNotFoundError(
+                        f"Docker bind mount source does not exist: {source}"
+                    )
                 mounts.append(
                     DockerSDKMount(
                         target=spec["target"],
-                        source=spec["source"],
+                        source=str(source),
                         type="bind",
                         read_only=spec.get("read_only", False),
                     )
@@ -420,17 +433,43 @@ class StrixDockerSandboxClient(DockerSandboxClient):
             _format_bind_specs(list(self.strix_bind_mounts or [])),
             create_kwargs.get("labels") or {},
         )
-        try:
-            container = self.docker_client.containers.create(**create_kwargs)
-        except Exception:
-            logger.exception(
-                "Failed to create sandbox container image=%s network=%s ports=%s mounts=%s",
-                image,
-                create_kwargs.get("network") or "default",
-                list(exposed_ports),
-                _format_bind_specs(list(self.strix_bind_mounts or [])),
-            )
-            raise
+        # Docker Desktop can briefly fail with "bind source path does not exist"
+        # right after the host directory is created; recreate sources and retry.
+        last_exc: Exception | None = None
+        container = None
+        for attempt in range(3):
+            try:
+                container = self.docker_client.containers.create(**create_kwargs)
+                break
+            except Exception as exc:
+                last_exc = exc
+                msg = str(exc).lower()
+                if attempt < 2 and "bind source path does not exist" in msg:
+                    for spec in bind_mounts:
+                        if spec.get("read_only", False):
+                            continue
+                        src = Path(str(spec["source"])).expanduser().resolve()
+                        src.mkdir(parents=True, exist_ok=True)
+                        (src / ".keep").touch(exist_ok=True)
+                    logger.warning(
+                        "Retrying sandbox create after missing bind source "
+                        "(attempt %s/3): %s",
+                        attempt + 1,
+                        exc,
+                    )
+                    continue
+                logger.exception(
+                    "Failed to create sandbox container image=%s network=%s ports=%s mounts=%s",
+                    image,
+                    create_kwargs.get("network") or "default",
+                    list(exposed_ports),
+                    _format_bind_specs(list(self.strix_bind_mounts or [])),
+                )
+                raise
+        else:
+            assert last_exc is not None
+            raise last_exc
+        assert container is not None
         logger.info(
             "Sandbox container created: id=%s image=%s (start pending)",
             container.short_id if hasattr(container, "short_id") else "?",

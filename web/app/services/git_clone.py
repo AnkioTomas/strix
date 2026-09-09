@@ -10,15 +10,6 @@ class GitError(RuntimeError):
     pass
 
 
-def _git_timeout() -> int:
-    try:
-        from strix.config import load_settings
-
-        return int(load_settings().runtime.git_timeout)
-    except Exception:
-        return 300
-
-
 def clone_repository(
     url: str,
     dest: Path,
@@ -35,10 +26,9 @@ def clone_repository(
         cmd.extend(["--branch", branch])
     cmd.extend([url, str(dest)])
 
-    timeout = _git_timeout()
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=False, timeout=timeout
+            cmd, capture_output=True, text=True, check=False, timeout=300
         )
     except subprocess.TimeoutExpired as exc:
         raise GitError(f"git clone timed out after {exc.timeout}s") from exc
@@ -53,7 +43,7 @@ def clone_repository(
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=timeout,
+                timeout=300,
             )
         except subprocess.TimeoutExpired as exc:
             raise GitError(f"git checkout timed out after {exc.timeout}s") from exc

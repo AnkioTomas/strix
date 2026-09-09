@@ -581,27 +581,23 @@ class DiffScopeResult:
 def _run_git_command(
     repo_path: Path, args: list[str], check: bool = True
 ) -> subprocess.CompletedProcess[str]:
-    from strix.config import load_settings
-
     return subprocess.run(  # noqa: S603
         ["git", "-C", str(repo_path), *args],  # noqa: S607
         capture_output=True,
         text=True,
         check=check,
-        timeout=load_settings().runtime.git_timeout,
+        timeout=300,
     )
 
 
 def _run_git_command_raw(
     repo_path: Path, args: list[str], check: bool = True
 ) -> subprocess.CompletedProcess[bytes]:
-    from strix.config import load_settings
-
     return subprocess.run(  # noqa: S603
         ["git", "-C", str(repo_path), *args],  # noqa: S607
         capture_output=True,
         check=check,
-        timeout=load_settings().runtime.git_timeout,
+        timeout=300,
     )
 
 
@@ -1577,8 +1573,6 @@ def clone_repository(repo_url: str, run_name: str, dest_name: str | None = None)
         shutil.rmtree(clone_path)
 
     try:
-        from strix.config import load_settings
-
         with console.status(f"[bold cyan]Cloning repository {repo_url}...", spinner="dots"):
             subprocess.run(  # noqa: S603
                 [
@@ -1590,7 +1584,7 @@ def clone_repository(repo_url: str, run_name: str, dest_name: str | None = None)
                 capture_output=True,
                 text=True,
                 check=True,
-                timeout=load_settings().runtime.git_timeout,
+                timeout=300,
             )
 
         return str(clone_path.absolute())

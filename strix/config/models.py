@@ -257,7 +257,7 @@ class _TurnGuardModel(Model):
 
     Stalled streams: a turn that emits a few tokens and then goes silent is
     not covered by the request timeout, which resets on any byte (keepalives
-    included). ``LLM_STREAM_IDLE_TIMEOUT`` bounds the gap between events so the
+    included). ``LLM_TIMEOUT`` also bounds the gap between stream events so the
     turn fails instead of hanging, and the existing retry path replays it.
     """
 
@@ -520,7 +520,7 @@ class StrixProvider(MultiProvider):
     def get_model(self, model_name: str | None) -> Model:
         llm = load_settings().llm
         slug = codex.subscription_model(model_name)
-        idle_timeout = float(llm.stream_idle_timeout)
+        idle_timeout = float(llm.timeout)
         if slug:
             # The ChatGPT subscription backend is always streamed; it has no
             # non-streaming mode to fall back to, so LLM_DISABLE_STREAMING

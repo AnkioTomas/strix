@@ -131,7 +131,7 @@ async def test_events_keep_flowing_while_the_stream_is_alive() -> None:
 
 @pytest.fixture
 def _reset_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    for key in ("STRIX_LLM", "LLM_DISABLE_STREAMING", "LLM_STREAM_IDLE_TIMEOUT"):
+    for key in ("STRIX_LLM", "LLM_DISABLE_STREAMING", "LLM_TIMEOUT"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(loader, "_cached", None)
     monkeypatch.setattr(loader, "_override", None)
@@ -146,11 +146,11 @@ class _DummyModel(Model):
         raise NotImplementedError
 
 
-def test_idle_timeout_is_configurable(
+def test_idle_timeout_follows_llm_timeout(
     monkeypatch: pytest.MonkeyPatch, _reset_settings: None
 ) -> None:
     monkeypatch.setattr("strix.config.models.MultiProvider.get_model", lambda *_: _DummyModel())
-    monkeypatch.setenv("LLM_STREAM_IDLE_TIMEOUT", "45")
+    monkeypatch.setenv("LLM_TIMEOUT", "45")
     load_settings()
 
     model = StrixProvider().get_model("openai/gpt-4o-mini")
@@ -164,7 +164,7 @@ def test_idle_timeout_is_off_without_streaming(
     # LLM_DISABLE_STREAMING turns the whole request into one event, so an idle
     # gap would just be the request duration — the request timeout bounds that.
     monkeypatch.setattr("strix.config.models.MultiProvider.get_model", lambda *_: _DummyModel())
-    monkeypatch.setenv("LLM_STREAM_IDLE_TIMEOUT", "45")
+    monkeypatch.setenv("LLM_TIMEOUT", "45")
     monkeypatch.setenv("LLM_DISABLE_STREAMING", "true")
     load_settings()
 

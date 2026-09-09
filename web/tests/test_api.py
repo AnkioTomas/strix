@@ -141,6 +141,51 @@ def test_ingest_results(client: TestClient):
     assert "Report" in manager.get_report(task["id"])
 
 
+def test_start_strix_job_preserves_resume_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import subprocess as sp
+
+    from app.services import strix_runner
+
+    class _FakePopen:
+        pid = 4242
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(sp, "Popen", _FakePopen)
+
+    workspace = tmp_path / "task"
+    workspace.mkdir()
+    (tmp_path / "data").mkdir()
+    task = {
+        "id": "task_resume_job",
+        "type": "pentest",
+        "instruction": "orig",
+        "scan_mode": "quick",
+        "max_budget": None,
+        "workspace": str(workspace),
+        "action": "resume",
+        "run_name": "keep_this_run",
+        "target": "https://example.com",
+    }
+    monkeypatch.setenv("STRIX_API_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("STRIX_API_AUTH_DISABLED", "1")
+    get_settings.cache_clear()
+    settings = get_settings()
+    handle = strix_runner.start_strix(task, settings=settings, target="https://example.com")
+    assert handle.pid == 4242
+    job = json.loads((workspace / ".web_scan_job.json").read_text(encoding="utf-8"))
+    assert job["task"]["action"] == "resume"
+    assert job["task"]["run_name"] == "keep_this_run"
+    assert job["task"]["id"] == "task_resume_job"
+    get_settings.cache_clear()
+
+
 def test_retry_creates_child(client: TestClient):
     created = client.post(
         "/api/v1/tasks",
@@ -155,3 +200,47 @@ def test_retry_creates_child(client: TestClient):
     body = retried.json()
     assert body["parent_task_id"] == created["id"]
     assert body["action"] == "retry"
+
+
+def test_resume_requires_agent_snapshot(client: TestClient):
+    created = client.post(
+        "/api/v1/tasks",
+        json={"type": "pentest", "target": "https://example.com", "scan_mode": "quick"},
+    ).json()
+    manager = client.app.state.manager
+    task = manager.get_task(created["id"])
+    workspace = Path(task["workspace"])
+    run_name = "example_resume_1"
+    state_dir = workspace / "strix_runs" / run_name / ".state"
+    state_dir.mkdir(parents=True)
+    (workspace / "strix_runs" / run_name / "run.json").write_text(
+        '{"run_name":"example_resume_1","targets_info":[{"type":"web","details":{}}]}',
+        encoding="utf-8",
+    )
+    manager.db.update_task(
+        created["id"],
+        status="failed",
+        finished_at="2026-01-01T00:00:00Z",
+        run_name=run_name,
+    )
+    manager._processes.pop(created["id"], None)
+
+    missing = client.post(f"/api/v1/tasks/{created['id']}/resume")
+    assert missing.status_code == 400
+    assert missing.json()["error"]["code"] == "RESUME_UNAVAILABLE"
+
+    (state_dir / "agents.json").write_text("{}", encoding="utf-8")
+    ok = client.post(
+        f"/api/v1/tasks/{created['id']}/resume",
+        json={"instruction": "继续找 SQLi"},
+    )
+    assert ok.status_code == 202, ok.text
+    body = ok.json()
+    assert body["id"] == created["id"]
+    assert body["action"] == "resume"
+    assert body["status"] == "queued"
+    assert body["run_name"] == run_name
+    assert body["finished_at"] is None
+    note = workspace / ".web_resume_instruction"
+    assert note.is_file()
+    assert note.read_text(encoding="utf-8") == "继续找 SQLi"

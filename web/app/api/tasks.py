@@ -18,6 +18,7 @@ from app.schemas import (
     MessageCreate,
     MessagesResponse,
     ReportResponse,
+    ResumeTaskRequest,
     TaskListResponse,
     TaskSummary,
 )
@@ -106,6 +107,20 @@ async def retest_task(
 ):
     try:
         task = await asyncio.to_thread(manager.retest_task, task_id, instruction)
+    except TaskError as exc:
+        return _error(exc)
+    return _summary(task)
+
+
+@router.post("/tasks/{task_id}/resume", status_code=202, response_model=TaskSummary)
+async def resume_task(
+    task_id: str,
+    payload: ResumeTaskRequest | None = None,
+    manager: TaskManager = Depends(get_manager),
+):
+    instruction = payload.instruction if payload else None
+    try:
+        task = await asyncio.to_thread(manager.resume_task, task_id, instruction)
     except TaskError as exc:
         return _error(exc)
     return _summary(task)

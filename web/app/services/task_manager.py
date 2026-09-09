@@ -205,14 +205,71 @@ class TaskManager:
             base.instruction = note
         return self.create_task(base, parent_task_id=task_id, action="retest")
 
+    def resume_task(self, task_id: str, instruction: str | None = None) -> dict[str, Any]:
+        """Continue a finished scan in-place via Strix ``--resume`` (same task id)."""
+        from strix.core.paths import RUNS_DIR_NAME, RUNTIME_STATE_DIR_NAME
+
+        task = self.get_task(task_id)
+        if task["status"] not in TERMINAL:
+            raise TaskError("TASK_ALREADY_RUNNING", "Only finished tasks can be resumed")
+        run_name = task.get("run_name")
+        if not run_name:
+            raise TaskError(
+                "RESUME_UNAVAILABLE",
+                "Task has no run_name; nothing to resume",
+            )
+        workspace = Path(task["workspace"])
+        agents_path = (
+            workspace / RUNS_DIR_NAME / run_name / RUNTIME_STATE_DIR_NAME / "agents.json"
+        )
+        if not agents_path.is_file():
+            raise TaskError(
+                "RESUME_UNAVAILABLE",
+                f"Missing agent snapshot for run {run_name}; cannot resume",
+            )
+        workspace_s = str(workspace)
+        for other in self.db.list_tasks(limit=500, offset=0):
+            if (
+                other["id"] != task_id
+                and other["status"] in ACTIVE
+                and other.get("workspace") == workspace_s
+            ):
+                raise TaskError(
+                    "TASK_ALREADY_RUNNING",
+                    f"Workspace already in use by {other['id']}",
+                )
+
+        self._processes.pop(task_id, None)
+        note = (instruction or "").strip()
+        note_path = workspace / ".web_resume_instruction"
+        if note:
+            note_path.write_text(note, encoding="utf-8")
+        elif note_path.exists():
+            note_path.unlink()
+
+        updated = self.db.update_task(
+            task_id,
+            status="queued",
+            action="resume",
+            exit_code=None,
+            error=None,
+            finished_at=None,
+            started_at=None,
+            pid=None,
+            viewer_url=None,
+            viewer_token=None,
+        )
+        assert updated is not None
+        return updated
+
     def resume_with_message(
         self, task_id: str, content: str, *, agent_id: str | None = None
     ) -> dict[str, Any]:
-        """Deliver a live message into a running scan, or queue a follow-up.
+        """Deliver a live message into a running scan, or resume a finished one.
 
         Running tasks use the in-process coordinator (same channel as the
-        Strix viewer ``POST /api/agents/steer``). Finished tasks spawn a
-        follow-up scan with the note folded into the instruction.
+        Strix viewer ``POST /api/agents/steer``). Finished tasks resume the
+        same ``run_name`` with ``content`` as ``resume_instruction``.
         """
         parent = self.get_task(task_id)
         if parent["status"] in {"starting", "running"}:
@@ -249,10 +306,7 @@ class TaskManager:
                 "TASK_NOT_CANCELLABLE",
                 f"Cannot message task in status {parent['status']}",
             )
-        req = self._request_from_task(parent)
-        follow = f"[User follow-up]\n{content}"
-        req.instruction = f"{req.instruction}\n\n{follow}" if req.instruction else follow
-        return self.create_task(req, parent_task_id=task_id, action="follow_up")
+        return self.resume_task(task_id, instruction=content)
 
     # --- worker hooks ---
 
@@ -376,11 +430,13 @@ class TaskManager:
         task = self.get_task(task_id)
         exit_code = None
         run_name = task.get("run_name")
+        detail_error: str | None = None
         if process is not None:
             exit_code = process.poll()
             if exit_code is None:
                 exit_code = process.terminate(self.settings.cancel_grace_seconds)
             run_name = process.refresh_run_name() or run_name
+            detail_error = getattr(process, "_error", None) or None
             close_process_logs(process)
 
         # Strix headless: 0 = clean, 2 = vulnerabilities found. Both are OK runs.
@@ -391,6 +447,13 @@ class TaskManager:
         else:
             status = "failed"
 
+        if status in ("completed", "cancelled"):
+            error_msg = None
+        elif detail_error:
+            error_msg = detail_error
+        else:
+            error_msg = f"strix exited with code {exit_code}"
+
         updated = self.db.update_task(
             task_id,
             status=status,
@@ -398,7 +461,7 @@ class TaskManager:
             run_name=run_name,
             finished_at=utc_now(),
             pid=None,
-            error=None if status == "completed" else f"strix exited with code {exit_code}",
+            error=error_msg,
         )
         assert updated is not None
         self.ingest_results(updated)

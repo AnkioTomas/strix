@@ -407,10 +407,8 @@ def _git_candidate_paths(git: str, git_root: Path, source: Path) -> Iterator[Pat
                 yield relative
         if buffer:
             raise http.CloudError("Git returned a malformed source file manifest.")
-        from strix.config import load_settings
-
         try:
-            exit_code = process.wait(timeout=load_settings().runtime.git_timeout)
+            exit_code = process.wait(timeout=300)
         except subprocess.TimeoutExpired as exc:
             process.kill()
             process.wait(timeout=5)

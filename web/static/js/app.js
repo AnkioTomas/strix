@@ -430,6 +430,23 @@
     }
   };
 
+  $("resumeBtn").onclick = async () => {
+    if (!selected) return;
+    const note = prompt("继续扫描的附加指令（可留空）:", "") ?? null;
+    if (note === null) return;
+    try {
+      const body = note.trim() ? { instruction: note.trim() } : {};
+      const t = await api.api(`/api/v1/tasks/${selected}/resume`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      await refresh();
+      selectTask(t.id);
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
   $("retestBtn").onclick = async () => {
     if (!selected) return;
     try {

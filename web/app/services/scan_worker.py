@@ -60,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
         error=None,
         viewer_url=None,
         viewer_token=None,
-        run_name=None,
+        run_name=task.get("run_name"),
         root_agent_id=None,
     )
 
@@ -77,6 +77,13 @@ def main(argv: list[str] | None = None) -> int:
             viewer_token=live.viewer_token,
             root_agent_id=live.root_agent_id,
         )
+
+    logger.info(
+        "scan worker starting task=%s action=%s run_name=%s",
+        task_id,
+        task.get("action"),
+        task.get("run_name"),
+    )
 
     try:
         session.start(settings=settings, target=target, task=task, on_ready=on_ready)

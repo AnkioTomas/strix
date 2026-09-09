@@ -171,10 +171,25 @@ class LiveStrixSession:
         from strix.runtime import session_manager
 
         args = _build_args(target=target, task=task, settings=settings)
-        build_targets_info(args)
-        prepare_run(args)
+        if task.get("action") == "resume" and task.get("run_name"):
+            logger.info(
+                "resuming Strix run task=%s run_name=%s (CLI --resume equivalent)",
+                self.task_id,
+                task.get("run_name"),
+            )
+            _prepare_resume_args(args, run_name=str(task["run_name"]), task=task)
+        else:
+            if task.get("action") == "resume" and not task.get("run_name"):
+                raise RuntimeError("resume requested but task has no run_name")
+            build_targets_info(args)
+            prepare_run(args)
         self.run_name = args.run_name
         assert self.run_name
+        if task.get("action") == "resume" and self.run_name != task.get("run_name"):
+            raise RuntimeError(
+                f"resume must keep run_name={task.get('run_name')!r}, "
+                f"got {self.run_name!r}"
+            )
         run_dir = run_dir_for(self.run_name)
 
         scan_config: dict[str, Any] = {
@@ -189,7 +204,7 @@ class LiveStrixSession:
             "workspace_files": getattr(args, "workspace_files", None) or [],
             "scope_mode": args.scope_mode,
             "diff_base": args.diff_base,
-            "resume_instruction": "",
+            "resume_instruction": getattr(args, "user_explicit_instruction", None) or "",
         }
 
         report_state = ReportState(self.run_name)
@@ -310,6 +325,44 @@ def _build_args(*, target: str, task: dict[str, Any], settings: Settings) -> arg
         user_instruction=task.get("instruction"),
         user_explicit_instruction=None,
     )
+
+
+def _prepare_resume_args(
+    args: argparse.Namespace, *, run_name: str, task: dict[str, Any]
+) -> None:
+    """Hydrate ``args`` like ``strix --resume <run_name>`` (cwd = task workspace)."""
+    from strix.core.paths import run_dir_for, runtime_state_dir
+    from strix.interface.cli_args import _load_resume_state
+    from strix.interface.scan_setup import prepare_run
+
+    class _ResumeParser(argparse.ArgumentParser):
+        def error(self, message: str) -> None:  # type: ignore[override]
+            raise ValueError(message)
+
+    # Optional one-shot nudge written by TaskManager.resume_task — not task.instruction.
+    note_path = Path(task["workspace"]) / ".web_resume_instruction"
+    resume_note: str | None = None
+    if note_path.is_file():
+        resume_note = note_path.read_text(encoding="utf-8").strip() or None
+        note_path.unlink(missing_ok=True)
+
+    args.resume = run_name
+    args.target = None
+    args.target_list = None
+    # Prior instruction/targets come from run.json; do not treat task.instruction as nudge.
+    args.instruction = None
+    args.user_instruction = None
+    args.user_explicit_instruction = resume_note
+    _load_resume_state(args, _ResumeParser())
+    agents_path = runtime_state_dir(run_dir_for(run_name)) / "agents.json"
+    if not agents_path.is_file():
+        raise RuntimeError(
+            f"Cannot resume {run_name}: missing {agents_path}. "
+            "The run never reached an agent snapshot."
+        )
+    prepare_run(args)
+    if resume_note:
+        args.user_explicit_instruction = resume_note
 
 
 # Back-compat aliases used by older call sites / tests.
@@ -554,19 +607,16 @@ def start_strix(
 
     workspace = Path(task["workspace"])
     job_path = workspace / ".web_scan_job.json"
+    # Pass the full DB row — resume needs ``action`` + ``run_name`` or the worker
+    # silently starts a brand-new scan (new run_name, empty agents.db).
+    job_task = {key: task.get(key) for key in task}
+    job_task["workspace"] = str(workspace)
     job = {
         "workspace": str(workspace),
         "target": target,
-        "task": {
-            "id": task["id"],
-            "type": task.get("type"),
-            "instruction": task.get("instruction"),
-            "scan_mode": task.get("scan_mode"),
-            "max_budget": task.get("max_budget"),
-            "workspace": str(workspace),
-        },
+        "task": job_task,
     }
-    job_path.write_text(json.dumps(job, ensure_ascii=False), encoding="utf-8")
+    job_path.write_text(json.dumps(job, ensure_ascii=False, default=str), encoding="utf-8")
     write_state(
         workspace,
         pid=None,
@@ -576,7 +626,7 @@ def start_strix(
         error=None,
         viewer_url=None,
         viewer_token=None,
-        run_name=None,
+        run_name=task.get("run_name"),
         root_agent_id=None,
     )
 

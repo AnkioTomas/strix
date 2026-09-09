@@ -78,8 +78,13 @@ def build_bind_mounts(local_sources: list[dict[str, Any]]) -> list[dict[str, Any
 
 def build_run_workspace_mount(host_workspace: Path) -> dict[str, Any]:
     """Bind the per-run host workspace at container ``/workspace`` (writable)."""
+    source = Path(host_workspace).expanduser().resolve()
+    # Docker Desktop rejects bind mounts when the source is missing; create it
+    # here (not only in create_or_reuse) so the path exists at create time.
+    source.mkdir(parents=True, exist_ok=True)
+    (source / ".keep").touch(exist_ok=True)
     return {
-        "source": str(host_workspace.expanduser().resolve()),
+        "source": str(source),
         "target": _WORKSPACE_ROOT,
         "read_only": False,
     }

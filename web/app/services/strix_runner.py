@@ -1,8 +1,8 @@
-"""In-process Strix runner with live viewer steer (real user↔agent chat).
+"""Detached Strix scan worker + in-process LiveStrixSession.
 
-Headless ``strix -n`` does **not** open a steerable HTTP server. Live chat only
-exists when the scan process owns an ``AgentCoordinator`` and wires
-``viewer.serve(..., steer_handler=...)``. That is what this module does.
+Scans run in a separate OS process (``python -m app.services.scan_worker``) so
+API restarts do not kill the engagement. The API talks to the live viewer over
+loopback HTTP for steering after reattach.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import threading
@@ -315,7 +316,7 @@ def _build_args(*, target: str, task: dict[str, Any], settings: Settings) -> arg
 StrixProcess = LiveStrixSession
 
 
-def close_process_logs(_process: LiveStrixSession) -> None:
+def close_process_logs(_process: Any) -> None:
     return
 
 
@@ -335,13 +336,273 @@ def strix_available(settings: Settings) -> bool:
     return result.returncode == 0
 
 
+class DetachedScanHandle:
+    """Handle for a scan running in a detached OS process (survives API restart)."""
+
+    def __init__(
+        self,
+        workspace: Path,
+        task_id: str,
+        *,
+        popen: Any | None = None,
+    ) -> None:
+        self.workspace = Path(workspace)
+        self.task_id = task_id
+        self._popen = popen
+
+    @classmethod
+    def attach(cls, workspace: Path, task_id: str) -> DetachedScanHandle:
+        return cls(workspace, task_id, popen=None)
+
+    def _state(self) -> dict[str, Any]:
+        from app.services.scan_state import read_state
+
+        return read_state(self.workspace)
+
+    @property
+    def pid(self) -> int | None:
+        st = self._state()
+        pid = st.get("pid")
+        if pid:
+            return int(pid)
+        if self._popen is not None:
+            return int(self._popen.pid)
+        return None
+
+    @property
+    def run_name(self) -> str | None:
+        value = self._state().get("run_name")
+        return str(value) if value else None
+
+    @property
+    def viewer_url(self) -> str | None:
+        value = self._state().get("viewer_url")
+        return str(value) if value else None
+
+    @property
+    def viewer_token(self) -> str | None:
+        value = self._state().get("viewer_token")
+        return str(value) if value else None
+
+    @property
+    def root_agent_id(self) -> str | None:
+        value = self._state().get("root_agent_id")
+        return str(value) if value else None
+
+    @property
+    def _error(self) -> str | None:
+        value = self._state().get("error")
+        return str(value) if value else None
+
+    def refresh_run_name(self) -> str | None:
+        return self.run_name
+
+    def poll(self) -> int | None:
+        from app.services.scan_state import pid_alive
+
+        st = self._state()
+        if st.get("exit_code") is not None:
+            return int(st["exit_code"])
+        if self._popen is not None:
+            code = self._popen.poll()
+            if code is not None:
+                # Worker may still be flushing state; prefer file if present.
+                st2 = self._state()
+                if st2.get("exit_code") is not None:
+                    return int(st2["exit_code"])
+                return int(code)
+        pid = self.pid
+        if pid_alive(pid):
+            return None
+        # Process gone but no exit recorded → treat as crash.
+        return int(st["exit_code"]) if st.get("exit_code") is not None else 1
+
+    def wait_ready(self, timeout: float = 180.0) -> bool:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            st = self._state()
+            if st.get("ready") and (st.get("viewer_url") or st.get("error") or self.poll() is not None):
+                return True
+            if self.poll() is not None:
+                return True
+            time.sleep(0.25)
+        return bool(self._state().get("ready"))
+
+    def send_message(self, message: str, *, agent_id: str | None = None) -> bool:
+        return steer_via_viewer_http(
+            viewer_url=self.viewer_url,
+            viewer_token=self.viewer_token,
+            message=message,
+            agent_id=agent_id or self.root_agent_id,
+            run_dir=self.workspace,
+            run_name=self.run_name,
+        )
+
+    def terminate(self, grace_seconds: int = 15) -> int | None:
+        import signal
+
+        from app.services.scan_state import pid_alive
+
+        code = self.poll()
+        if code is not None:
+            return code
+        pid = self.pid
+        if not pid or not pid_alive(pid):
+            return self.poll()
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                os.kill(pid, signal.SIGTERM)
+        deadline = time.time() + grace_seconds
+        while time.time() < deadline:
+            code = self.poll()
+            if code is not None:
+                return code
+            time.sleep(0.2)
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            os.killpg(pid, signal.SIGKILL)
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            os.kill(pid, signal.SIGKILL)
+        return self.poll() if self.poll() is not None else 137
+
+
+def steer_via_viewer_http(
+    *,
+    viewer_url: str | None,
+    viewer_token: str | None,
+    message: str,
+    agent_id: str | None,
+    run_dir: Path | None = None,
+    run_name: str | None = None,
+) -> bool:
+    """POST /api/agents/steer on the live viewer (works after API reattach)."""
+    if not viewer_url or not viewer_token:
+        return False
+    target_agent = agent_id or _root_agent_from_disk(run_dir, run_name)
+    if not target_agent:
+        return False
+    import httpx
+
+    # Keep cookie prefix in sync with strix.interface.viewer.server.SESSION_COOKIE_PREFIX
+    cookie_prefix = "strix_viewer_session"
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(viewer_url)
+        host = (parsed.hostname or "").lower()
+        if host not in {"127.0.0.1", "localhost", "::1"}:
+            return False
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        base = f"{parsed.scheme}://{host}:{port}"
+    except Exception:
+        return False
+    cookie = f"{cookie_prefix}_{port}={viewer_token}"
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.post(
+                f"{base}/api/agents/steer",
+                headers={"Cookie": cookie, "Content-Type": "application/json"},
+                json={"agent_id": target_agent, "message": message},
+            )
+    except httpx.HTTPError:
+        logger.exception("viewer steer HTTP failed")
+        return False
+    if resp.status_code != 200:
+        return False
+    try:
+        payload = resp.json()
+    except ValueError:
+        return False
+    return bool(payload.get("ok"))
+
+
+def _root_agent_from_disk(run_dir: Path | None, run_name: str | None) -> str | None:
+    if run_dir is None or not run_name:
+        return None
+    agents_path = run_dir / "strix_runs" / run_name / ".state" / "agents.json"
+    if not agents_path.is_file():
+        return None
+    try:
+        data = json.loads(agents_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    parent_of = data.get("parent_of") or {}
+    if isinstance(parent_of, dict):
+        for aid, parent in parent_of.items():
+            if parent is None:
+                return str(aid)
+    statuses = data.get("statuses") or {}
+    if isinstance(statuses, dict) and statuses:
+        return str(next(iter(statuses)))
+    return None
+
+
 def start_strix(
     task: dict[str, Any],
     *,
     settings: Settings,
     target: str,
-    on_ready: Callable[[LiveStrixSession], None] | None = None,
-) -> LiveStrixSession:
-    session = LiveStrixSession(Path(task["workspace"]), task["id"])
-    session.start(settings=settings, target=target, task=task, on_ready=on_ready)
-    return session
+    on_ready: Callable[[Any], None] | None = None,
+) -> DetachedScanHandle:
+    """Spawn a detached scan worker process that outlives the API."""
+    import json
+    import subprocess
+    import sys
+
+    from app.services.scan_state import write_state
+
+    workspace = Path(task["workspace"])
+    job_path = workspace / ".web_scan_job.json"
+    job = {
+        "workspace": str(workspace),
+        "target": target,
+        "task": {
+            "id": task["id"],
+            "type": task.get("type"),
+            "instruction": task.get("instruction"),
+            "scan_mode": task.get("scan_mode"),
+            "max_budget": task.get("max_budget"),
+            "workspace": str(workspace),
+        },
+    }
+    job_path.write_text(json.dumps(job, ensure_ascii=False), encoding="utf-8")
+    write_state(
+        workspace,
+        pid=None,
+        task_id=task["id"],
+        ready=False,
+        exit_code=None,
+        error=None,
+        viewer_url=None,
+        viewer_token=None,
+        run_name=None,
+        root_agent_id=None,
+    )
+
+    web_root = Path(__file__).resolve().parents[2]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(web_root), env["PYTHONPATH"]] if env.get("PYTHONPATH") else [str(web_root)]
+    )
+    popen = subprocess.Popen(  # noqa: S603
+        [sys.executable, "-m", "app.services.scan_worker", "--job", str(job_path)],
+        cwd=str(web_root),
+        env=env,
+        start_new_session=True,
+        stdout=open(workspace / "scan_worker.stdout.log", "ab", buffering=0),  # noqa: SIM115
+        stderr=open(workspace / "scan_worker.stderr.log", "ab", buffering=0),  # noqa: SIM115
+    )
+    handle = DetachedScanHandle(workspace, task["id"], popen=popen)
+    # Seed pid immediately so DB reattach works even before worker writes state.
+    write_state(workspace, pid=popen.pid, task_id=task["id"], ready=False)
+
+    if on_ready is not None:
+        # Best-effort: invoke after ready so DB gets viewer fields.
+        def _watch() -> None:
+            if handle.wait_ready(timeout=180):
+                with contextlib.suppress(Exception):
+                    on_ready(handle)
+
+        threading.Thread(target=_watch, name=f"strix-ready-{task['id']}", daemon=True).start()
+    return handle

@@ -20,7 +20,12 @@ from app.services.results import (
     read_report_markdown,
     workspace_run_dir,
 )
-from app.services.strix_runner import LiveStrixSession, close_process_logs, start_strix
+from app.services.strix_runner import (
+    DetachedScanHandle,
+    close_process_logs,
+    start_strix,
+    steer_via_viewer_http,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -42,7 +47,7 @@ class TaskManager:
     def __init__(self, db: Database, settings: Settings) -> None:
         self.db = db
         self.settings = settings
-        self._processes: dict[str, LiveStrixSession] = {}
+        self._processes: dict[str, DetachedScanHandle] = {}
 
     # --- create / list ---
 
@@ -215,6 +220,16 @@ class TaskManager:
             delivered = False
             if session is not None:
                 delivered = session.send_message(content, agent_id=agent_id)
+            elif parent.get("viewer_url") and parent.get("viewer_token"):
+                # API restarted: no in-memory handle yet — steer via viewer HTTP.
+                delivered = steer_via_viewer_http(
+                    viewer_url=parent.get("viewer_url"),
+                    viewer_token=parent.get("viewer_token"),
+                    message=content,
+                    agent_id=agent_id,
+                    run_dir=Path(parent["workspace"]),
+                    run_name=parent.get("run_name"),
+                )
             self.db.add_message(task_id, "user", content, delivered=delivered)
             if not delivered:
                 raise TaskError(
@@ -264,10 +279,10 @@ class TaskManager:
             raise TaskError("STRIX_START_FAILED", str(exc)) from exc
         return str(source_dir)
 
-    def start_process(self, task: dict[str, Any], target: str) -> LiveStrixSession:
+    def start_process(self, task: dict[str, Any], target: str) -> DetachedScanHandle:
         task_id = task["id"]
 
-        def on_ready(session: LiveStrixSession) -> None:
+        def on_ready(session: DetachedScanHandle) -> None:
             self.db.update_task(
                 task_id,
                 run_name=session.run_name,
@@ -299,6 +314,62 @@ class TaskManager:
             viewer_token=process.viewer_token,
         )
         return process
+
+    def reattach_running_scans(self) -> int:
+        """Reconnect to scan workers that survived an API restart."""
+        from app.services.scan_state import pid_alive, read_state
+
+        attached = 0
+        for status in ("starting", "running", "cancelling"):
+            for task in self.db.list_tasks(status=status, limit=500, offset=0):
+                task_id = task["id"]
+                if task_id in self._processes:
+                    continue
+                workspace = Path(task["workspace"])
+                state = read_state(workspace)
+                pid = state.get("pid") or task.get("pid")
+                if state.get("exit_code") is not None:
+                    handle = DetachedScanHandle.attach(workspace, task_id)
+                    self._processes[task_id] = handle
+                    # Let the worker pool finish_process on next tick.
+                    logger.info(
+                        "scan worker already exited task=%s code=%s; will finalize",
+                        task_id,
+                        state.get("exit_code"),
+                    )
+                    continue
+                if not pid_alive(pid):
+                    logger.warning(
+                        "orphaned task %s (pid=%s dead); marking failed", task_id, pid
+                    )
+                    self.db.update_task(
+                        task_id,
+                        status="failed",
+                        error="SCAN_WORKER_GONE",
+                        finished_at=utc_now(),
+                        pid=None,
+                        viewer_url=None,
+                        viewer_token=None,
+                    )
+                    continue
+                handle = DetachedScanHandle.attach(workspace, task_id)
+                self._processes[task_id] = handle
+                self.db.update_task(
+                    task_id,
+                    status="running" if task["status"] != "cancelling" else "cancelling",
+                    pid=handle.pid,
+                    run_name=handle.run_name or task.get("run_name"),
+                    viewer_url=handle.viewer_url or task.get("viewer_url"),
+                    viewer_token=handle.viewer_token or task.get("viewer_token"),
+                )
+                attached += 1
+                logger.info(
+                    "reattached scan worker task=%s pid=%s viewer=%s",
+                    task_id,
+                    handle.pid,
+                    bool(handle.viewer_url),
+                )
+        return attached
 
     def finish_process(self, task_id: str, *, cancelled: bool = False) -> dict[str, Any]:
         process = self._processes.pop(task_id, None)

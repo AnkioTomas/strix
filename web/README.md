@@ -1,6 +1,6 @@
 # Local Strix Security API
 
-编排层，不是第二个 Agent。HTTP 管任务；进程内 `run_strix_scan(interactive=True)` + viewer steer 管子弹与对话。
+编排层，不是第二个 Agent。HTTP 管任务；**独立扫描子进程**跑 `run_strix_scan(interactive=True)` + viewer（API 重启不杀扫描）。
 
 ## 能力
 
@@ -110,7 +110,8 @@ Worker 每秒检查：
 
 ## 设计约束
 
-- 不在 HTTP handler 里同步跑扫描；Worker 线程内进程内调用 `run_strix_scan(interactive=True)`
+- 扫描在 **detached 子进程**（`python -m app.services.scan_worker`，`start_new_session=True`）；API 重启后通过 PID + `.web_scan_state.json` 重连，Viewer 反代仍指向原 loopback 端口
+- 不在 HTTP handler 里同步跑扫描；Worker 只负责排队/认领/收尸
 - 每任务独立 workspace：`web/data/tasks/<task_id>/`
 - 漏洞只按 `task_id` 暴露，不做全局汇聚
 - 固定 Bearer Token，不做账号体系

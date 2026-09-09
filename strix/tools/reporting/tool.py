@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING, Any
 
 from agents import RunContextWrapper, function_tool
 
-from strix.tools.nullish import clean_optional
 from strix.report.zh_report import extract_screenshot_paths
+from strix.tools.nullish import clean_optional
 
 
 if TYPE_CHECKING:
@@ -1027,10 +1027,12 @@ async def create_vulnerability_report(
         poc_script_code: Runnable PoC artifact. Prefer, in order: (1) a
             full URL with scheme/host/path/query when one GET reproduces
             it; (2) a ``curl`` script for HTTP request/response PoCs
-            (method, URL, headers, cookies, body); (3) a Python/other
-            script ONLY when curl/URL cannot express the attack — say
-            why in ``poc_description``. Do not default to Python for
-            ordinary HTTP findings.
+            (method, URL, headers, cookies, body); (3) full HTML PoC
+            inlined as a fenced ``html`` block when the exploit is a
+            page/form; (4) a Python/other script ONLY when curl/URL/HTML
+            cannot express the attack — say why in ``poc_description``.
+            Do not default to Python for ordinary HTTP findings. Never
+            file a conceptual-only write-up.
         remediation_steps: Specific, actionable fix (prose, no code).
         evidence: Irrefutable proof the issue is real and exploitable.
             Include request/response excerpts **and** screenshot path(s)
@@ -1038,7 +1040,8 @@ async def create_vulnerability_report(
             attacker session; leak → leaked value on screen; SQLi →
             table/column names or extracted rows). Use fenced code
             blocks; no internal sandbox identifiers beyond screenshot
-            paths under ``/workspace``.
+            paths under ``/workspace``. If a required screenshot is
+            missing, re-test and capture it before filing.
         assumptions: Short note on the assumptions/prerequisites that
             make this finding impactful or exploitable (e.g. "assumes an
             authenticated low-privilege user").
@@ -1175,6 +1178,12 @@ async def create_vulnerability_report(
             fix (summary + rationale). Prose/markdown only — the code
             change itself belongs in ``code_locations``. Omit for
             black-box findings.
+        screenshots: REQUIRED for dynamic findings. List of sandbox
+            absolute paths to claim-matching PNG/JPEG screenshots
+            (typically under ``/workspace/.agent-browser-screenshots/``).
+            Paths may also be cited in ``evidence``; either is enough
+            for validation. If screenshots are missing, re-test and
+            capture them — do not file without pixel proof.
 
     Example (abbreviated — mirror this structure)::
 
@@ -1230,6 +1239,8 @@ async def create_vulnerability_report(
             A restrictive CSP that blocks inline script execution would
             reduce impact and lower the severity.
         fix_effort: "low"
+        screenshots:
+            ["/workspace/.agent-browser-screenshots/xss-search-alert.png"]
     """
     agent_id, agent_name = _caller_identity(ctx)
 

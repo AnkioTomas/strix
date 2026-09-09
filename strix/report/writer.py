@@ -220,7 +220,7 @@ def atomic_write_text(path: Path, payload: str) -> None:
     tmp_path.replace(path)
 
 
-def render_vulnerability_md(report: dict[str, Any]) -> str:  # noqa: PLR0912, PLR0915
+def render_vulnerability_md(report: dict[str, Any]) -> str:
     """Render one finding as Chinese markdown matching the delivery report."""
     from strix.report.zh_report import render_zh_vulnerability_section, severity_zh
 
@@ -229,10 +229,12 @@ def render_vulnerability_md(report: dict[str, Any]) -> str:  # noqa: PLR0912, PL
     sev = severity_zh(report.get("severity"))
     title = report.get("title") or "未命名漏洞"
     body = render_zh_vulnerability_section(report, index=1)
-    # Drop the "## 1. ..." heading from the section renderer and replace.
+    # Drop the leading "1. [ sev ] title" line from the section renderer.
     lines = body.splitlines()
-    if lines and lines[0].startswith("## "):
+    if lines and lines[0].startswith("1. [ "):
         lines = lines[1:]
+        if lines and lines[0] == "":
+            lines = lines[1:]
     header = [
         f"# [ {sev} ] {title}",
         "",
@@ -240,7 +242,8 @@ def render_vulnerability_md(report: dict[str, Any]) -> str:  # noqa: PLR0912, PL
         f"**发现时间:** {report.get('timestamp', 'unknown')}",
         "",
     ]
-    return "\n".join([*header, *lines]).rstrip() + "\n"
+    history_lines = render_update_history(report.get("update_history"))
+    return "\n".join([*header, *lines, *history_lines]).rstrip() + "\n"
 
 
 def render_update_history(history: Any) -> list[str]:

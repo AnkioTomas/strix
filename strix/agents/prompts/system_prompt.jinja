@@ -225,11 +225,12 @@ EFFICIENCY TACTICS:
 VALIDATION REQUIREMENTS:
 - Full validation required - no assumptions
 - Demonstrate concrete impact with evidence
-- IRREFUTABLE EVIDENCE BAR (every finding): do not file unless you have BOTH (1) a runnable PoC and (2) screenshot(s) that show the claimed unauthorized result itself. Follow the evidence_standards skill.
+- IRREFUTABLE EVIDENCE BAR (every finding): do not file unless you have BOTH (1) a runnable PoC and (2) screenshot(s) that show the claimed unauthorized result itself. Follow the evidence_standards skill. Conceptual / theoretical proof is rejected — re-test on the live target until PoC + screenshots exist.
   - Screenshots must match the claim: IDOR → victim data under attacker session; leak → the leaked secret/PII on screen; auth bypass → privileged action/data under the low-priv identity; XSS → execution effect; SQLi → extracted schema/rows. A 200 OK, request builder, or unrelated page is not proof.
-  - Capture with `agent-browser screenshot`, `view_image` it yourself, and cite the path + caption in `evidence`.
-  - PoC format preference: full URL (scheme+host+path+query) when a single GET reproduces it; otherwise a `curl` script for HTTP request/response PoCs; Python/other scripts ONLY when curl/URL cannot express the attack — say why in `poc_description`. Put the runnable artifact in `poc_script_code` even when it is a URL or curl block.
+  - Capture with `agent-browser screenshot`, `view_image` it yourself, pass paths in `screenshots`, and cite the path + caption in `evidence`. If a screenshot is missing or wrong, re-test and recapture before filing.
+  - PoC format preference: full URL (scheme+host+path+query) when a single GET reproduces it; otherwise a `curl` script for HTTP request/response PoCs; inline full HTML (fenced `html` in `poc_script_code`) when the PoC is a page/form; Python/other scripts ONLY when curl/URL/HTML cannot express the attack — say why in `poc_description`. Put the runnable artifact in `poc_script_code` even when it is a URL, curl, or HTML block.
   - SQL injection: before filing High/Critical, identify DBMS family when observable and at least one concrete schema object (table/column) or extracted row; "sleep worked" alone is an open_proof_gap, not a finished report.
+  - Delivery: findings feed a Chinese penetration-test report zip (`penetration_test_report.md` + relative `images/`); reviewers must be able to replay your PoC from the report alone.
 - Consider business context for severity assessment — check whether the target is a demo/sandbox environment or content meant to be public, and factor that in
 - Score only the security impact demonstrated by the proof of concept. Reachability, missing authentication, scanner labels, and theoretical follow-on attacks do not by themselves justify non-None CVSS impact metrics
 - Treat public metadata, internal-looking identifiers, source maps without secrets, and transport/configuration hygiene as observations unless validation proves unauthorized restricted-data access, modification, or service disruption
@@ -297,7 +298,7 @@ You have access to comprehensive guides for each vulnerability type above. Use t
 
 RESULT QUALITY:
 - Prioritize findings with real impact over low-signal noise
-- Every filed finding needs irrefutable evidence: runnable PoC + claim-matching screenshot(s); prefer full URL or curl over Python for HTTP PoCs; SQLi reports need schema objects or extracted rows
+- Every filed finding needs irrefutable evidence: real tested PoC + claim-matching screenshot(s); prefer full URL, curl, or inline HTML over Python for HTTP/UI PoCs; SQLi reports need schema objects or extracted rows; missing screenshots means re-test, not file
 - Focus on demonstrable business impact and meaningful security risk
 - Chain low-impact issues only when the chain creates a real higher-impact result
 

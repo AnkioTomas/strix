@@ -103,7 +103,10 @@ async def test_create_report_persists_new_fields(report_state: ReportState) -> N
         poc_description="1. open /search?q=<payload>",
         poc_script_code="GET /search?q=<script>alert(1)</script>",
         remediation_steps="Context-encode output.",
-        evidence="Response echoes the payload verbatim.",
+        evidence=(
+            "Response echoes the payload verbatim.\n"
+            "screenshot: /workspace/.agent-browser-screenshots/xss.png — alert shown"
+        ),
         assumptions="Assumes a victim opens a crafted link.",
         counterevidence="No output encoding or CSP observed on this response.",
         confidence="HIGH",
@@ -116,10 +119,12 @@ async def test_create_report_persists_new_fields(report_state: ReportState) -> N
         cwe="CWE-79",
         code_locations=None,
         fix_pr_body="## Fix\nEncode output.",
+        screenshots=["/workspace/.agent-browser-screenshots/xss.png"],
     )
     assert result["success"] is True
     report = report_state.vulnerability_reports[0]
-    assert report["evidence"] == "Response echoes the payload verbatim."
+    assert report["evidence"].startswith("Response echoes the payload verbatim.")
+    assert report["screenshots"] == ["/workspace/.agent-browser-screenshots/xss.png"]
     assert report["assumptions"] == "Assumes a victim opens a crafted link."
     assert report["fix_effort"] == "low"
     assert report["fix_pr_body"] == "## Fix\nEncode output."
@@ -211,10 +216,22 @@ async def _create_with(report_state: ReportState, **overrides: object) -> dict[s
         "cve": None,
         "cwe": None,
         "code_locations": None,
+        "screenshots": ["/workspace/.agent-browser-screenshots/poc.png"],
     }
     kwargs.update(overrides)
     assert report_state is not None
     return await _do_create(**kwargs)  # type: ignore[arg-type]
+
+
+async def test_create_report_requires_screenshots(report_state: ReportState) -> None:
+    result = await _create_with(
+        report_state,
+        screenshots=None,
+        evidence="Response body only, no image path.",
+    )
+    assert result["success"] is False
+    assert any("screenshots required" in e for e in result["errors"])
+    assert not report_state.vulnerability_reports
 
 
 async def test_create_report_requires_counterevidence(report_state: ReportState) -> None:
@@ -1040,7 +1057,7 @@ def test_tool_descriptions_include_formatting_guidance() -> None:
 
 def test_vuln_tool_exposes_new_params() -> None:
     props = create_vulnerability_report.params_json_schema["properties"]
-    for field in ("evidence", "assumptions", "fix_effort", "fix_pr_body"):
+    for field in ("evidence", "assumptions", "fix_effort", "fix_pr_body", "screenshots"):
         assert field in props
 
     dep_props = create_dependency_report.params_json_schema["properties"]
@@ -1264,7 +1281,10 @@ _CONFIRMED_KWARGS: dict[str, Any] = {
     "poc_description": "1. PATCH /files/<uuid> with a multipart body as an anonymous user.",
     "poc_script_code": "PATCH /files/2f1c HTTP/1.1\n\n--x\nowned\n--x--",
     "remediation_steps": "Authorize before the write.",
-    "evidence": "The stored file returns the injected payload after the 403 response.",
+    "evidence": (
+        "The stored file returns the injected payload after the 403 response.\n"
+        "screenshot: /workspace/.agent-browser-screenshots/file-write.png — payload served"
+    ),
     "assumptions": "Assumes the uuid of one existing file is known.",
     "counterevidence": "The endpoint answers 403, yet the write already landed.",
     "confidence": "HIGH",
@@ -1277,6 +1297,7 @@ _CONFIRMED_KWARGS: dict[str, Any] = {
     "cve": "CVE-2025-55746",
     "cwe": "CWE-863",
     "code_locations": None,
+    "screenshots": ["/workspace/.agent-browser-screenshots/file-write.png"],
 }
 
 

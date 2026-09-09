@@ -70,14 +70,14 @@ def test_render_vulnerability_md_includes_core_sections() -> None:
             remediation_steps="Use parameterized queries.",
         ),
     )
-    assert "# SQL Injection" in md
-    assert "**Severity:** HIGH" in md
-    assert "## Description" in md
-    assert "## Impact" in md
-    assert "## Technical Analysis" in md
-    assert "## Proof of Concept" in md
-    assert "## Remediation" in md
-    assert "**Endpoint:** /api/login" in md
+    assert "# [ 高危 ] SQL Injection" in md
+    assert "## 描述" in md
+    assert "## 影响" in md
+    assert "## 复现步骤" in md
+    assert "## 修复建议" in md
+    assert "## 附录" in md
+    assert "Root cause in UserDAO." in md
+    assert "| 端点 | /api/login |" in md
 
 
 def test_render_vulnerability_md_includes_dependency_fields() -> None:
@@ -104,14 +104,13 @@ def test_render_vulnerability_md_includes_dependency_fields() -> None:
             remediation_steps="Upgrade to 4.17.21.",
         ),
     )
-    assert "**Package:** lodash" in md
-    assert "**Ecosystem:** npm" in md
-    assert "**Installed Version:** 4.17.20" in md
-    assert "**Fixed Version:** 4.17.21" in md
-    assert "**CWE:** CWE-94" in md
-    assert "**Fix Effort:** Trivial" in md
-    assert "## Evidence" in md
-    assert "## Assumptions" in md
+    assert "**包名：** lodash" in md
+    assert "**生态：** npm" in md
+    assert "**已安装版本：** 4.17.20" in md
+    assert "**修复版本：** 4.17.21" in md
+    assert "| CWE | CWE-94 |" in md
+    assert "## 附录" in md
+    assert "Assumes lodash ships in deployed builds." in md
 
 
 def test_render_vulnerability_md_poc_code_cannot_break_out_of_fence() -> None:
@@ -120,7 +119,7 @@ def test_render_vulnerability_md_poc_code_cannot_break_out_of_fence() -> None:
     injected = "curl x\n```\n\n## Injected Heading\n![x](https://evil.example/beacon.png)"
     md = render_vulnerability_md(_sample_report(poc_script_code=injected))
     lines = md.split("\n")
-    opening = next(ln for ln in lines[lines.index("## Proof of Concept") + 1 :] if ln.strip())
+    opening = next(ln for ln in lines[lines.index("## 复现步骤") + 1 :] if ln.startswith("`"))
     ticks = opening[: len(opening) - len(opening.lstrip("`"))]
     assert len(ticks) >= 4  # wider than the payload's 3-backtick run
     assert "`" not in opening.removeprefix(ticks)  # backtick run + language tag only
@@ -133,9 +132,7 @@ def test_render_vulnerability_md_snippet_cannot_break_out_of_fence() -> None:
     md = render_vulnerability_md(
         _sample_report(code_locations=[{"file": "app.py", "snippet": snippet}]),
     )
-    assert (
-        "  ````\n  row = q()\n  ```\n  ## Injected\n  ````"
-    ) in md  # indented fence widened past the payload's ``` run
+    assert "````\nrow = q()\n```\n## Injected\n````" in md
 
 
 def test_write_vulnerabilities_creates_markdown_csv_and_json(tmp_path: Path) -> None:
@@ -259,9 +256,8 @@ def test_render_vulnerability_md_surfaces_calibration_metadata() -> None:
         }
     )
 
-    assert "**Confidence:** Medium" in md
-    assert "## Counterevidence" in md
-    assert "Egress appears filtered at the network layer." in md
-    assert "## Confidence Rationale" in md
-    assert "## What Would Change This Severity" in md
-    assert "## Fix Verification" in md
+    assert "**置信度：** medium" in md
+    assert "**反证：** Egress appears filtered at the network layer." in md
+    assert "**置信度说明：** Reproduced once out of three attempts." in md
+    assert "**严重性可变条件：** Critical if egress filtering is removed." in md
+    assert "**修复验证：** Not retested." in md

@@ -1,6 +1,6 @@
 ---
 name: evidence_standards
-description: Universal evidence bar for every vulnerability report — irrefutable PoC plus claim-matching screenshots; curl over Python; full URLs; SQLi must identify schema objects
+description: Universal evidence bar for every vulnerability report — real tested PoC, claim-matching screenshots, curl/URL/HTML over Python; Chinese delivery report expects reproducible steps
 ---
 
 # Evidence Standards (Universal)
@@ -8,6 +8,10 @@ description: Universal evidence bar for every vulnerability report — irrefutab
 Every vulnerability you file must be **undeniable to a reviewer who was
 not in the room**. Claims without matching proof are not findings —
 do not file them.
+
+Customer delivery is a Chinese penetration-test report plus a zip of
+`penetration_test_report.md` and relative-path images. Reviewers will
+replay your PoC and look at your screenshots. Conceptual write-ups fail.
 
 ## Irrefutable Evidence Bar
 
@@ -19,6 +23,8 @@ Before `create_vulnerability_report`, you must have **both**:
 
 A description of what "would happen", a scanner hit, a static trace you
 did not execute, or a screenshot of an unrelated page is not enough.
+**Do not file conceptual proof.** Re-test on the live target until you
+have a working PoC and matching screenshots.
 
 ## Screenshots Must Match the Claim
 
@@ -41,8 +47,13 @@ Rules:
 
 - Take the screenshot with `agent-browser screenshot`, then `view_image`
   it yourself before filing so you know the pixels match the claim.
-- Put the screenshot path and a one-line caption of what it proves into
-  `evidence` (e.g. ``screenshot: /workspace/.agent-browser-screenshots/idor-user-2-email.png — attacker session reading victim email``).
+- Pass paths in the `screenshots` argument **and** put the path plus a
+  one-line caption into `evidence` (e.g. ``screenshot:
+  /workspace/.agent-browser-screenshots/idor-user-2-email.png — attacker
+  session reading victim email``).
+- **If a screenshot is missing or does not match the claim, re-test and
+  capture a new one before filing.** Do not file and hope the report
+  writer invents images.
 - A screenshot of the request builder, a 200 OK with no body, or the
   login page after a failed attempt does **not** prove the claim.
 
@@ -57,15 +68,19 @@ Prefer the smallest, most reviewable artifact:
    cookies, multipart, JSON body). Include method, URL, headers, body,
    and the exact cookie/token values needed (redact only if the user
    asked; otherwise keep them so the PoC runs).
-3. **Browser steps + screenshot** for UI-only flows that cannot be
-   reduced to curl.
-4. **Python (or other) script** only when curl/URL cannot express the
-   attack (multi-step crypto, websocket, race, non-HTTP protocol). If
-   you reach for Python, say why curl is insufficient in
+3. **Inline HTML** when the PoC is an HTML page/form (CSRF, XSS sink
+   demo, clickjacking helper). Put the **full HTML source** in
+   `poc_script_code` as a fenced `html` block so the report embeds it —
+   do not only link to an external file the reviewer cannot open.
+4. **Browser steps + screenshot** for UI-only flows that cannot be
+   reduced to curl/HTML.
+5. **Python (or other) script** only when curl/URL/HTML cannot express
+   the attack (multi-step crypto, websocket, race, non-HTTP protocol).
+   If you reach for Python, say why curl is insufficient in
    `poc_description`.
 
 Do **not** default to Python for ordinary HTTP vulns. Put the runnable
-artifact in `poc_script_code` even when it is a URL or a curl block.
+artifact in `poc_script_code` even when it is a URL, curl, or HTML.
 
 ## Class-Specific Minimums
 
@@ -90,8 +105,9 @@ response excerpt.
 ## What Goes Where
 
 - `poc_description` — numbered steps only (no large code dumps).
-- `poc_script_code` — the runnable PoC: full URL, curl, or (only if
-  necessary) a script.
+- `poc_script_code` — the runnable PoC: full URL, curl, inline HTML, or
+  (only if necessary) a script.
+- `screenshots` — list of sandbox absolute image paths proving the claim.
 - `evidence` — request/response excerpts **plus** screenshot paths and
   captions that match the claim; for SQLi include table/column names.
 

@@ -222,10 +222,11 @@ async def finish_scan(
       consultant deliverable, not an engineering log.
     - Each section has a specific role:
 
-        - ``executive_summary`` — for non-technical leadership. Risk
-          posture, business impact (data exposure / compliance /
-          reputation), notable criticals, overarching remediation
-          theme.
+        - ``executive_summary`` — for non-technical leadership **and**
+          the Chinese delivery report's「测试概述」. Risk posture,
+          business impact (data exposure / compliance / reputation),
+          notable criticals, overarching remediation theme. Keep it
+          factual; this text is copied into the customer zip.
         - ``methodology`` — frameworks followed (OWASP WSTG, PTES,
           OSSTMM, NIST), engagement type (black/gray/white box), scope
           and constraints, categories of testing performed. **No**

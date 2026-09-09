@@ -152,7 +152,7 @@ def materialize_screenshots(
     return mapping
 
 
-def _md_table(rows: list[tuple[str, str]]) -> str:
+def _md_table(rows: list[tuple[str, object]]) -> str:
     lines = ["| 项目 | 内容 |", "| --- | --- |"]
     for key, value in rows:
         cell = str(value or "—").replace("|", "\\|").replace("\n", "<br>")
@@ -216,15 +216,15 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
     sev = severity_zh(report.get("severity"))
     title = report.get("title") or "未命名漏洞"
     lines: list[str] = [
-        f"## {index}. [ {sev} ] {title}",
+        f"{index}. [ {sev} ] {title}",
         "",
         _vuln_meta_table(report),
         "",
-        "### 描述",
+        "## 描述",
         "",
         str(report.get("description") or report.get("technical_analysis") or "无描述。"),
         "",
-        "### 复现步骤",
+        "## 复现步骤",
         "",
     ]
     if report.get("poc_description"):
@@ -257,11 +257,11 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
 
     lines.extend(
         [
-            "### 影响",
+            "## 影响",
             "",
             str(report.get("impact") or "未说明。"),
             "",
-            "### 修复建议",
+            "## 修复建议",
             "",
             str(report.get("remediation_steps") or "未提供。"),
             "",
@@ -271,11 +271,52 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
     appendix_bits: list[str] = []
     if report.get("technical_analysis"):
         appendix_bits.append(str(report["technical_analysis"]))
+        appendix_bits.append("")
     if report.get("assumptions"):
         appendix_bits.append(f"**前提假设：** {report['assumptions']}")
+        appendix_bits.append("")
+    if report.get("counterevidence"):
+        appendix_bits.append(f"**反证：** {report['counterevidence']}")
+        appendix_bits.append("")
+    if report.get("confidence"):
+        appendix_bits.append(f"**置信度：** {report['confidence']}")
+        appendix_bits.append("")
+    if report.get("confidence_rationale"):
+        appendix_bits.append(f"**置信度说明：** {report['confidence_rationale']}")
+        appendix_bits.append("")
+    if report.get("severity_change_conditions"):
+        appendix_bits.append(f"**严重性可变条件：** {report['severity_change_conditions']}")
+        appendix_bits.append("")
+    if report.get("fix_verification"):
+        appendix_bits.append(f"**修复验证：** {report['fix_verification']}")
+        appendix_bits.append("")
+    dep = report.get("dependency_metadata")
+    if isinstance(dep, dict) and dep:
+        for key, label in (
+            ("package_name", "包名"),
+            ("package_ecosystem", "生态"),
+            ("installed_version", "已安装版本"),
+            ("fixed_version", "修复版本"),
+        ):
+            if dep.get(key):
+                appendix_bits.append(f"**{label}：** {dep[key]}")
+        appendix_bits.append("")
+    locations = report.get("code_locations")
+    if isinstance(locations, list):
+        for loc in locations:
+            if not isinstance(loc, dict):
+                continue
+            file_path = loc.get("file") or "unknown"
+            appendix_bits.append(f"**代码位置：** `{file_path}`")
+            snippet = loc.get("snippet")
+            if snippet:
+                fence = safe_fence(str(snippet))
+                appendix_bits.extend([f"{fence}", str(snippet), fence, ""])
+            else:
+                appendix_bits.append("")
     if appendix_bits:
-        lines.extend(["### 附录", "", *appendix_bits, ""])
-    return "\n".join(lines)
+        lines.extend(["## 附录", "", *appendix_bits])
+    return "\n".join(lines).rstrip()
 
 
 def render_zh_penetration_report(

@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
 from pathlib import Path
 
 from strix.config import apply_config_override
 from strix.config.settings import DEFAULT_MAX_TURNS
 from strix.core.paths import run_dir_for, runtime_state_dir
 from strix.interface.scan_setup import attach_workspace_mount, build_targets_info
-from strix.interface.update_check import self_update
 from strix.interface.utils import (
     check_mountable_dir,
     collect_local_sources,
@@ -114,14 +112,6 @@ Strix Cloud:
         "--version",
         action="version",
         version=f"strix {get_version()}",
-    )
-
-    parser.add_argument(
-        "--update",
-        action="store_true",
-        help="Update strix to the latest version and exit. Self-updates the "
-        "standalone binary install; for pip/pipx/uv installs, prints the "
-        "matching upgrade command instead.",
     )
 
     parser.add_argument(
@@ -313,9 +303,6 @@ Strix Cloud:
         os.environ["STRIX_MCP_ONLY"] = ",".join(args.mcp_server)
     if args.mcp_exclude:
         os.environ["STRIX_MCP_EXCLUDE"] = ",".join(args.mcp_exclude)
-
-    if args.update:
-        sys.exit(0 if self_update() else 1)
 
     if args.instruction and args.instruction_file:
         parser.error(

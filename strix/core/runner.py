@@ -43,9 +43,9 @@ from strix.core.inputs import (
 )
 from strix.core.paths import run_dir_for, runtime_state_dir
 from strix.core.sessions import open_agent_session
+from strix.logging_setup import set_scan_id, setup_scan_logging
 from strix.report.state import get_global_report_state
 from strix.runtime import session_manager
-from strix.logging_setup import set_scan_id, setup_scan_logging
 from strix.tools.output_store import (
     WORKSPACE_SPILL_DIR,
     configure_spill_writer,

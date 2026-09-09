@@ -1602,7 +1602,7 @@ def check_docker_connection() -> Any:
 
     try:
         return docker.from_env()
-    except DockerException as exc:
+    except DockerException:
         console = Console()
         error_text = Text()
         error_text.append("DOCKER NOT AVAILABLE", style="bold red")

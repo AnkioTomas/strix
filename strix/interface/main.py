@@ -29,13 +29,6 @@ from strix.interface.scan_setup import (
     preflight_model_connection,
     prepare_run,
 )
-from strix.interface.update_check import (
-    is_binary_install,
-    notify_update,
-    prompt_update_if_available,
-    restart_after_update,
-    start_background_check,
-)
 from strix.interface.utils import (
     build_final_stats_text,
 )
@@ -336,8 +329,6 @@ def display_completion_message(args: argparse.Namespace, results_path: Path) -> 
             "[dim]Enterprise[/]  [#60a5fa]strix.ai/demo[/]"
         )
     console.print()
-    if not args.non_interactive:
-        notify_update(console)
 
 
 def _print_error_panel(title: str, message: str) -> None:
@@ -456,12 +447,6 @@ def main() -> None:
 
     args = parse_arguments()
 
-    start_background_check()
-    if not args.non_interactive and prompt_update_if_available(Console()):
-        if is_binary_install() and sys.platform != "win32":
-            restart_after_update()
-        sys.exit(0)
-
     check_docker_installed()
     pull_docker_image()
     validate_environment()
@@ -505,7 +490,6 @@ def main() -> None:
 
     if not args.run_name:
         # Setup mode where the user quit before starting a scan: nothing ran.
-        notify_update(Console())
         return
 
     results_path = run_dir_for(args.run_name)

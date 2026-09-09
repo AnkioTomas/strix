@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from agents import RunContextWrapper, function_tool
 
 from strix.tools.nullish import clean_optional
+from strix.report.zh_report import extract_screenshot_paths
 
 
 if TYPE_CHECKING:
@@ -728,6 +729,7 @@ async def _do_create(
             "code_locations": parsed_locations,
             "fix_verification": fix_verification,
             "fix_pr_body": fix_pr_body,
+            "screenshots": cleaned_shots or cited,
         }
 
         dedupe = await check_duplicate(candidate, existing)
@@ -815,6 +817,7 @@ async def create_vulnerability_report(
     confidence_rationale: str | None = None,
     fix_verification: str | None = None,
     fix_pr_body: str | None = None,
+    screenshots: list[str] | None = None,
 ) -> str:
     """File a vulnerability report — one report per fully-verified finding.
 
@@ -1254,6 +1257,7 @@ async def create_vulnerability_report(
         code_locations=code_locations,
         fix_verification=fix_verification,
         fix_pr_body=fix_pr_body,
+        screenshots=screenshots,
         agent_id=agent_id,
         agent_name=agent_name,
     )

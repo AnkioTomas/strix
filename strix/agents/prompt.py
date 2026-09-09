@@ -37,8 +37,9 @@ def _resolve_skills(
        agent-browser CLI).
     4. ``tooling/python`` (always — Python runs through ``exec_command``;
        sandbox scripts can import ``caido_api`` for Caido automation).
-    5. ``analysis/counterevidence`` and ``analysis/severity_calibration``
-       (always — closure discipline and severity rubric apply to every
+    5. ``analysis/counterevidence``, ``analysis/severity_calibration``,
+       and ``analysis/evidence_standards`` (always — closure discipline,
+       severity rubric, and the irrefutable-evidence bar apply to every
        agent that can open or close a candidate, or file a report).
     6. ``coordination/root_agent`` for the root agent only — orchestration
        guidance for delegating to specialist subagents.
@@ -54,6 +55,7 @@ def _resolve_skills(
     ordered.append("tooling/python")
     ordered.append("analysis/counterevidence")
     ordered.append("analysis/severity_calibration")
+    ordered.append("analysis/evidence_standards")
     if is_root:
         ordered.append("coordination/root_agent")
     if is_whitebox:

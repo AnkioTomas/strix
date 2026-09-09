@@ -221,144 +221,26 @@ def atomic_write_text(path: Path, payload: str) -> None:
 
 
 def render_vulnerability_md(report: dict[str, Any]) -> str:  # noqa: PLR0912, PLR0915
-    lines: list[str] = [
-        f"# {report.get('title', 'Untitled Vulnerability')}\n",
+    """Render one finding as Chinese markdown matching the delivery report."""
+    from strix.report.zh_report import render_zh_vulnerability_section, severity_zh
+
+    # Standalone per-vuln files keep the same section body as the consolidated
+    # report, prefixed with a top-level title for navigation.
+    sev = severity_zh(report.get("severity"))
+    title = report.get("title") or "未命名漏洞"
+    body = render_zh_vulnerability_section(report, index=1)
+    # Drop the "## 1. ..." heading from the section renderer and replace.
+    lines = body.splitlines()
+    if lines and lines[0].startswith("## "):
+        lines = lines[1:]
+    header = [
+        f"# [ {sev} ] {title}",
+        "",
         f"**ID:** {report.get('id', 'unknown')}",
-        f"**Severity:** {report.get('severity', 'unknown').upper()}",
-        f"**Found:** {report.get('timestamp', 'unknown')}",
+        f"**发现时间:** {report.get('timestamp', 'unknown')}",
+        "",
     ]
-
-    dep_meta = report.get("dependency_metadata") or {}
-    metadata: list[tuple[str, Any]] = [
-        ("Target", report.get("target")),
-        ("Package", dep_meta.get("package_name")),
-        ("Ecosystem", dep_meta.get("package_ecosystem")),
-        ("Installed Version", dep_meta.get("installed_version")),
-        ("Fixed Version", dep_meta.get("fixed_version")),
-        ("Introduced By", dep_meta.get("introduced_by")),
-        ("Dependency Chain", dep_meta.get("dependency_path")),
-        ("Endpoint", report.get("endpoint")),
-        ("Method", report.get("method")),
-        ("CVE", report.get("cve")),
-        ("CWE", report.get("cwe")),
-    ]
-    cvss = report.get("cvss")
-    if cvss is not None:
-        metadata.append(("CVSS", cvss))
-    advisory_cvss = dep_meta.get("advisory_cvss")
-    if advisory_cvss is not None and advisory_cvss != cvss:
-        metadata.append(("Advisory CVSS", advisory_cvss))
-    if dep_meta.get("contextual_cvss_vector"):
-        metadata.append(("Contextual CVSS Vector", dep_meta["contextual_cvss_vector"]))
-    if report.get("confidence"):
-        metadata.append(("Confidence", str(report["confidence"]).title()))
-    if report.get("fix_effort"):
-        metadata.append(("Fix Effort", str(report["fix_effort"]).title()))
-    for label, value in metadata:
-        if value:
-            lines.append(f"**{label}:** {value}")
-
-    lines.append("")
-    lines.append("## Description\n")
-    lines.append(report.get("description") or "No description provided.")
-    lines.append("")
-
-    if report.get("evidence"):
-        lines.append("## Evidence\n")
-        lines.append(str(report["evidence"]))
-        lines.append("")
-
-    if report.get("impact"):
-        lines.append("## Impact\n")
-        lines.append(str(report["impact"]))
-        lines.append("")
-
-    if report.get("counterevidence"):
-        lines.append("## Counterevidence\n")
-        lines.append(str(report["counterevidence"]))
-        lines.append("")
-
-    if report.get("confidence_rationale"):
-        lines.append("## Confidence Rationale\n")
-        lines.append(str(report["confidence_rationale"]))
-        lines.append("")
-
-    if report.get("severity_change_conditions"):
-        lines.append("## What Would Change This Severity\n")
-        lines.append(str(report["severity_change_conditions"]))
-        lines.append("")
-
-    if report.get("technical_analysis"):
-        lines.append("## Technical Analysis\n")
-        lines.append(str(report["technical_analysis"]))
-        lines.append("")
-
-    if dep_meta.get("contextual_cvss_reasoning"):
-        lines.append("## Contextual CVSS\n")
-        lines.append(str(dep_meta["contextual_cvss_reasoning"]))
-        lines.append("")
-
-    if report.get("poc_description") or report.get("poc_script_code"):
-        lines.append("## Proof of Concept\n")
-        if report.get("poc_description"):
-            lines.append(str(report["poc_description"]))
-            lines.append("")
-        if report.get("poc_script_code"):
-            language, code = parse_fenced_code(str(report["poc_script_code"]))
-            fence_lang = language or guess_language_name(code)
-            fence = safe_fence(code)
-            lines.append(f"{fence}{fence_lang}")
-            lines.append(code)
-            lines.append(fence)
-            lines.append("")
-
-    if report.get("code_locations"):
-        lines.append("## Code Analysis\n")
-        for i, loc in enumerate(report["code_locations"]):
-            file_ref = loc.get("file", "unknown")
-            line_ref = ""
-            if loc.get("start_line") is not None:
-                if loc.get("end_line") and loc["end_line"] != loc["start_line"]:
-                    line_ref = f" (lines {loc['start_line']}-{loc['end_line']})"
-                else:
-                    line_ref = f" (line {loc['start_line']})"
-            lines.append(f"**Location {i + 1}:** `{file_ref}`{line_ref}")
-            if loc.get("label"):
-                lines.append(f"  {loc['label']}")
-            if loc.get("snippet"):
-                snippet = str(loc["snippet"])
-                fence = safe_fence(snippet)
-                lines.append(f"  {fence}")
-                lines.extend(f"  {ln}" for ln in snippet.splitlines())
-                lines.append(f"  {fence}")
-            if loc.get("fix_before") or loc.get("fix_after"):
-                lines.append("\n  **Suggested Fix:**")
-                lines.append("```diff")
-                if loc.get("fix_before"):
-                    lines.extend(f"- {ln}" for ln in str(loc["fix_before"]).splitlines())
-                if loc.get("fix_after"):
-                    lines.extend(f"+ {ln}" for ln in str(loc["fix_after"]).splitlines())
-                lines.append("```")
-            lines.append("")
-
-    if report.get("remediation_steps"):
-        lines.append("## Remediation\n")
-        lines.append(str(report["remediation_steps"]))
-        lines.append("")
-
-    if report.get("fix_verification"):
-        lines.append("## Fix Verification\n")
-        lines.append(str(report["fix_verification"]))
-        lines.append("")
-
-    if report.get("assumptions"):
-        lines.append("## Assumptions\n")
-        lines.append(str(report["assumptions"]))
-        lines.append("")
-
-    lines.extend(render_update_history(report.get("update_history")))
-
-    return "\n".join(lines)
+    return "\n".join([*header, *lines]).rstrip() + "\n"
 
 
 def render_update_history(history: Any) -> list[str]:

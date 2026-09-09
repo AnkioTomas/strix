@@ -239,6 +239,7 @@ def test_resolve_skills_always_includes_analysis_baseline() -> None:
 
     assert "analysis/counterevidence" in resolved
     assert "analysis/severity_calibration" in resolved
+    assert "analysis/evidence_standards" in resolved
 
 
 def test_resolve_skills_adds_diff_mode_only_when_diff_scoped() -> None:
@@ -263,6 +264,7 @@ def test_new_skill_files_load() -> None:
     names = [
         "analysis/counterevidence",
         "analysis/severity_calibration",
+        "analysis/evidence_standards",
         "analysis/fix_verification",
         "analysis/source_aware_discovery",
         "scan_modes/diff",

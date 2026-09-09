@@ -160,9 +160,15 @@ _REQUIRED_FIELDS = {
     "target": "Target cannot be empty",
     "technical_analysis": "Technical analysis cannot be empty",
     "poc_description": "PoC description cannot be empty",
-    "poc_script_code": "PoC script/code is REQUIRED - provide the actual exploit/payload",
+    "poc_script_code": (
+        "PoC artifact is REQUIRED - full URL, curl script, or (only if "
+        "necessary) another runnable script"
+    ),
     "remediation_steps": "Remediation steps cannot be empty",
-    "evidence": "Evidence cannot be empty - provide concrete proof of the finding",
+    "evidence": (
+        "Evidence cannot be empty - include claim-matching proof "
+        "(response excerpts and/or screenshot paths with captions)"
+    ),
     "assumptions": "Assumptions cannot be empty - state exploitability prerequisites",
 }
 
@@ -609,6 +615,7 @@ async def _do_create(
     confidence_rationale: str | None = None,
     fix_verification: str | None = None,
     fix_pr_body: str | None = None,
+    screenshots: list[str] | None = None,
     agent_id: str | None = None,
     agent_name: str | None = None,
 ) -> dict[str, Any]:
@@ -626,6 +633,15 @@ async def _do_create(
             "assumptions": assumptions,
         }
     )
+
+    cleaned_shots = [str(p).strip() for p in (screenshots or []) if str(p).strip()]
+    cited = extract_screenshot_paths(evidence, poc_description, *cleaned_shots)
+    if not cleaned_shots and not cited:
+        errors.append(
+            "screenshots required: provide sandbox PNG/JPEG paths of claim-matching "
+            "screenshots (or cite them in evidence). If you have no screenshot yet, "
+            "re-test and capture one before filing — do not file conceptual proof."
+        )
 
     confidence = (confidence or "").strip().lower()
     errors.extend(
@@ -802,13 +818,18 @@ async def create_vulnerability_report(
 ) -> str:
     """File a vulnerability report — one report per fully-verified finding.
 
-    **When to file**: you have a concrete vulnerability with a working
-    proof-of-concept and you're 100% sure it's a real issue.
+    **When to file**: you have a concrete vulnerability with BOTH a
+    working PoC and claim-matching screenshot evidence, and you're sure
+    it's a real issue. See the evidence_standards skill.
 
     **When NOT to file**:
 
     - General security observations without a specific vulnerability.
-    - Suspicions you haven't confirmed with a PoC.
+    - Suspicions you haven't confirmed with a PoC **and** a screenshot
+      that shows the claimed unauthorized result (victim data, leaked
+      secret, privileged action, extracted rows, etc.).
+    - Timing-only SQLi without at least one identified schema object
+      (table/column) or extracted row.
     - Tracking multiple vulnerabilities at once — one report per vuln.
     - Re-reporting something you (or another agent) already filed.
     - Known-CVE dependency / supply-chain findings that can't be
@@ -1000,11 +1021,21 @@ async def create_vulnerability_report(
         target: Affected URL / domain / repository.
         technical_analysis: The mechanism and root cause.
         poc_description: Step-by-step reproduction (steps only, no code).
-        poc_script_code: Working PoC (Python preferred).
+        poc_script_code: Runnable PoC artifact. Prefer, in order: (1) a
+            full URL with scheme/host/path/query when one GET reproduces
+            it; (2) a ``curl`` script for HTTP request/response PoCs
+            (method, URL, headers, cookies, body); (3) a Python/other
+            script ONLY when curl/URL cannot express the attack — say
+            why in ``poc_description``. Do not default to Python for
+            ordinary HTTP findings.
         remediation_steps: Specific, actionable fix (prose, no code).
-        evidence: Concrete proof the issue is real and exploitable —
-            request/response excerpts, observed behavior, tool output.
-            Use fenced code blocks; no internal identifiers/paths.
+        evidence: Irrefutable proof the issue is real and exploitable.
+            Include request/response excerpts **and** screenshot path(s)
+            with captions that match the claim (IDOR → victim data under
+            attacker session; leak → leaked value on screen; SQLi →
+            table/column names or extracted rows). Use fenced code
+            blocks; no internal sandbox identifiers beyond screenshot
+            paths under ``/workspace``.
         assumptions: Short note on the assumptions/prerequisites that
             make this finding impactful or exploitable (e.g. "assumes an
             authenticated low-privilege user").
@@ -1159,11 +1190,18 @@ async def create_vulnerability_report(
 
             No output encoding is applied, so `<script>` executes.
         poc_description:
-            1. Navigate to `/search?q=<payload>`.
-            2. Observe the payload executes in the victim's browser.
+            1. Open the full crafted search URL in a browser as an
+               unauthenticated user.
+            2. Observe the payload executes; capture a screenshot of the
+               rendered page showing the effect.
         poc_script_code:
             ```
-            GET /search?q=<script>alert(document.domain)</script>
+            https://app.example.com/search?q=%3Cscript%3Ealert(document.domain)%3C%2Fscript%3E
+            ```
+            Or as curl:
+
+            ```bash
+            curl -sS 'https://app.example.com/search?q=%3Cscript%3Ealert(document.domain)%3C%2Fscript%3E'
             ```
         evidence:
             Response echoes the payload verbatim:
@@ -1171,6 +1209,9 @@ async def create_vulnerability_report(
             ```html
             <h2>Results for <script>alert(document.domain)</script></h2>
             ```
+
+            screenshot: /workspace/.agent-browser-screenshots/xss-search-alert.png
+            — browser shows alert with document.domain after loading the PoC URL.
         assumptions:
             Assumes a victim can be induced to open a crafted link.
         remediation_steps:
@@ -1301,7 +1342,8 @@ async def update_vulnerability_report(
         target: Replacement affected asset.
         technical_analysis: Replacement technical details.
         poc_description: Replacement PoC steps (no code).
-        poc_script_code: Replacement exploit script or payload.
+        poc_script_code: Replacement PoC artifact (full URL, curl, or
+            script only when necessary).
         remediation_steps: Replacement remediation prose (no code).
         evidence: Replacement evidence.
         assumptions: Replacement exploitability prerequisites.

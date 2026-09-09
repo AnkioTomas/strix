@@ -22,6 +22,7 @@ from strix.report.writer import (
     write_run_record,
     write_vulnerabilities,
 )
+from strix.report.zh_report import extract_screenshot_paths, write_zh_delivery_bundle
 
 
 if TYPE_CHECKING:
@@ -324,6 +325,7 @@ class ReportState:
         fix_pr_body: str | None = None,
         finding_class: str | None = None,
         dependency_metadata: dict[str, str] | None = None,
+        screenshots: list[str] | None = None,
         agent_id: str | None = None,
         agent_name: str | None = None,
     ) -> str:
@@ -385,6 +387,8 @@ class ReportState:
         report["finding_class"] = (finding_class or "dynamic").strip().lower()
         if dependency_metadata:
             report["dependency_metadata"] = dependency_metadata
+        if screenshots:
+            report["screenshots"] = [str(p).strip() for p in screenshots if str(p).strip()]
         if agent_id:
             report["agent_id"] = agent_id
         if agent_name:
@@ -667,11 +671,25 @@ class ReportState:
                 except OSError:
                     logger.exception("coverage.json write failed (non-fatal)")
 
-            if self.final_scan_result:
-                write_executive_report(run_dir, self.final_scan_result)
-
             if self.vulnerability_reports:
                 write_vulnerabilities(run_dir, self.vulnerability_reports, self._saved_vuln_ids)
+
+            # Customer-facing Chinese report + zip (md + relative-path images).
+            try:
+                overview = None
+                if isinstance(self.scan_results, dict):
+                    overview = self.scan_results.get("executive_summary")
+                write_zh_delivery_bundle(
+                    run_dir,
+                    run_record=self.run_record,
+                    vulnerability_reports=self.vulnerability_reports,
+                    overview=str(overview) if overview else self.final_scan_result,
+                    file_bytes=self._pull_screenshot_bytes(),
+                )
+            except Exception:
+                logger.exception("Chinese delivery bundle failed (non-fatal)")
+                if self.final_scan_result:
+                    write_executive_report(run_dir, self.final_scan_result)
 
             # SARIF 2.1.0 emitter for CI / ASPM integration. Always emit (even
             # empty) so a clean run overwrites a prior findings.sarif rather than
@@ -695,6 +713,59 @@ class ReportState:
             logger.info("Essential scan data saved to: %s", run_dir)
         except (OSError, RuntimeError):
             logger.exception("Failed to save scan data")
+
+    def _pull_screenshot_bytes(self) -> dict[str, bytes]:
+        """Best-effort pull of cited screenshots from the live sandbox session."""
+        paths: list[str] = []
+        for report in self.vulnerability_reports:
+            declared = report.get("screenshots")
+            if isinstance(declared, list):
+                paths.extend(str(p) for p in declared if p)
+            paths.extend(
+                extract_screenshot_paths(
+                    report.get("evidence"),
+                    report.get("poc_description"),
+                    report.get("poc_script_code"),
+                )
+            )
+        unique = list(dict.fromkeys(paths))
+        if not unique:
+            return {}
+
+        try:
+            from strix.runtime.session_manager import get_cached_session
+
+            session = get_cached_session(self.run_id) or get_cached_session(
+                str(self.run_name or "")
+            )
+        except Exception:  # noqa: BLE001
+            return {}
+        if session is None:
+            return {}
+
+        import asyncio
+        from pathlib import Path as FsPath
+
+        out: dict[str, bytes] = {}
+
+        async def _read_all() -> None:
+            for path in unique:
+                try:
+                    handle = await session.read(FsPath(path))
+                    data = handle.read()
+                    if isinstance(data, bytes | bytearray) and data:
+                        out[path] = bytes(data)
+                except Exception:  # noqa: BLE001
+                    logger.debug("could not pull screenshot %s", path, exc_info=True)
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(_read_all())
+        else:
+            # Already inside an event loop (unlikely on this sync path); skip.
+            logger.debug("skip sandbox screenshot pull: event loop already running")
+        return out
 
     def _sarif_repository_context(self) -> dict[str, Any] | None:
         """Repo/commit/branch context for SARIF provenance (repo scans only).

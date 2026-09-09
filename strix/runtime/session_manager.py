@@ -39,6 +39,14 @@ _WORKSPACE_ROOT = "/workspace"
 _PROTECTED_METADATA_NAMES = (".git", ".agents", ".codex")
 
 
+def get_cached_session(scan_id: str) -> Any | None:
+    """Return the live sandbox session for ``scan_id``, or None."""
+    bundle = _SESSION_CACHE.get(scan_id)
+    if bundle is None:
+        return None
+    return bundle.get("session")
+
+
 def _host_identity_env() -> dict[str, str]:
     # Read the platform through a local so it is not narrowed to whichever OS is
     # type-checking: comparing sys.platform directly makes one of these branches

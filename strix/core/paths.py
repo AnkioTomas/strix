@@ -8,6 +8,7 @@ from pathlib import Path
 RUNS_DIR_NAME = "strix_runs"
 RUNTIME_STATE_DIR_NAME = ".state"
 RUN_RECORD_FILENAME = "run.json"
+WORKSPACE_DIR_NAME = "workspace"
 
 
 def run_dir_for(run_name: str, *, cwd: Path | None = None) -> Path:
@@ -21,6 +22,11 @@ def runtime_state_dir(run_dir: Path) -> Path:
 
 def run_record_path(run_dir: Path) -> Path:
     return run_dir / RUN_RECORD_FILENAME
+
+
+def workspace_dir(run_dir: Path) -> Path:
+    """Host directory bind-mounted at container ``/workspace``."""
+    return run_dir / WORKSPACE_DIR_NAME
 
 
 def runs_base_dir(*, cwd: Path | None = None) -> Path:

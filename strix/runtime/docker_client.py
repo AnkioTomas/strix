@@ -33,12 +33,14 @@ from agents.sandbox.manifest import Manifest
 from agents.sandbox.sandboxes.docker import (
     DockerSandboxClient,
     DockerSandboxSession,
+    DockerSandboxSessionState,
     _build_docker_volume_mounts,
     _docker_port_key,
     _manifest_requires_fuse,
     _manifest_requires_sys_admin,
 )
 from agents.sandbox.session.sandbox_session import SandboxSession
+from agents.sandbox.snapshot import resolve_snapshot
 from agents.sandbox.types import ExposedPortEndpoint
 from docker import errors as docker_errors  # type: ignore[import-untyped, unused-ignore]
 from docker.models.containers import Container  # type: ignore[import-untyped, unused-ignore]
@@ -52,6 +54,10 @@ logger = logging.getLogger(__name__)
 
 
 _SANDBOX_NETWORK_ENV = "STRIX_DOCKER_SANDBOX_NETWORK"
+
+
+class ContainerImageMismatchError(RuntimeError):
+    """Raised when an existing container's image does not match the requested one."""
 
 
 def _sandbox_network() -> str | None:
@@ -121,6 +127,36 @@ def _apply_run_labels(create_kwargs: dict[str, Any]) -> None:
     run_type = os.getenv("STRIX_RUN_TYPE")
     if run_type:
         labels["strix-run-type"] = run_type
+
+
+def _container_image_matches(container: Container, image: str) -> bool:
+    """True when ``container`` was created from ``image`` (name or id)."""
+    try:
+        container.reload()
+    except (docker_errors.APIError, RequestException):
+        return False
+    attrs = getattr(container, "attrs", {}) or {}
+    config_image = str((attrs.get("Config") or {}).get("Image") or "")
+    if config_image == image:
+        return True
+    try:
+        tags = list(getattr(container.image, "tags", None) or [])
+    except (docker_errors.APIError, RequestException, AttributeError):
+        tags = []
+    if image in tags:
+        return True
+    try:
+        expected = container.client.images.get(image)
+        return bool(container.image.id == expected.id)
+    except (docker_errors.ImageNotFound, docker_errors.APIError, RequestException, AttributeError):
+        return False
+
+
+def _session_container_id(session: SandboxSession) -> str | None:
+    inner = getattr(session, "_inner", None)
+    state = getattr(inner, "state", None)
+    container_id = getattr(state, "container_id", None)
+    return container_id if isinstance(container_id, str) and container_id else None
 
 
 class StrixDockerSandboxSession(DockerSandboxSession):
@@ -268,6 +304,66 @@ class StrixDockerSandboxClient(DockerSandboxClient):
 
     async def create(self, **kwargs: Any) -> SandboxSession:
         session = await super().create(**kwargs)
+        return self._apply_sandbox_network_session(session)
+
+    async def attach_existing(
+        self,
+        container_id: str,
+        *,
+        image: str,
+        manifest: Manifest,
+        exposed_ports: tuple[int, ...] = (),
+    ) -> SandboxSession:
+        """Attach to a previously created sandbox container (start if stopped).
+
+        Raises:
+            docker.errors.NotFound: container id is gone.
+            ContainerImageMismatchError: container image does not match ``image``.
+        """
+        container = self.docker_client.containers.get(container_id)
+        if not _container_image_matches(container, image):
+            raise ContainerImageMismatchError(
+                f"container {container_id[:12]} image does not match {image!r}"
+            )
+
+        container.reload()
+        if container.status != "running":
+            logger.info(
+                "Starting stopped sandbox container %s (was %s)",
+                container.short_id if hasattr(container, "short_id") else container_id[:12],
+                container.status,
+            )
+            container.start()
+            container.reload()
+
+        resolved_id = container.id
+        assert resolved_id is not None
+        session_id = uuid.uuid4()
+        state = DockerSandboxSessionState(
+            session_id=session_id,
+            manifest=manifest,
+            image=image,
+            snapshot=resolve_snapshot(None, str(session_id)),
+            container_id=resolved_id,
+            exposed_ports=exposed_ports,
+            workspace_root_ready=True,
+        )
+        inner = DockerSandboxSession(
+            docker_client=self.docker_client,
+            container=container,
+            state=state,
+        )
+        inner._resume_workspace_probe_pending = True
+        inner._set_start_state_preserved(workspace=True)
+        session = self._wrap_session(inner, instrumentation=self._instrumentation)
+        logger.info(
+            "Attached existing sandbox container: id=%s image=%s",
+            container.short_id if hasattr(container, "short_id") else resolved_id[:12],
+            image,
+        )
+        return self._apply_sandbox_network_session(session)
+
+    def _apply_sandbox_network_session(self, session: SandboxSession) -> SandboxSession:
         network = _sandbox_network()
         inner = session._inner
         if network and isinstance(inner, DockerSandboxSession):
@@ -275,8 +371,20 @@ class StrixDockerSandboxClient(DockerSandboxClient):
             cast("StrixDockerSandboxSession", inner).sandbox_network = network
         return session
 
+    async def stop(self, session: SandboxSession) -> None:
+        """Stop the container without removing it (resume-friendly teardown)."""
+        container_id = _session_container_id(session)
+        if not container_id:
+            return
+        with contextlib.suppress(docker_errors.NotFound, docker_errors.APIError, RequestException):
+            container = self.docker_client.containers.get(container_id)
+            container.reload()
+            if container.status == "running":
+                container.stop(timeout=10)
+                logger.info("Stopped sandbox container %s (retained)", container_id[:12])
+
     async def delete(self, session: SandboxSession) -> SandboxSession:
-        container_id = getattr(getattr(session._inner, "state", None), "container_id", None)
+        container_id = _session_container_id(session)
         if container_id:
             # Best-effort kill: NotFound/APIError cover a gone or unhappy
             # container. RequestException covers a torn-down daemon socket —

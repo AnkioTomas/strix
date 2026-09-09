@@ -15,6 +15,8 @@ from agents.sandbox.entries import BaseEntry, File, LocalDir
 from agents.sandbox.manifest import Environment, Manifest
 
 from strix.config import load_settings
+from strix.core.paths import run_dir_for, workspace_dir
+from strix.report.writer import read_run_record, write_run_record
 from strix.runtime.backends import backend_supports_bind_mounts, get_backend
 from strix.runtime.caido_bootstrap import bootstrap_caido
 from strix.runtime.caido_handle import CaidoBootstrapHandle
@@ -72,6 +74,37 @@ def build_bind_mounts(local_sources: list[dict[str, Any]]) -> list[dict[str, Any
         if src.get("protect_metadata"):
             bind_mounts.extend(_metadata_mounts(resolved, target))
     return bind_mounts
+
+
+def build_run_workspace_mount(host_workspace: Path) -> dict[str, Any]:
+    """Bind the per-run host workspace at container ``/workspace`` (writable)."""
+    return {
+        "source": str(host_workspace.expanduser().resolve()),
+        "target": _WORKSPACE_ROOT,
+        "read_only": False,
+    }
+
+
+def read_sandbox_record(run_dir: Path) -> dict[str, Any] | None:
+    """Return ``run.json``'s ``sandbox`` object, or None."""
+    record = read_run_record(run_dir)
+    sandbox = record.get("sandbox")
+    return sandbox if isinstance(sandbox, dict) else None
+
+
+def write_sandbox_record(run_dir: Path, sandbox: dict[str, Any]) -> None:
+    """Merge ``sandbox`` into ``run.json`` without clobbering other fields."""
+    run_dir.mkdir(parents=True, exist_ok=True)
+    record = read_run_record(run_dir)
+    record["sandbox"] = sandbox
+    write_run_record(run_dir, record)
+
+
+def _session_container_id(session: Any) -> str | None:
+    inner = getattr(session, "_inner", None)
+    state = getattr(inner, "state", None)
+    container_id = getattr(state, "container_id", None)
+    return container_id if isinstance(container_id, str) and container_id else None
 
 
 def build_manifest_entries(local_sources: list[dict[str, Any]]) -> dict[str | Path, BaseEntry]:
@@ -286,6 +319,10 @@ async def create_or_reuse(
     regardless of backend: an in-memory ``File`` manifest entry on manifest
     backends, a read-only bind mount of a host-staged copy on bind-mount
     backends.
+
+    For the docker backend, ``strix_runs/<scan_id>/workspace`` is always
+    bind-mounted at ``/workspace``. On cleanup the container is stopped (not
+    removed) and its id is kept in ``run.json`` so ``--resume`` can attach.
     """
 
     def report(phase: str) -> None:
@@ -297,18 +334,38 @@ async def create_or_reuse(
         logger.info("Reusing existing sandbox session for scan %s", scan_id)
         return cached
 
+    # Labels for newly created containers (see docker_client._apply_run_labels).
+    os.environ["STRIX_RUN_ID"] = scan_id
+
+    run_dir = run_dir_for(scan_id)
+    host_workspace = workspace_dir(run_dir)
+    host_workspace.mkdir(parents=True, exist_ok=True)
+
     backend_name = load_settings().runtime.backend
     backend = get_backend(backend_name)
 
     staging_dir: Path | None = None
+    reuse_container_id: str | None = None
     if backend_supports_bind_mounts(backend_name):
-        bind_mounts = build_bind_mounts(local_sources)
+        bind_mounts = [
+            build_run_workspace_mount(host_workspace),
+            *build_bind_mounts(local_sources),
+        ]
         entries: dict[str | Path, BaseEntry] = {}
         if extra_files:
             staging_dir = extra_file_staging_dir(scan_id)
             bind_mounts.extend(
                 build_extra_file_bind_mounts(extra_files, staging_dir, local_sources)
             )
+        prior = read_sandbox_record(run_dir)
+        if (
+            isinstance(prior, dict)
+            and prior.get("backend") == backend_name
+            and prior.get("image") == image
+            and isinstance(prior.get("container_id"), str)
+            and prior["container_id"]
+        ):
+            reuse_container_id = str(prior["container_id"])
     else:
         bind_mounts = []
         entries = build_manifest_entries(local_sources)
@@ -337,18 +394,20 @@ async def create_or_reuse(
     )
 
     logger.info(
-        "Creating sandbox session for scan %s (backend=%s, image=%s)",
+        "Creating sandbox session for scan %s (backend=%s, image=%s, reuse=%s)",
         scan_id,
         backend_name,
         image,
+        bool(reuse_container_id),
     )
     report("Starting sandbox container")
     try:
-        client, session = await backend(
+        client, session = await _start_backend_session(
+            backend,
             image=image,
             manifest=manifest,
-            exposed_ports=(_CONTAINER_CAIDO_PORT,),
             bind_mounts=bind_mounts,
+            reuse_container_id=reuse_container_id,
         )
 
         report("Setting up the proxy")
@@ -372,6 +431,18 @@ async def create_or_reuse(
             )
         )
 
+        container_id = _session_container_id(session)
+        if container_id:
+            write_sandbox_record(
+                run_dir,
+                {
+                    "backend": backend_name,
+                    "container_id": container_id,
+                    "image": image,
+                    "workspace": str(host_workspace.resolve()),
+                },
+            )
+
         bundle = {
             "client": client,
             "session": session,
@@ -388,18 +459,50 @@ async def create_or_reuse(
     return bundle
 
 
+async def _start_backend_session(
+    backend: Any,
+    *,
+    image: str,
+    manifest: Manifest,
+    bind_mounts: list[dict[str, Any]],
+    reuse_container_id: str | None,
+) -> tuple[Any, Any]:
+    """Attach to ``reuse_container_id`` when possible; otherwise create a new container."""
+    if reuse_container_id:
+        try:
+            return await backend(
+                image=image,
+                manifest=manifest,
+                exposed_ports=(_CONTAINER_CAIDO_PORT,),
+                bind_mounts=bind_mounts,
+                container_id=reuse_container_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # NotFound / image mismatch / attach failures → create fresh.
+            logger.warning(
+                "Could not reuse container %s (%s); creating a new sandbox",
+                reuse_container_id[:12],
+                exc,
+            )
+    return await backend(
+        image=image,
+        manifest=manifest,
+        exposed_ports=(_CONTAINER_CAIDO_PORT,),
+        bind_mounts=bind_mounts,
+    )
+
+
 def _remove_staging_dir(staging_dir: Path | None) -> None:
     if staging_dir is not None:
         shutil.rmtree(staging_dir, ignore_errors=True)
 
 
 async def cleanup(scan_id: str) -> None:
-    """Tear down ``scan_id``'s container and drop its cache entry.
+    """Stop ``scan_id``'s container (retain it) and drop its process cache entry.
 
-    Best-effort: any error during ``client.delete`` is logged and
-    swallowed. We never want a cleanup failure to prevent the next
-    scan from starting; the worst case is a stranded container that
-    Docker's normal reaping will catch on next ``docker prune``.
+    Best-effort: any error during ``client.stop`` is logged and swallowed.
+    The container id stays in ``run.json`` so a later resume can attach.
+    Staging dirs and the Caido handle are still torn down.
     """
     bundle = _SESSION_CACHE.pop(scan_id, None)
     if bundle is None:
@@ -416,12 +519,18 @@ async def cleanup(scan_id: str) -> None:
             logger.debug("cleanup(%s): caido_client.aclose() raised", scan_id, exc_info=True)
 
     client = bundle["client"]
+    stop = getattr(client, "stop", None)
     try:
-        await client.delete(bundle["session"])
-        logger.info("Cleaned up sandbox session for scan %s", scan_id)
+        if callable(stop):
+            await stop(bundle["session"])
+            logger.info("Stopped sandbox session for scan %s (container retained)", scan_id)
+        else:
+            # Non-docker / legacy backends without stop() still tear down fully.
+            await client.delete(bundle["session"])
+            logger.info("Cleaned up sandbox session for scan %s", scan_id)
     except Exception:
         logger.exception(
-            "cleanup(%s): client.delete raised; container may need manual reaping",
+            "cleanup(%s): client stop/delete raised; container may need manual reaping",
             scan_id,
         )
 

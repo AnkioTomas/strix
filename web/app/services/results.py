@@ -90,7 +90,9 @@ def list_artifacts(run_dir: Path) -> list[dict[str, Any]]:
         if not path.is_file():
             continue
         rel = path.relative_to(run_dir).as_posix()
-        if path.name in interesting or rel.startswith(("vulnerabilities/", "screenshots/")):
+        if path.name in interesting or rel.startswith(
+            ("vulnerabilities/", "screenshots/", "images/")
+        ):
             artifacts.append(
                 {
                     "name": rel,

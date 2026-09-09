@@ -12,14 +12,15 @@ from app.config import get_settings
 SESSION_COOKIE_NAME = "strix_web_session"
 
 
-def _unauthorized(message: str = "Missing or invalid credentials") -> HTTPException:
+def unauthorized(message: str = "Missing or invalid credentials") -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail={"error": {"code": "UNAUTHORIZED", "message": message}},
     )
 
 
-def _expected_key() -> str | None:
+def expected_api_key() -> str | None:
+    """Return configured API key, or None when auth is disabled."""
     cfg = get_settings()
     if cfg.auth_disabled:
         return None
@@ -47,7 +48,7 @@ def require_api_key(
     authorization: str | None = Header(default=None),
     strix_web_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> None:
-    expected = _expected_key()
+    expected = expected_api_key()
     if expected is None:
         return
 
@@ -59,4 +60,4 @@ def require_api_key(
     if token_matches(strix_web_session, expected):
         return
 
-    raise _unauthorized()
+    raise unauthorized()

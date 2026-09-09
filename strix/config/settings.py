@@ -112,6 +112,10 @@ class RuntimeSettings(BaseSettings):
     backend: str = Field(default="docker", alias="STRIX_RUNTIME_BACKEND")
     # Max screenshot/image tool outputs kept live per agent context (0 = none).
     max_context_images: int = Field(default=3, ge=0, alias="STRIX_MAX_CONTEXT_IMAGES")
+    # docker-py API / pull HTTP timeout (seconds). Missing this hangs forever on bad networks.
+    docker_timeout: int = Field(default=300, ge=1, alias="STRIX_DOCKER_TIMEOUT")
+    # git clone / checkout / local git helpers (seconds).
+    git_timeout: int = Field(default=300, ge=1, alias="STRIX_GIT_TIMEOUT")
 
 
 WebSearchProvider = Literal["auto", "perplexity", "exa"]

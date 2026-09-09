@@ -41,12 +41,11 @@ async def _docker_backend(
     Strix manages session lifetime explicitly via ``client.stop()`` /
     ``client.delete()`` so we trigger ``start()`` ourselves.
     """
-    import docker
     from agents.sandbox.sandboxes.docker import DockerSandboxClientOptions
 
-    from strix.runtime.docker_client import StrixDockerSandboxClient
+    from strix.runtime.docker_client import StrixDockerSandboxClient, docker_client_from_env
 
-    client = StrixDockerSandboxClient(docker.from_env())
+    client = StrixDockerSandboxClient(docker_client_from_env())
     client.strix_bind_mounts = bind_mounts or []
     options = DockerSandboxClientOptions(image=image, exposed_ports=exposed_ports)
     if container_id:

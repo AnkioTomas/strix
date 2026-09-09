@@ -53,6 +53,19 @@ from requests.exceptions import RequestException
 logger = logging.getLogger(__name__)
 
 
+def docker_client_from_env() -> Any:
+    """``docker.from_env`` with ``STRIX_DOCKER_TIMEOUT`` applied.
+
+    Without an explicit timeout, docker-py requests can hang forever on a
+    stuck daemon or registry.
+    """
+    import docker
+
+    from strix.config import load_settings
+
+    return docker.from_env(timeout=load_settings().runtime.docker_timeout)
+
+
 _SANDBOX_NETWORK_ENV = "STRIX_DOCKER_SANDBOX_NETWORK"
 
 

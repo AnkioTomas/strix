@@ -581,21 +581,27 @@ class DiffScopeResult:
 def _run_git_command(
     repo_path: Path, args: list[str], check: bool = True
 ) -> subprocess.CompletedProcess[str]:
+    from strix.config import load_settings
+
     return subprocess.run(  # noqa: S603
         ["git", "-C", str(repo_path), *args],  # noqa: S607
         capture_output=True,
         text=True,
         check=check,
+        timeout=load_settings().runtime.git_timeout,
     )
 
 
 def _run_git_command_raw(
     repo_path: Path, args: list[str], check: bool = True
 ) -> subprocess.CompletedProcess[bytes]:
+    from strix.config import load_settings
+
     return subprocess.run(  # noqa: S603
         ["git", "-C", str(repo_path), *args],  # noqa: S607
         capture_output=True,
         check=check,
+        timeout=load_settings().runtime.git_timeout,
     )
 
 
@@ -1571,6 +1577,8 @@ def clone_repository(repo_url: str, run_name: str, dest_name: str | None = None)
         shutil.rmtree(clone_path)
 
     try:
+        from strix.config import load_settings
+
         with console.status(f"[bold cyan]Cloning repository {repo_url}...", spinner="dots"):
             subprocess.run(  # noqa: S603
                 [
@@ -1582,10 +1590,15 @@ def clone_repository(repo_url: str, run_name: str, dest_name: str | None = None)
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=load_settings().runtime.git_timeout,
             )
 
         return str(clone_path.absolute())
 
+    except subprocess.TimeoutExpired as e:
+        raise ValueError(
+            f"Timed out cloning repository {repo_url} after {e.timeout}s"
+        ) from e
     except subprocess.CalledProcessError as e:
         detail = e.stderr if hasattr(e, "stderr") and e.stderr else str(e)
         raise ValueError(f"Could not clone repository {repo_url}: {detail}") from e
@@ -1597,11 +1610,12 @@ def clone_repository(repo_url: str, run_name: str, dest_name: str | None = None)
 
 
 def check_docker_connection() -> Any:
-    import docker
     from docker.errors import DockerException
 
+    from strix.runtime.docker_client import docker_client_from_env
+
     try:
-        return docker.from_env()
+        return docker_client_from_env()
     except DockerException:
         console = Console()
         error_text = Text()

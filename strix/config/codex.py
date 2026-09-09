@@ -358,13 +358,17 @@ def build_openai_client() -> AsyncOpenAI:
 
     get_valid_token()  # fail fast at configure time if the sign-in is dead
 
+    from strix.config import load_settings
+
+    llm_timeout = float(load_settings().llm.timeout)
+
     async def _auth_hook(request: httpx.Request) -> None:
         access, account_id = await asyncio.to_thread(get_valid_token)
         request.headers["Authorization"] = f"Bearer {access}"
         request.headers["chatgpt-account-id"] = account_id
 
     http_client = httpx.AsyncClient(
-        timeout=httpx.Timeout(600.0, connect=30.0),
+        timeout=httpx.Timeout(llm_timeout, connect=min(30.0, llm_timeout)),
         event_hooks={"request": [_auth_hook]},
     )
     return AsyncOpenAI(

@@ -407,7 +407,17 @@ def _git_candidate_paths(git: str, git_root: Path, source: Path) -> Iterator[Pat
                 yield relative
         if buffer:
             raise http.CloudError("Git returned a malformed source file manifest.")
-        if process.wait() != 0:
+        from strix.config import load_settings
+
+        try:
+            exit_code = process.wait(timeout=load_settings().runtime.git_timeout)
+        except subprocess.TimeoutExpired as exc:
+            process.kill()
+            process.wait(timeout=5)
+            raise http.CloudError(
+                f"Git enumeration timed out after {exc.timeout}s"
+            ) from exc
+        if exit_code != 0:
             raise http.CloudError("Git could not enumerate the source directory.")
     finally:
         process.stdout.close()
@@ -417,7 +427,7 @@ def _git_candidate_paths(git: str, git_root: Path, source: Path) -> Iterator[Pat
                 process.wait(timeout=1)
             except subprocess.TimeoutExpired:
                 process.kill()
-                process.wait()
+                process.wait(timeout=5)
 
 
 def _git_relative_path(raw: bytes, relative_source: Path) -> Path | None:

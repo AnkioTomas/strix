@@ -111,14 +111,16 @@ def _memory_darwin() -> tuple[int | None, int | None]:
     import subprocess
 
     try:
-        total_raw = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True).strip()
+        total_raw = subprocess.check_output(
+            ["sysctl", "-n", "hw.memsize"], text=True, timeout=2
+        ).strip()
         total = int(total_raw)
-    except (OSError, ValueError, subprocess.CalledProcessError):
+    except (OSError, ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None, None
 
     try:
-        vm = subprocess.check_output(["vm_stat"], text=True)
-    except (OSError, subprocess.CalledProcessError):
+        vm = subprocess.check_output(["vm_stat"], text=True, timeout=2)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return total, None
 
     page_size = 4096

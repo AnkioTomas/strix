@@ -180,7 +180,6 @@ async def _proxy(
         content=content,
         status_code=upstream_resp.status_code,
         headers=out_headers,
-        media_type=upstream_resp.headers.get("content-type"),
     )
 
 

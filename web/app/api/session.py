@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Header, Response, status
 
 from app.config import get_settings
-from app.security.auth import SESSION_COOKIE_NAME, _expected_key, _unauthorized, token_matches
+from app.security.auth import SESSION_COOKIE_NAME, expected_api_key, token_matches, unauthorized
 
 
 router = APIRouter(prefix="/api/v1")
@@ -16,17 +16,16 @@ async def create_session(
     response: Response,
     authorization: str | None = Header(default=None),
 ) -> Response:
-    expected = _expected_key()
+    expected = expected_api_key()
     if expected is None:
-        # Auth disabled: still set an empty marker so the UI can treat session as ready.
         response.delete_cookie(SESSION_COOKIE_NAME, path="/")
         return response
 
     if not authorization or not authorization.startswith("Bearer "):
-        raise _unauthorized("Missing Bearer token")
+        raise unauthorized("Missing Bearer token")
     token = authorization.removeprefix("Bearer ").strip()
     if not token_matches(token, expected):
-        raise _unauthorized("Invalid API key")
+        raise unauthorized("Invalid API key")
 
     secure = get_settings().host not in {"127.0.0.1", "localhost", "::1"}
     response.set_cookie(

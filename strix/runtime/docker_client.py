@@ -159,6 +159,115 @@ def _session_container_id(session: SandboxSession) -> str | None:
     return container_id if isinstance(container_id, str) and container_id else None
 
 
+def _format_published_ports(ports: object) -> str:
+    """Summarize Docker NetworkSettings.Ports for logs."""
+    if not isinstance(ports, dict) or not ports:
+        return "none"
+    parts: list[str] = []
+    for container_port, bindings in ports.items():
+        if not bindings:
+            parts.append(f"{container_port}->(unpublished)")
+            continue
+        if not isinstance(bindings, list):
+            parts.append(f"{container_port}->{bindings!r}")
+            continue
+        mapped = []
+        for binding in bindings:
+            if not isinstance(binding, dict):
+                mapped.append(repr(binding))
+                continue
+            host_ip = binding.get("HostIp") or "0.0.0.0"
+            host_port = binding.get("HostPort") or "?"
+            mapped.append(f"{host_ip}:{host_port}")
+        parts.append(f"{container_port}->[{', '.join(mapped)}]")
+    return ", ".join(parts)
+
+
+def _format_networks(networks: object) -> str:
+    if not isinstance(networks, dict) or not networks:
+        return "bridge?"
+    parts: list[str] = []
+    for name, endpoint in networks.items():
+        if not isinstance(endpoint, dict):
+            parts.append(str(name))
+            continue
+        ip = endpoint.get("IPAddress") or endpoint.get("GlobalIPv6Address") or "-"
+        gateway = endpoint.get("Gateway") or "-"
+        parts.append(f"{name}(ip={ip}, gw={gateway})")
+    return ", ".join(parts)
+
+
+def _format_mounts(mounts: object) -> str:
+    if not isinstance(mounts, list) or not mounts:
+        return "none"
+    parts: list[str] = []
+    for mount in mounts:
+        if not isinstance(mount, dict):
+            continue
+        source = mount.get("Source") or mount.get("Name") or "?"
+        target = mount.get("Destination") or "?"
+        mode = mount.get("Mode") or ("ro" if mount.get("RW") is False else "rw")
+        mtype = mount.get("Type") or "bind"
+        parts.append(f"{source} -> {target} ({mtype},{mode})")
+    return "; ".join(parts) if parts else "none"
+
+
+def _format_bind_specs(bind_mounts: list[dict[str, Any]] | None) -> str:
+    if not bind_mounts:
+        return "none"
+    return "; ".join(
+        f"{m.get('source')} -> {m.get('target')} "
+        f"({'ro' if m.get('read_only') else 'rw'})"
+        for m in bind_mounts
+    )
+
+
+def _log_container_runtime(container: Container, *, action: str, image: str | None = None) -> None:
+    """Emit an INFO line with identity, network reachability, and mounts."""
+    try:
+        container.reload()
+    except (docker_errors.APIError, RequestException) as exc:
+        logger.warning(
+            "%s sandbox container (reload failed: %s): id=%s",
+            action,
+            exc,
+            getattr(container, "short_id", None) or getattr(container, "id", "?"),
+        )
+        return
+
+    attrs = getattr(container, "attrs", {}) or {}
+    config = attrs.get("Config") or {}
+    network_settings = attrs.get("NetworkSettings") or {}
+    host_config = attrs.get("HostConfig") or {}
+    short_id = getattr(container, "short_id", None) or str(attrs.get("Id", "?"))[:12]
+    name = (attrs.get("Name") or getattr(container, "name", "") or "").lstrip("/")
+    status = attrs.get("State", {}).get("Status") or getattr(container, "status", "?")
+    config_image = image or config.get("Image") or "?"
+    network_mode = host_config.get("NetworkMode") or _sandbox_network() or "default"
+    extra_hosts = host_config.get("ExtraHosts") or []
+    cap_add = host_config.get("CapAdd") or []
+    labels = config.get("Labels") or {}
+    run_label = labels.get("strix-run-id") if isinstance(labels, dict) else None
+
+    logger.info(
+        "%s sandbox container id=%s name=%s image=%s status=%s "
+        "network_mode=%s networks=%s published_ports=%s mounts=%s "
+        "extra_hosts=%s caps=%s run_id=%s",
+        action,
+        short_id,
+        name or "-",
+        config_image,
+        status,
+        network_mode,
+        _format_networks(network_settings.get("Networks")),
+        _format_published_ports(network_settings.get("Ports")),
+        _format_mounts(attrs.get("Mounts")),
+        extra_hosts or ["host.docker.internal:host-gateway"],
+        cap_add or ["NET_ADMIN", "NET_RAW"],
+        run_label or os.getenv("STRIX_RUN_ID") or "-",
+    )
+
+
 class StrixDockerSandboxSession(DockerSandboxSession):
     sandbox_network: str = ""
 

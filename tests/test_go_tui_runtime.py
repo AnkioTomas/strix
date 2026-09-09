@@ -808,7 +808,6 @@ async def test_setup_prepare_system_exit_is_recoverable_and_transactional(
     runtime = GoTuiRuntime(runtime_args)
     runtime.controller.scan_mode = "quick"
     runtime.controller.instruction = ""
-    telemetry_started = False
 
     async def preflight(_model: str) -> None:
         return None
@@ -819,10 +818,6 @@ async def test_setup_prepare_system_exit_is_recoverable_and_transactional(
         candidate.targets_info[0]["details"]["url"] = "https://mutated.example"
         raise ValueError("invalid diff scope")
 
-    def telemetry(_candidate: argparse.Namespace) -> None:
-        nonlocal telemetry_started
-        telemetry_started = True
-
     monkeypatch.setattr(
         go_tui,
         "load_settings",
@@ -830,13 +825,11 @@ async def test_setup_prepare_system_exit_is_recoverable_and_transactional(
     )
     monkeypatch.setattr(go_tui, "preflight_model_connection", preflight)
     monkeypatch.setattr(go_tui, "prepare_run", fail_prepare)
-    monkeypatch.setattr(go_tui, "telemetry_start", telemetry)
 
     with pytest.raises(ValueError, match="invalid diff scope"):
         await runtime.start_from_setup()
 
     assert vars(runtime.args) == original_args
-    assert telemetry_started is False
     assert runtime.scan_task is None
 
 

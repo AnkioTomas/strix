@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from dotenv import load_dotenv
 from pydantic import AliasChoices, BaseModel
 
 from strix.config.settings import LlmSettings, Settings
@@ -33,10 +34,25 @@ _cached: Settings | None = None
 _LINKED_LLM_FIELDS = ("model", "api_key", "api_base")
 
 
+def load_cwd_dotenv() -> Path | None:
+    """Load ``.env`` from the current working directory into ``os.environ``.
+
+    Existing environment variables are never overwritten (shell ``export``
+    wins). Returns the path that was loaded, or ``None`` when missing.
+    """
+    path = Path.cwd() / ".env"
+    if not path.is_file():
+        return None
+    load_dotenv(path, override=False)
+    logger.debug("load_cwd_dotenv: loaded %s", path)
+    return path
+
+
 def load_settings() -> Settings:
     """Resolve settings from env + JSON file + defaults. Memoized.
 
-    Precedence: env vars win, then the JSON file, then field defaults.
+    Precedence: env vars win (including keys filled from CWD ``.env`` by
+    :func:`load_cwd_dotenv`), then the JSON file, then field defaults.
     """
     global _cached  # noqa: PLW0603
     if _cached is None:

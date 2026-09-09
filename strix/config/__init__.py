@@ -6,12 +6,14 @@ Public surface:
 - :class:`LlmSettings`, :class:`RuntimeSettings`, :class:`IntegrationSettings`
   — sub-models, attribute-accessed off ``Settings``.
 - :func:`load_settings` — memoized resolve (env > JSON file > defaults).
+- :func:`load_cwd_dotenv` — load CWD ``.env`` into the process env (no override).
 - :func:`apply_config_override` — switch the JSON source to a custom path.
 - :func:`persist_current` — write currently-set env vars to the active file.
 """
 
 from strix.config.loader import (
     apply_config_override,
+    load_cwd_dotenv,
     load_settings,
     persist_current,
 )
@@ -33,6 +35,7 @@ __all__ = [
     "RuntimeSettings",
     "Settings",
     "apply_config_override",
+    "load_cwd_dotenv",
     "load_settings",
     "persist_current",
 ]

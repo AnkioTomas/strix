@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from strix.config import codex, load_settings, persist_current
+from strix.config import codex, load_cwd_dotenv, load_settings, persist_current
 from strix.core.paths import run_dir_for
 from strix.interface.cli_args import parse_arguments
 from strix.interface.environment import (
@@ -403,6 +403,9 @@ def _bootstrap_scan(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    # CWD .env before any settings/subcommand path so shell-unset keys are filled
+    # without overriding already-exported variables.
+    load_cwd_dotenv()
     configure_dependency_logging()
 
     if sys.platform == "win32":

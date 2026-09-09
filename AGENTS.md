@@ -30,6 +30,7 @@ Target-specific workflows built on the same engine:
   curl -sSL https://strix.ai/install | bash        # install
   export STRIX_LLM="openrouter/z-ai/glm-5.3"        # any LiteLLM model id
   export LLM_API_KEY="<key>"
+  # Or put STRIX_LLM / LLM_API_KEY in a CWD `.env` (shell export still wins)
   strix -n -t ./ --scan-mode quick --max-budget 10  # headless scan; always use -n
   ```
   - Requires Docker running. Scans take minutes (`quick`) to hours (`deep`) — run in the background.

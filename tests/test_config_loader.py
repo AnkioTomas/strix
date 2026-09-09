@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import TYPE_CHECKING
 
 import pytest
@@ -412,3 +413,33 @@ def test_persist_current_sets_0600_mode(tmp_path: Path, monkeypatch: pytest.Monk
     loader.persist_current()
 
     assert target.stat().st_mode & 0o777 == 0o600
+
+
+def test_load_cwd_dotenv_fills_unset_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("STRIX_LLM=from-dotenv\n", encoding="utf-8")
+
+    loaded = loader.load_cwd_dotenv()
+
+    assert loaded == tmp_path / ".env"
+    assert os.environ["STRIX_LLM"] == "from-dotenv"
+
+
+def test_load_cwd_dotenv_does_not_override_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("STRIX_LLM", "from-shell")
+    (tmp_path / ".env").write_text("STRIX_LLM=from-dotenv\n", encoding="utf-8")
+
+    loader.load_cwd_dotenv()
+
+    assert os.environ["STRIX_LLM"] == "from-shell"
+
+
+def test_load_cwd_dotenv_missing_is_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    before = dict(os.environ)
+
+    assert loader.load_cwd_dotenv() is None
+    assert dict(os.environ) == before

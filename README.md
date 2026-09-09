@@ -87,6 +87,7 @@ curl -sSL https://strix.ai/install | bash
 # Configure your AI provider
 export STRIX_LLM="openrouter/z-ai/glm-5.3"
 export LLM_API_KEY="your-api-key"
+# Or put the same keys in a CWD `.env` file (exported shell vars still win)
 
 # Run your first security assessment
 strix --target ./app-directory
@@ -292,8 +293,13 @@ export LLM_API_KEY="your-api-key"
 export LLM_API_BASE="your-api-base-url"  # if using a local model, e.g. Ollama, LMStudio
 ```
 
+You can also place the same variables in a `.env` file in the current working
+directory. Strix loads it at startup and does **not** override variables already
+exported in the shell.
+
 > [!NOTE]
 > Strix automatically saves your configuration to `~/.strix/cli-config.json`, so you don't have to re-enter it on every run.
+> Precedence: shell env > CWD `.env` > `cli-config.json` > defaults.
 > See the [configuration reference](https://docs.strix.ai/advanced/configuration) for every environment variable.
 
 #### Sign in with a ChatGPT subscription

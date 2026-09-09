@@ -159,7 +159,8 @@
       <section>
         <h2>选中任务操作</h2>
         <p class="hint">ID: <span id="selectedId">—</span></p>
-        <label>给 Agent 的消息（完成后会创建 resume 续跑）</label>
+        <p class="hint">Viewer: <a id="viewerLink" href="#" target="_blank" rel="noopener">—</a></p>
+        <label>给 Agent 的消息（运行中实时投递；结束后会开 follow-up）</label>
         <textarea id="message" placeholder="继续验证刚才的 SSRF..."></textarea>
         <div>
           <button id="sendMsg">发送消息</button>
@@ -273,6 +274,15 @@
           tr.onclick = () => {
             selected = tr.dataset.id;
             $("selectedId").textContent = selected;
+            const task = (tasks.tasks || []).find(t => t.id === selected);
+            const link = $("viewerLink");
+            if (task && task.viewer_url) {
+              link.href = task.viewer_url;
+              link.textContent = task.viewer_url;
+            } else {
+              link.href = "#";
+              link.textContent = "（运行后生成）";
+            }
             watchEvents(selected);
             refresh();
           };

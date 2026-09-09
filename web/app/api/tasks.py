@@ -211,7 +211,11 @@ async def post_message(
     manager: TaskManager = Depends(get_manager),
 ):
     try:
-        await asyncio.to_thread(manager.resume_with_message, task_id, payload.content)
+        await asyncio.to_thread(
+            lambda: manager.resume_with_message(
+                task_id, payload.content, agent_id=payload.agent_id
+            )
+        )
         rows = await asyncio.to_thread(manager.db.list_messages, task_id)
     except TaskError as exc:
         return _error(exc)

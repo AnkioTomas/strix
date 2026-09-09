@@ -1,6 +1,6 @@
 # Local Strix Security API
 
-编排层，不是第二个 Agent。HTTP 管任务；`strix -n` 管子弹。
+编排层，不是第二个 Agent。HTTP 管任务；进程内 `run_strix_scan(interactive=True)` + viewer steer 管子弹与对话。
 
 ## 能力
 
@@ -8,7 +8,7 @@
 2. 按系统负载排队（内存不足 / load 过高时不放行，任务留在 `queued`）
 3. 取消 / 重试 / 复测
 4. 事件查询 + SSE
-5. 用户消息（运行中只入库；结束后自动开 follow-up 任务）
+5. 运行中实时与 Agent 交互（viewer steer / `POST .../messages`）
 6. 报告 / artifacts 下载
 7. **按任务**查看漏洞 `GET /api/v1/tasks/{id}/results`（不跨任务）
 
@@ -78,7 +78,25 @@ Worker 每秒检查：
 
 ## 设计约束
 
-- 不在 HTTP handler 里跑 Strix
+- 不在 HTTP handler 里同步跑扫描；Worker 线程内进程内调用 `run_strix_scan(interactive=True)`
 - 每任务独立 workspace：`web/data/tasks/<task_id>/`
 - 漏洞只按 `task_id` 暴露，不做全局汇聚
 - 固定 Bearer Token，不做账号体系
+
+## 交互（实话）
+
+`strix -n` **不会**开可 steer 的 HTTP。能双向对话的是同一进程里的 viewer：
+
+```text
+API Worker
+  → run_strix_scan(interactive=True) + AgentCoordinator
+  → viewer.serve(..., steer_handler=...)
+  → POST /api/agents/steer   （Strix 原生）
+```
+
+| 时机 | `POST /api/v1/tasks/{id}/messages` |
+|------|-------------------------------------|
+| 运行中 | 经 coordinator 实时投递（与 viewer steer 同源） |
+| 已结束 | 创建 follow-up 任务，消息并进 instruction |
+
+任务上的 `viewer_url` 可直接打开官方 Viewer（带 token）。

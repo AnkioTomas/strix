@@ -20,7 +20,7 @@ from app.services.results import (
     read_report_markdown,
     workspace_run_dir,
 )
-from app.services.strix_runner import StrixProcess, close_process_logs, start_strix
+from app.services.strix_runner import LiveStrixSession, close_process_logs, start_strix
 
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ class TaskManager:
     def __init__(self, db: Database, settings: Settings) -> None:
         self.db = db
         self.settings = settings
-        self._processes: dict[str, StrixProcess] = {}
+        self._processes: dict[str, LiveStrixSession] = {}
 
     # --- create / list ---
 
@@ -106,6 +106,8 @@ class TaskManager:
             "max_budget": req.max_budget,
             "workspace": str(workspace),
             "run_name": None,
+            "viewer_url": None,
+            "viewer_token": None,
             "pid": None,
             "exit_code": None,
             "parent_task_id": parent_task_id,
@@ -198,20 +200,40 @@ class TaskManager:
             base.instruction = note
         return self.create_task(base, parent_task_id=task_id, action="retest")
 
-    def resume_with_message(self, task_id: str, content: str) -> dict[str, Any]:
-        """Store a user message; if the task is finished, queue a follow-up scan.
+    def resume_with_message(
+        self, task_id: str, content: str, *, agent_id: str | None = None
+    ) -> dict[str, Any]:
+        """Deliver a live message into a running scan, or queue a follow-up.
 
-        Headless Strix has no live chat channel. While a task is active the
-        message is persisted only. After completion/failure we spawn a fresh
-        task with the follow-up folded into ``--instruction`` — no brittle
-        ``--resume`` workspace copy.
+        Running tasks use the in-process coordinator (same channel as the
+        Strix viewer ``POST /api/agents/steer``). Finished tasks spawn a
+        follow-up scan with the note folded into the instruction.
         """
         parent = self.get_task(task_id)
-        self.db.add_message(task_id, "user", content)
-        if parent["status"] in ACTIVE:
+        if parent["status"] in {"starting", "running"}:
+            session = self._processes.get(task_id)
+            delivered = False
+            if session is not None:
+                delivered = session.send_message(content, agent_id=agent_id)
+            self.db.add_message(task_id, "user", content, delivered=delivered)
+            if not delivered:
+                raise TaskError(
+                    "RESULT_NOT_READY",
+                    "Agent not ready to receive messages yet; retry shortly",
+                    status_code=409,
+                )
+            return self.get_task(task_id)
+
+        self.db.add_message(task_id, "user", content, delivered=False)
+        if parent["status"] == "queued":
             return parent
+        if parent["status"] == "cancelling":
+            raise TaskError("TASK_NOT_CANCELLABLE", "Task is cancelling")
         if parent["status"] not in TERMINAL:
-            raise TaskError("TASK_NOT_CANCELLABLE", f"Cannot message task in status {parent['status']}")
+            raise TaskError(
+                "TASK_NOT_CANCELLABLE",
+                f"Cannot message task in status {parent['status']}",
+            )
         req = self._request_from_task(parent)
         follow = f"[User follow-up]\n{content}"
         req.instruction = f"{req.instruction}\n\n{follow}" if req.instruction else follow
@@ -242,13 +264,40 @@ class TaskManager:
             raise TaskError("STRIX_START_FAILED", str(exc)) from exc
         return str(source_dir)
 
-    def start_process(self, task: dict[str, Any], target: str) -> StrixProcess:
+    def start_process(self, task: dict[str, Any], target: str) -> LiveStrixSession:
+        task_id = task["id"]
+
+        def on_ready(session: LiveStrixSession) -> None:
+            self.db.update_task(
+                task_id,
+                run_name=session.run_name,
+                viewer_url=session.viewer_url,
+                viewer_token=session.viewer_token,
+                pid=session.pid,
+            )
+
         try:
-            process = start_strix(task, settings=self.settings, target=target)
-        except OSError as exc:
+            process = start_strix(
+                task,
+                settings=self.settings,
+                target=target,
+                on_ready=on_ready,
+            )
+        except (OSError, RuntimeError) as exc:
             raise TaskError("STRIX_START_FAILED", str(exc)) from exc
-        self._processes[task["id"]] = process
-        self.db.update_task(task["id"], status="running", pid=process.pid)
+        # Wait until prepare_run + viewer bind finish so clients see viewer_url.
+        process.wait_ready(timeout=180)
+        self._processes[task_id] = process
+        if process._error and process.poll() is not None:
+            raise TaskError("STRIX_START_FAILED", process._error)
+        self.db.update_task(
+            task_id,
+            status="running",
+            pid=process.pid,
+            run_name=process.run_name,
+            viewer_url=process.viewer_url,
+            viewer_token=process.viewer_token,
+        )
         return process
 
     def finish_process(self, task_id: str, *, cancelled: bool = False) -> dict[str, Any]:

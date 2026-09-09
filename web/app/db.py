@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     max_budget REAL,
     workspace TEXT NOT NULL,
     run_name TEXT,
+    viewer_url TEXT,
+    viewer_token TEXT,
     pid INTEGER,
     exit_code INTEGER,
     parent_task_id TEXT,
@@ -87,6 +89,15 @@ class Database:
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+        if "viewer_url" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN viewer_url TEXT")
+        if "viewer_token" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN viewer_token TEXT")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -180,19 +191,25 @@ class Database:
             updated = conn.execute("SELECT * FROM tasks WHERE id = ?", (row["id"],)).fetchone()
         return dict(updated) if updated else None
 
-    def add_message(self, task_id: str, role: str, content: str) -> dict[str, Any]:
+    def add_message(
+        self, task_id: str, role: str, content: str, *, delivered: bool = False
+    ) -> dict[str, Any]:
         now = utc_now()
         with self.connect() as conn:
             cur = conn.execute(
                 "INSERT INTO messages (task_id, role, content, created_at, delivered) "
-                "VALUES (?, ?, ?, ?, 0)",
-                (task_id, role, content, now),
+                "VALUES (?, ?, ?, ?, ?)",
+                (task_id, role, content, now, 1 if delivered else 0),
             )
             row = conn.execute(
                 "SELECT * FROM messages WHERE id = ?",
                 (cur.lastrowid,),
             ).fetchone()
         return dict(row)
+
+    def mark_message_delivered(self, message_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute("UPDATE messages SET delivered = 1 WHERE id = ?", (message_id,))
 
     def list_messages(self, task_id: str) -> list[dict[str, Any]]:
         with self.connect() as conn:

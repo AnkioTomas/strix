@@ -81,11 +81,6 @@ def run_view(argv: list[str]) -> None:
 
     run_name = run_dir.name
     summary = read_run_summary(run_dir)
-    live = not summary.get("finished", False)
-
-    from strix.telemetry import posthog
-
-    posthog.viewer_opened(source="cli", live=live)
 
     state_label = _state_label(summary)
     console.print()

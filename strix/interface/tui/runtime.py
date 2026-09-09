@@ -21,7 +21,6 @@ from strix.interface.scan_setup import (
     build_targets_info,
     preflight_model_connection,
     prepare_run,
-    telemetry_start,
 )
 from strix.interface.tui.backend import TuiBackendServer, TuiController
 from strix.interface.tui.backend.live_view import TuiLiveView
@@ -37,7 +36,6 @@ from strix.interface.tui.sidecar import (
 )
 from strix.interface.utils import read_workspace_files
 from strix.report.state import ReportState, set_global_report_state
-from strix.telemetry import report_error, set_scan_phase
 from strix.utils.resource_paths import get_strix_resource_path
 
 
@@ -139,13 +137,11 @@ class GoTuiRuntime:
             await self._preflight_model()
         except Exception as exc:
             logger.exception("Go TUI setup model preflight failed")
-            report_error("model_connection_failed", exc)
             raise RuntimeError(f"Model connection failed: {exc}") from exc
 
     async def _preflight_model(self) -> None:
         model = (load_settings().llm.model or "").strip()
         self.controller.add_message("Verifying model connection...")
-        set_scan_phase("preflight")
         await preflight_model_connection(model)
         self.model_verified = True
 
@@ -184,13 +180,7 @@ class GoTuiRuntime:
             candidate.target = list(self.controller.targets)
             candidate.target_list = []
             build_targets_info(candidate)
-        try:
-            prepare_run(candidate)
-        except Exception as exc:
-            report_error("scan_preparation_failed", exc)
-            raise
-        telemetry_start(candidate)
-
+        prepare_run(candidate)
         vars(self.args).update(vars(candidate))
         self.init_run_state()
         self.start_scan()
@@ -202,21 +192,17 @@ class GoTuiRuntime:
         launch so the interface appears immediately.
         """
         model = (load_settings().llm.model or "").strip()
-        set_scan_phase("preflight")
         try:
             await preflight_model_connection(model)
         except Exception as exc:
             logger.exception("Go TUI scan preparation failed")
-            report_error("model_connection_failed", exc)
             self.controller.fail_preparation(str(exc))
             return
         try:
             persist_current()
             prepare_run(self.args)
-            telemetry_start(self.args)
         except Exception as exc:
             logger.exception("Go TUI scan preparation failed")
-            report_error("scan_preparation_failed", exc)
             self.controller.fail_preparation(str(exc))
             return
         self.controller.scan_state = "running"
@@ -255,7 +241,6 @@ class GoTuiRuntime:
             self.controller.scan_state = "completed" if report_status == "completed" else "stopped"
         except Exception as exc:
             logger.exception("Go TUI scan failed")
-            report_error("unhandled_exception", exc)
             if self.report_state is not None and self.report_state.scan_ended_exit_reason is None:
                 self.report_state.scan_ended_exit_reason = "error"
             self.scan_error = exc

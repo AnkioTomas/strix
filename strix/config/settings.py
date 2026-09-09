@@ -114,12 +114,6 @@ class RuntimeSettings(BaseSettings):
     max_context_images: int = Field(default=3, ge=0, alias="STRIX_MAX_CONTEXT_IMAGES")
 
 
-class TelemetrySettings(BaseSettings):
-    model_config = _BASE_CONFIG
-
-    enabled: bool = Field(default=True, alias="STRIX_TELEMETRY")
-
-
 WebSearchProvider = Literal["auto", "perplexity", "exa"]
 ExaSearchType = Literal["auto", "fast", "instant", "deep-lite", "deep", "deep-reasoning"]
 
@@ -174,6 +168,5 @@ class Settings(BaseSettings):
     dedupe: DedupeSettings = Field(default_factory=DedupeSettings)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
     context: ContextSettings = Field(default_factory=ContextSettings)
-    telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
     integrations: IntegrationSettings = Field(default_factory=IntegrationSettings)
     viewer: ViewerSettings = Field(default_factory=ViewerSettings)

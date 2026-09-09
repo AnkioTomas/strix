@@ -781,7 +781,7 @@ async def stop_agent(
             ``target_agent_id`` leaves-first. ``False`` stops only the
             target.
         reason: Optional human-readable reason for the stop, surfaced
-            in logs and telemetry.
+            in logs.
     """
     inner = _ctx(ctx)
     coordinator = coordinator_from_context(inner)

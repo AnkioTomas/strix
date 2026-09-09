@@ -1,10 +1,10 @@
 """Scan bootstrap shared by the CLI entry point and the TUI setup flow.
 
-Target resolution, run preparation, model preflight, and start-of-run
-telemetry live here so ``strix.interface.main`` (the CLI) and
-``strix.interface.tui.runtime`` (interactive setup) depend on one module
-instead of each other. Everything raises ordinary exceptions; rendering
-errors and exiting the process is the caller's job.
+Target resolution, run preparation, and model preflight live here so
+``strix.interface.main`` (the CLI) and ``strix.interface.tui.runtime``
+(interactive setup) depend on one module instead of each other. Everything
+raises ordinary exceptions; rendering errors and exiting the process is the
+caller's job.
 """
 
 from __future__ import annotations
@@ -24,14 +24,12 @@ from strix.interface.utils import (
     derive_local_base_name,
     generate_run_name,
     infer_target_type,
-    is_whitebox_scan,
     read_target_list_file,
     resolve_diff_scope_context,
     rewrite_localhost_targets,
     stage_api_specs,
     write_fetched_collection,
 )
-from strix.telemetry import posthog, scarf
 from strix.utils.api_spec import (
     SpecParseError,
     fetch_postman_collection,
@@ -220,20 +218,6 @@ def attach_workspace_mount(args: argparse.Namespace) -> None:
         }
     )
     args.local_sources = local_sources
-
-
-def telemetry_start(args: argparse.Namespace) -> None:
-    model = load_settings().llm.model
-    kwargs = {
-        "model": model,
-        "auth_mode": codex.auth_mode(model),
-        "scan_mode": args.scan_mode,
-        "is_whitebox": is_whitebox_scan(args.targets_info),
-        "interactive": not args.non_interactive,
-        "has_instructions": bool(args.instruction),
-    }
-    posthog.start(**kwargs)
-    scarf.start(**kwargs)
 
 
 def _persist_run_record(args: argparse.Namespace) -> None:

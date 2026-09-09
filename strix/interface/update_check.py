@@ -30,7 +30,7 @@ import requests
 from rich.console import Console
 from rich.prompt import Prompt
 
-from strix.telemetry._common import get_version
+from strix.interface.cli_args import get_version
 
 
 logger = logging.getLogger(__name__)

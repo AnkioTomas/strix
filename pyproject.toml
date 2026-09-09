@@ -248,13 +248,11 @@ ignore = [
 # MCP connection request in a test carries a dummy bearer token.
 "tests/test_runner_root_prompt.py" = ["S106"]
 # Stdlib HTTP handler overrides (do_GET/do_POST) and lazy imports that avoid a
-# circular dependency with strix.telemetry / strix.interface.viewer.report_pdf.
+# circular dependency with strix.interface.viewer.report_pdf.
 "strix/interface/viewer/server.py" = ["N802", "PLC0415"]
 "strix/interface/cloud/payment_proxy.py" = ["N802"]
-# Lazy telemetry import to avoid importing PostHog before the viewer starts.
-"strix/interface/viewer/cli.py" = ["PLC0415"]
 # Lazy imports inside functions to avoid circular dependency with
-# strix.telemetry / strix.report.dedupe / cvss.
+# strix.report.dedupe / cvss.
 "strix/tools/notes/tools.py" = ["PLC0415", "TC002"]
 "strix/tools/finish/tool.py" = ["PLC0415", "TC002"]
 "strix/tools/reporting/tool.py" = ["PLC0415", "TC002"]
@@ -306,7 +304,7 @@ ignore = [
 # Lazy import of strix.config.models avoids a circular dependency between the
 # report pipeline and the config layer.
 "strix/report/dedupe.py" = ["PLC0415"]
-"strix/telemetry/logging.py" = ["PLC0415"]
+"strix/logging_setup.py" = ["PLC0415"]
 "strix/config/models.py" = ["PLC0415"]
 # Heavy inference deps (httpx, openai) imported lazily so auth-status checks
 # don't pull them in.

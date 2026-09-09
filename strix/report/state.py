@@ -22,7 +22,6 @@ from strix.report.writer import (
     write_run_record,
     write_vulnerabilities,
 )
-from strix.telemetry import posthog, scarf
 
 
 if TYPE_CHECKING:
@@ -105,13 +104,6 @@ def _clean_title(title: str) -> str:
     return " ".join(_CONTROL_CHARS.sub(" ", title).split())
 
 
-def _number(value: Any) -> int | float:
-    try:
-        return float(value or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _parse_repo_full_name(uri: str) -> str | None:
     """Extract ``owner/repo`` from a git URL or slug, else None."""
     text = uri.strip().removesuffix(".git")
@@ -188,7 +180,6 @@ class ReportState:
         self.run_name = run_name
         self.run_id = run_name or f"run-{uuid4().hex[:8]}"
         self.start_time = datetime.now(UTC).isoformat()
-        self.process_start_time = self.start_time
         self.end_time: str | None = None
 
         self.vulnerability_reports: list[dict[str, Any]] = []
@@ -201,7 +192,6 @@ class ReportState:
         from strix.report.usage import LLMUsageLedger
 
         self._llm_usage = LLMUsageLedger()
-        self._telemetry_llm_usage_baseline: dict[str, Any] = {}
         auth_mode = codex.auth_mode(load_settings().llm.model)
         self._llm_usage.zero_cost = auth_mode == "subscription"
         self.run_record: dict[str, Any] = {
@@ -224,8 +214,6 @@ class ReportState:
         self._sarif_repo_ctx: dict[str, Any] | None = None
         self._sarif_repo_ctx_ready: bool = False
 
-        self.posthog_scan_ended_sent: bool = False
-        self.scarf_scan_ended_sent: bool = False
         self.scan_ended_exit_reason: str | None = None
 
     def get_run_dir(self) -> Path:
@@ -268,7 +256,6 @@ class ReportState:
                 self.scan_results = scan_results
                 self.final_scan_result = self._format_final_scan_result(scan_results)
             self._hydrate_llm_usage(data.get("llm_usage"))
-            self._telemetry_llm_usage_baseline = self._build_llm_usage_record()
             logger.info("report state hydrated run.json from %s", run_dir)
 
         json_path = run_dir / "vulnerabilities.json"
@@ -405,8 +392,6 @@ class ReportState:
 
         self.vulnerability_reports.append(report)
         logger.info(f"Added vulnerability report: {report_id} - {title}")
-        posthog.finding(severity, cwe=cwe, is_cve=bool(cve))
-        scarf.finding(severity, cwe=cwe, is_cve=bool(cve))
 
         if self.vulnerability_found_callback:
             self.vulnerability_found_callback(report)
@@ -534,25 +519,6 @@ class ReportState:
     def get_total_llm_usage(self) -> dict[str, Any]:
         return dict(self.run_record.get("llm_usage") or self._build_llm_usage_record())
 
-    def get_process_llm_usage(self) -> dict[str, int | float]:
-        """Return LLM usage accumulated since this process started."""
-        usage = self._llm_usage.to_record()
-        return {
-            key: max(
-                0, _number(usage.get(key)) - _number(self._telemetry_llm_usage_baseline.get(key))
-            )
-            for key in ("requests", "input_tokens", "output_tokens", "total_tokens", "cost")
-        }
-
-    def get_process_duration_seconds(self) -> float:
-        """Return this process's elapsed wall time for telemetry."""
-        try:
-            start = datetime.fromisoformat(self.process_start_time.replace("Z", "+00:00"))
-            duration = (datetime.now(start.tzinfo) - start).total_seconds()
-            return max(0.0, duration)
-        except (ValueError, TypeError, AttributeError):
-            return 0.0
-
     def get_total_llm_cost(self) -> float:
         """Live accumulated LLM cost, independent of the persisted run-record snapshot."""
         return self._llm_usage.total_cost
@@ -578,8 +544,6 @@ class ReportState:
 
         logger.info("Updated scan final fields")
         self.save_run_data(mark_complete=True)
-        posthog.end(self, exit_reason="finished_by_tool")
-        scarf.end(self, exit_reason="finished_by_tool")
 
     def record_mcp_connections(self, names: list[str]) -> None:
         """Note the MCP servers this run connected, and persist it.

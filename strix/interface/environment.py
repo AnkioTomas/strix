@@ -14,7 +14,6 @@ from strix.interface.utils import (
     image_exists,
     process_pull_line,
 )
-from strix.telemetry import report_error
 
 
 logger = logging.getLogger(__name__)
@@ -45,7 +44,6 @@ def validate_environment() -> None:
                 f"[red]STRIX_LLM={settings.llm.model} uses your ChatGPT subscription, "
                 "but you're not signed in.[/] Run [cyan]strix auth login chatgpt[/] first."
             )
-            report_error("subscription_not_signed_in")
             sys.exit(1)
         logger.info("Environment OK (ChatGPT subscription)")
         return
@@ -155,7 +153,6 @@ def validate_environment() -> None:
         console.print("\n")
         console.print(panel)
         console.print()
-        report_error("missing_required_config")
         sys.exit(1)
     logger.info(
         "Environment OK (optional missing: %s)",
@@ -183,7 +180,6 @@ def check_docker_installed() -> None:
             padding=(1, 2),
         )
         console.print("\n", panel, "\n")
-        report_error("docker_not_installed")
         sys.exit(1)
     logger.debug("Docker CLI present")
 
@@ -231,7 +227,6 @@ def pull_docker_image() -> None:
                 padding=(1, 2),
             )
             console.print(panel, "\n")
-            report_error("image_pull_failed", e)
             sys.exit(1)
 
     logger.info("Docker image %s ready", image)

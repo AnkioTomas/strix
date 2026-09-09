@@ -5,7 +5,6 @@ Strix Agent Interface
 
 import argparse
 import asyncio
-import contextlib
 import sys
 from pathlib import Path
 
@@ -29,7 +28,6 @@ from strix.interface.scan_setup import (
     ModelConnectionError,
     preflight_model_connection,
     prepare_run,
-    telemetry_start,
 )
 from strix.interface.update_check import (
     is_binary_install,
@@ -42,8 +40,7 @@ from strix.interface.utils import (
     build_final_stats_text,
 )
 from strix.llm.warmup import start_import_warmup, wait_for_import_warmup
-from strix.telemetry import posthog, report_error, scarf, set_scan_phase
-from strix.telemetry.logging import configure_dependency_logging
+from strix.logging_setup import configure_dependency_logging
 
 
 BEDROCK_MODEL_PREFIX = "bedrock/"
@@ -401,21 +398,17 @@ def _bootstrap_scan(args: argparse.Namespace) -> None:
     happen inside the TUI so the interface paints immediately instead of
     waiting on a model round trip.
     """
-    set_scan_phase("preflight")
     try:
         asyncio.run(warm_up_llm(show_model_warning=True))
     except ModelConnectionError as exc:
-        report_error("model_connection_failed", exc)
         _print_model_connection_error(exc, exc.model_name)
         sys.exit(1)
     persist_current()
     try:
         prepare_run(args)
     except ValueError as e:
-        report_error("scan_preparation_failed", e)
         _print_error_panel("SCAN PREPARATION FAILED", str(e))
         sys.exit(1)
-    telemetry_start(args)
 
 
 def main() -> None:
@@ -488,20 +481,18 @@ def main() -> None:
 
             asyncio.run(run_cli(args))
             # Headless runs have no user to quit: the agent either finished
-            # (already beaconed as finished_by_tool) or stopped on its own.
+            # or stopped on its own.
             exit_reason = "agent_stopped"
         else:
             asyncio.run(run_tui(args))
     except InteractiveSetupUnavailableError as exc:
         exit_reason = "error"
-        report_error("interactive_setup_unavailable", exc)
         _print_error_panel("INTERACTIVE SETUP UNAVAILABLE", str(exc))
         sys.exit(1)
     except KeyboardInterrupt:
         exit_reason = "interrupted"
-    except Exception as exc:
+    except Exception:
         exit_reason = "error"
-        report_error("unhandled_exception", exc)
         raise
     finally:
         report_state = get_global_report_state()
@@ -511,12 +502,6 @@ def main() -> None:
                 "stopped",
             )
             report_state.cleanup(status=status)
-            # Best-effort beacons on the way out. They reach the network, so a
-            # second Ctrl-C lands here; abandon them rather than trading a clean
-            # exit for a traceback.
-            with contextlib.suppress(KeyboardInterrupt, Exception):
-                posthog.end(report_state, exit_reason=exit_reason)
-                scarf.end(report_state, exit_reason=exit_reason)
 
     if not args.run_name:
         # Setup mode where the user quit before starting a scan: nothing ran.

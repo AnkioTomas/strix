@@ -489,16 +489,6 @@ class TuiController:
             self._viewer_httpd = httpd
             self.viewer_url = authorized_url(url, token)
             self.viewer_status = "running"
-            with contextlib.suppress(Exception):
-                from strix.telemetry import posthog
-
-                live = self.report_state.run_record.get("status") not in {
-                    "completed",
-                    "stopped",
-                    "failed",
-                    "interrupted",
-                }
-                posthog.viewer_opened(source="tui", live=live)
         except Exception:  # noqa: BLE001 - viewer startup failures must not crash the TUI
             self.viewer_status = "failed"
             return {"status": self.viewer_status, "error": "Viewer failed to start"}

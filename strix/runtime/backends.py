@@ -50,6 +50,12 @@ async def _docker_backend(
     client.strix_bind_mounts = bind_mounts or []
     options = DockerSandboxClientOptions(image=image, exposed_ports=exposed_ports)
     if container_id:
+        logger.info(
+            "Docker backend attaching container_id=%s image=%s ports=%s",
+            container_id[:12],
+            image,
+            list(exposed_ports),
+        )
         session = await client.attach_existing(
             container_id,
             image=image,
@@ -57,8 +63,15 @@ async def _docker_backend(
             exposed_ports=exposed_ports,
         )
     else:
+        logger.info(
+            "Docker backend creating container image=%s ports=%s mounts=%d",
+            image,
+            list(exposed_ports),
+            len(bind_mounts or []),
+        )
         session = await client.create(options=options, manifest=manifest)
     await session.start()
+    logger.info("Docker backend session.start() completed for image=%s", image)
     return client, session
 
 

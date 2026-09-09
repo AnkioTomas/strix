@@ -301,7 +301,7 @@ def _gitdir_from_pointer(git_file: Path) -> Path | None:
     return None
 
 
-async def create_or_reuse(
+async def create_or_reuse(  # noqa: PLR0915
     scan_id: str,
     *,
     image: str,
@@ -394,11 +394,14 @@ async def create_or_reuse(
     )
 
     logger.info(
-        "Creating sandbox session for scan %s (backend=%s, image=%s, reuse=%s)",
+        "Creating sandbox session for scan %s (backend=%s, image=%s, "
+        "reuse_container=%s, workspace=%s, bind_mounts=%s)",
         scan_id,
         backend_name,
         image,
-        bool(reuse_container_id),
+        (reuse_container_id[:12] if reuse_container_id else None),
+        host_workspace,
+        "; ".join(f"{m['source']}->{m['target']}" for m in bind_mounts) or "none",
     )
     report("Starting sandbox container")
     try:
@@ -414,7 +417,11 @@ async def create_or_reuse(
         caido_endpoint = await session.resolve_exposed_port(_CONTAINER_CAIDO_PORT)
         scheme = "https" if caido_endpoint.tls else "http"
         host_caido_url = f"{scheme}://{caido_endpoint.host}:{caido_endpoint.port}"
-        logger.debug("Caido host endpoint resolved: %s", host_caido_url)
+        logger.info(
+            "Caido proxy reachable from host at %s (container listens on %s)",
+            host_caido_url,
+            container_caido_url,
+        )
 
         # The Caido login + project setup polls the guest for a couple of seconds
         # and nothing needs the client before the first proxy tool call, so it
@@ -442,6 +449,12 @@ async def create_or_reuse(
                     "workspace": str(host_workspace.resolve()),
                 },
             )
+            logger.info(
+                "Persisted sandbox record for scan %s: container_id=%s workspace=%s",
+                scan_id,
+                container_id[:12],
+                host_workspace.resolve(),
+            )
 
         bundle = {
             "client": client,
@@ -453,9 +466,20 @@ async def create_or_reuse(
     except BaseException:
         # Until the bundle is cached, cleanup(scan_id) cannot find the
         # staging dir, so it is removed here.
+        logger.exception(
+            "Sandbox session setup failed for scan %s (backend=%s, image=%s, reuse=%s)",
+            scan_id,
+            backend_name,
+            image,
+            reuse_container_id[:12] if reuse_container_id else None,
+        )
         _remove_staging_dir(staging_dir)
         raise
-    logger.info("Sandbox session for scan %s ready and cached", scan_id)
+    logger.info(
+        "Sandbox session for scan %s ready and cached (container_id=%s)",
+        scan_id,
+        (_session_container_id(session) or "?")[:12],
+    )
     return bundle
 
 
@@ -469,6 +493,11 @@ async def _start_backend_session(
 ) -> tuple[Any, Any]:
     """Attach to ``reuse_container_id`` when possible; otherwise create a new container."""
     if reuse_container_id:
+        logger.info(
+            "Attempting to reuse sandbox container %s (image=%s)",
+            reuse_container_id[:12],
+            image,
+        )
         try:
             return await backend(
                 image=image,
@@ -480,10 +509,13 @@ async def _start_backend_session(
         except Exception as exc:  # noqa: BLE001
             # NotFound / image mismatch / attach failures → create fresh.
             logger.warning(
-                "Could not reuse container %s (%s); creating a new sandbox",
+                "Could not reuse container %s (%s: %s); creating a new sandbox",
                 reuse_container_id[:12],
+                type(exc).__name__,
                 exc,
+                exc_info=True,
             )
+    logger.info("Creating a new sandbox container (image=%s)", image)
     return await backend(
         image=image,
         manifest=manifest,

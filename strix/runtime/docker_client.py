@@ -311,7 +311,7 @@ class StrixDockerSandboxClient(DockerSandboxClient):
     # backend before ``create()``. Each item is ``{source, target, read_only}``.
     strix_bind_mounts: list[dict[str, Any]] | None = None
 
-    async def _create_container(
+    async def _create_container(  # noqa: PLR0912
         self,
         image: str,
         *,
@@ -397,23 +397,50 @@ class StrixDockerSandboxClient(DockerSandboxClient):
                     )
                 )
 
-        logger.debug(
-            "Creating sandbox container: image=%s caps=%s exposed_ports=%s",
-            image,
-            cap_add,
-            list(exposed_ports),
-        )
-        container = self.docker_client.containers.create(**create_kwargs)
         logger.info(
-            "Sandbox container created: id=%s image=%s",
+            "Creating sandbox container: image=%s network=%s exposed_ports=%s "
+            "caps=%s bind_mounts=%s labels=%s",
+            image,
+            create_kwargs.get("network") or "default",
+            list(exposed_ports),
+            cap_add,
+            _format_bind_specs(list(self.strix_bind_mounts or [])),
+            create_kwargs.get("labels") or {},
+        )
+        try:
+            container = self.docker_client.containers.create(**create_kwargs)
+        except Exception:
+            logger.exception(
+                "Failed to create sandbox container image=%s network=%s ports=%s mounts=%s",
+                image,
+                create_kwargs.get("network") or "default",
+                list(exposed_ports),
+                _format_bind_specs(list(self.strix_bind_mounts or [])),
+            )
+            raise
+        logger.info(
+            "Sandbox container created: id=%s image=%s (start pending)",
             container.short_id if hasattr(container, "short_id") else "?",
             image,
         )
         return container
 
     async def create(self, **kwargs: Any) -> SandboxSession:
-        session = await super().create(**kwargs)
-        return self._apply_sandbox_network_session(session)
+        try:
+            session = await super().create(**kwargs)
+        except Exception:
+            logger.exception("Failed to start sandbox session after container create")
+            raise
+        session = self._apply_sandbox_network_session(session)
+        container = getattr(getattr(session, "_inner", None), "_container", None)
+        if container is not None:
+            image = getattr(getattr(session, "_inner", None), "state", None)
+            _log_container_runtime(
+                container,
+                action="Started",
+                image=getattr(image, "image", None),
+            )
+        return session
 
     async def attach_existing(
         self,
@@ -429,8 +456,29 @@ class StrixDockerSandboxClient(DockerSandboxClient):
             docker.errors.NotFound: container id is gone.
             ContainerImageMismatchError: container image does not match ``image``.
         """
-        container = self.docker_client.containers.get(container_id)
+        try:
+            container = self.docker_client.containers.get(container_id)
+        except docker_errors.NotFound:
+            logger.warning(
+                "Cannot attach sandbox: container %s not found (removed or wrong daemon)",
+                container_id[:12],
+            )
+            raise
+        except (docker_errors.APIError, RequestException):
+            logger.exception(
+                "Cannot attach sandbox: docker API error looking up container %s",
+                container_id[:12],
+            )
+            raise
+
         if not _container_image_matches(container, image):
+            actual = ((getattr(container, "attrs", {}) or {}).get("Config") or {}).get("Image")
+            logger.error(
+                "Cannot attach sandbox: container %s image mismatch want=%r have=%r",
+                container_id[:12],
+                image,
+                actual,
+            )
             raise ContainerImageMismatchError(
                 f"container {container_id[:12]} image does not match {image!r}"
             )
@@ -442,8 +490,15 @@ class StrixDockerSandboxClient(DockerSandboxClient):
                 container.short_id if hasattr(container, "short_id") else container_id[:12],
                 container.status,
             )
-            container.start()
-            container.reload()
+            try:
+                container.start()
+                container.reload()
+            except Exception:
+                logger.exception(
+                    "Failed to start stopped sandbox container %s",
+                    container_id[:12],
+                )
+                raise
 
         resolved_id = container.id
         assert resolved_id is not None
@@ -465,11 +520,7 @@ class StrixDockerSandboxClient(DockerSandboxClient):
         inner._resume_workspace_probe_pending = True
         inner._set_start_state_preserved(workspace=True)
         session = self._wrap_session(inner, instrumentation=self._instrumentation)
-        logger.info(
-            "Attached existing sandbox container: id=%s image=%s",
-            container.short_id if hasattr(container, "short_id") else resolved_id[:12],
-            image,
-        )
+        _log_container_runtime(container, action="Attached", image=image)
         return self._apply_sandbox_network_session(session)
 
     def _apply_sandbox_network_session(self, session: SandboxSession) -> SandboxSession:
@@ -478,19 +529,37 @@ class StrixDockerSandboxClient(DockerSandboxClient):
         if network and isinstance(inner, DockerSandboxSession):
             inner.__class__ = StrixDockerSandboxSession
             cast("StrixDockerSandboxSession", inner).sandbox_network = network
+            logger.info("Sandbox session bound to docker network %s", network)
         return session
 
     async def stop(self, session: SandboxSession) -> None:
         """Stop the container without removing it (resume-friendly teardown)."""
         container_id = _session_container_id(session)
         if not container_id:
+            logger.warning("stop(): session has no container_id; nothing to stop")
             return
-        with contextlib.suppress(docker_errors.NotFound, docker_errors.APIError, RequestException):
+        try:
             container = self.docker_client.containers.get(container_id)
             container.reload()
-            if container.status == "running":
-                container.stop(timeout=10)
-                logger.info("Stopped sandbox container %s (retained)", container_id[:12])
+            if container.status != "running":
+                logger.info(
+                    "Sandbox container %s already %s (retained)",
+                    container_id[:12],
+                    container.status,
+                )
+                return
+            container.stop(timeout=10)
+            logger.info("Stopped sandbox container %s (retained for resume)", container_id[:12])
+        except docker_errors.NotFound:
+            logger.warning(
+                "stop(): sandbox container %s already gone",
+                container_id[:12],
+            )
+        except (docker_errors.APIError, RequestException):
+            logger.exception(
+                "stop(): failed to stop sandbox container %s",
+                container_id[:12],
+            )
 
     async def delete(self, session: SandboxSession) -> SandboxSession:
         container_id = _session_container_id(session)
@@ -502,8 +571,21 @@ class StrixDockerSandboxClient(DockerSandboxClient):
             # under requests.RequestException (not a subclass), so it escapes
             # an APIError-only suppress and surfaces a full traceback even
             # though this teardown is meant to be best-effort.
-            with contextlib.suppress(
-                docker_errors.NotFound, docker_errors.APIError, RequestException
-            ):
+            try:
                 self.docker_client.containers.get(container_id).kill()
-        return await super().delete(session)
+                logger.info("Killed sandbox container %s before delete", container_id[:12])
+            except (docker_errors.NotFound, docker_errors.APIError, RequestException) as exc:
+                logger.warning(
+                    "delete(): best-effort kill of %s failed: %s: %s",
+                    container_id[:12],
+                    type(exc).__name__,
+                    exc,
+                )
+        try:
+            return await super().delete(session)
+        except Exception:
+            logger.exception(
+                "delete(): SDK delete failed for container %s",
+                container_id[:12] if container_id else "?",
+            )
+            raise

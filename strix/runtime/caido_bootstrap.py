@@ -75,6 +75,12 @@ async def _login_as_guest(
         logger.debug("loginAsGuest attempt %d/%d failed: %s", i, attempts, last_err)
         await asyncio.sleep(min(2.0 * i, 8.0))
 
+    logger.error(
+        "loginAsGuest failed after %d attempts against %s: %s",
+        attempts,
+        container_url,
+        last_err,
+    )
     raise RuntimeError(f"loginAsGuest failed after {attempts} attempts: {last_err}")
 
 
@@ -94,6 +100,7 @@ async def bootstrap_caido(
     logger.info("Bootstrapping Caido client (host=%s, container=%s)", host_url, container_url)
 
     access_token = await _login_as_guest(session, container_url=container_url)
+    logger.info("Caido guest token acquired via in-container login")
 
     client = Client(host_url, auth=TokenAuthOptions(token=access_token))
     try:
@@ -108,8 +115,13 @@ async def bootstrap_caido(
     except BaseException:
         # The client never reaches the session bundle if connect or project
         # setup fails, so close it here to avoid leaking the transport.
+        logger.exception(
+            "Caido bootstrap failed (host=%s, container=%s)",
+            host_url,
+            container_url,
+        )
         with contextlib.suppress(Exception):
             await client.aclose()
         raise
-    logger.info("Caido project selected: %s", project.id)
+    logger.info("Caido project selected: %s (host=%s)", project.id, host_url)
     return client

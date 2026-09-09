@@ -64,6 +64,7 @@ class TaskSummary(BaseModel):
     scan_mode: str | None = None
     run_name: str | None = None
     viewer_url: str | None = None
+    viewer_proxy_url: str | None = None
     parent_task_id: str | None = None
     action: str | None = None
     pid: int | None = None

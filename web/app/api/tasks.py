@@ -21,6 +21,7 @@ from app.schemas import (
     TaskListResponse,
     TaskSummary,
 )
+from app.api.viewer_proxy import attach_viewer_proxy_url
 from app.security.auth import require_api_key
 from app.services.results import list_artifacts, resolve_artifact, workspace_run_dir
 from app.services.task_manager import TaskError, TaskManager
@@ -41,7 +42,7 @@ def _error(exc: TaskError) -> JSONResponse:
 
 
 def _summary(task: dict[str, Any]) -> TaskSummary:
-    return TaskSummary.model_validate(task)
+    return TaskSummary.model_validate(attach_viewer_proxy_url(task))
 
 
 @router.post("/tasks", status_code=202, response_model=TaskSummary)

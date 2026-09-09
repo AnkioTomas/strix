@@ -8,10 +8,13 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from app.api.health import router as health_router
+from app.api.session import router as session_router
 from app.api.tasks import router as tasks_router
+from app.api.viewer_proxy import router as viewer_proxy_router
 from app.config import get_settings
 from app.db import Database
 from app.services.task_manager import TaskManager
@@ -55,7 +58,10 @@ app = FastAPI(
 )
 
 app.include_router(health_router)
+app.include_router(session_router)
 app.include_router(tasks_router)
+app.include_router(viewer_proxy_router)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/")

@@ -3,388 +3,152 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Strix Security API</title>
-  <style>
-    :root {
-      --bg: #0f1419;
-      --panel: #1a2332;
-      --text: #e7ecf3;
-      --muted: #8b9bb4;
-      --accent: #3d9a6a;
-      --danger: #d45454;
-      --warn: #d4a017;
-      --border: #2a3548;
-      --mono: "IBM Plex Mono", "SF Mono", ui-monospace, monospace;
-      --sans: "IBM Plex Sans", "Segoe UI", sans-serif;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: var(--sans);
-      background:
-        radial-gradient(1200px 600px at 10% -10%, #1c3a2e 0%, transparent 55%),
-        radial-gradient(900px 500px at 100% 0%, #24304a 0%, transparent 50%),
-        var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-    }
-    header {
-      padding: 2rem 1.5rem 1rem;
-      max-width: 1100px;
-      margin: 0 auto;
-    }
-    header h1 {
-      margin: 0;
-      font-size: 1.75rem;
-      letter-spacing: -0.02em;
-    }
-    header p { color: var(--muted); margin: 0.4rem 0 0; }
-    main {
-      max-width: 1100px;
-      margin: 0 auto;
-      padding: 0 1.5rem 3rem;
-      display: grid;
-      gap: 1rem;
-    }
-    .row { display: grid; gap: 1rem; grid-template-columns: 1.1fr 0.9fr; }
-    @media (max-width: 900px) { .row { grid-template-columns: 1fr; } }
-    section {
-      background: color-mix(in srgb, var(--panel) 92%, black);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 1rem 1.1rem;
-    }
-    h2 { margin: 0 0 0.75rem; font-size: 1rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
-    label { display: block; font-size: 0.85rem; color: var(--muted); margin: 0.55rem 0 0.25rem; }
-    input, select, textarea, button {
-      font: inherit;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      background: #121821;
-      color: var(--text);
-      padding: 0.55rem 0.7rem;
-      width: 100%;
-    }
-    textarea { min-height: 72px; resize: vertical; }
-    button {
-      background: var(--accent);
-      border-color: transparent;
-      color: #04140c;
-      font-weight: 600;
-      cursor: pointer;
-      width: auto;
-      margin-top: 0.75rem;
-      margin-right: 0.4rem;
-    }
-    button.secondary { background: transparent; color: var(--text); border-color: var(--border); }
-    button.danger { background: var(--danger); color: white; }
-    .auth {
-      display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap;
-    }
-    .auth input { min-width: 220px; flex: 1; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-    th, td { text-align: left; padding: 0.45rem 0.3rem; border-bottom: 1px solid var(--border); vertical-align: top; }
-    th { color: var(--muted); font-weight: 500; }
-    .status { font-family: var(--mono); font-size: 0.8rem; }
-    .status.running, .status.starting, .status.queued { color: #6ec6ff; }
-    .status.completed { color: var(--accent); }
-    .status.failed, .status.cancelled { color: var(--danger); }
-    .sev-critical, .sev-high { color: var(--danger); }
-    .sev-medium { color: var(--warn); }
-    .sev-low, .sev-info { color: var(--muted); }
-    #events {
-      font-family: var(--mono);
-      font-size: 0.78rem;
-      max-height: 280px;
-      overflow: auto;
-      white-space: pre-wrap;
-      color: #b7c4d8;
-      background: #0c1118;
-      border-radius: 8px;
-      padding: 0.75rem;
-      border: 1px solid var(--border);
-    }
-    .hint { color: var(--muted); font-size: 0.8rem; margin-top: 0.4rem; }
-    .selected { outline: 1px solid var(--accent); }
-  </style>
+  <title>Strix</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/app.css" />
 </head>
 <body>
-  <header>
-    <h1>Strix Security API</h1>
-    <p>本地任务编排：排队调度、按任务查看漏洞、固定 Token 鉴权。</p>
-  </header>
-  <main>
-    <section>
-      <h2>固定 Token</h2>
-      <div class="auth">
-        <div style="flex:1">
-          <label>Authorization Bearer（与 STRIX_API_KEY 相同，无登录系统）</label>
-          <input id="apiKey" type="password" placeholder="粘贴固定 Token" autocomplete="off" />
-        </div>
-        <button class="secondary" id="saveKey">记住</button>
-        <button class="secondary" id="refreshAll">刷新</button>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <button type="button" class="icon-btn sidebar-toggle" id="sidebarToggle" aria-label="切换侧栏">☰</button>
+        <span class="brand-mark">Strix</span>
+        <span class="brand-sub">Local Security API</span>
       </div>
-      <p class="hint" id="admissionHint">排队状态：加载中…</p>
-    </section>
+      <div class="topbar-status" id="admissionHint">准入：…</div>
+      <div class="topbar-auth">
+        <input id="apiKey" type="password" placeholder="API Token" autocomplete="off" />
+        <button type="button" class="btn" id="saveKey">记住</button>
+        <button type="button" class="btn ghost" id="clearSession">清除会话</button>
+      </div>
+    </header>
 
-    <div class="row">
-      <section>
-        <h2>下发任务</h2>
-        <label>类型</label>
-        <select id="taskType">
-          <option value="pentest">pentest</option>
-          <option value="audit">audit</option>
-        </select>
-        <div id="pentestFields">
-          <label>Target URL / host</label>
-          <input id="target" placeholder="https://example.com" />
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <h2>任务</h2>
+        <button type="button" class="btn" id="newTaskBtn">新建</button>
+      </div>
+      <ul class="task-list" id="taskList"></ul>
+    </aside>
+
+    <main class="main">
+      <section class="panel create-panel hidden" id="createPanel">
+        <h2>新建任务</h2>
+        <div class="form-grid">
+          <label>类型
+            <select id="taskType">
+              <option value="pentest">pentest</option>
+              <option value="audit">audit</option>
+            </select>
+          </label>
+          <label>Scan mode
+            <select id="scanMode">
+              <option value="quick">quick</option>
+              <option value="standard" selected>standard</option>
+              <option value="deep">deep</option>
+            </select>
+          </label>
+          <label id="pentestFields" class="span-2">Target
+            <input id="target" placeholder="https://example.com" />
+          </label>
+          <div id="auditFields" class="span-2 hidden">
+            <label>Git HTTPS URL
+              <input id="gitUrl" placeholder="https://github.com/org/repo.git" />
+            </label>
+            <label>Branch
+              <input id="gitBranch" placeholder="main" />
+            </label>
+          </div>
+          <label class="span-2">Instruction
+            <textarea id="instruction" placeholder="重点测试 IDOR / SQL Injection …"></textarea>
+          </label>
         </div>
-        <div id="auditFields" style="display:none">
-          <label>Git HTTPS URL</label>
-          <input id="gitUrl" placeholder="https://github.com/org/repo.git" />
-          <label>Branch</label>
-          <input id="gitBranch" placeholder="main" />
+        <div class="actions">
+          <button type="button" class="btn" id="createTask">创建</button>
+          <button type="button" class="btn ghost" id="cancelCreate">取消</button>
         </div>
-        <label>Scan mode</label>
-        <select id="scanMode">
-          <option value="quick">quick</option>
-          <option value="standard" selected>standard</option>
-          <option value="deep">deep</option>
-        </select>
-        <label>Instruction</label>
-        <textarea id="instruction" placeholder="重点测试 IDOR / SQL Injection ..."></textarea>
-        <button id="createTask">创建任务</button>
       </section>
 
-      <section>
-        <h2>选中任务操作</h2>
-        <p class="hint">ID: <span id="selectedId">—</span></p>
-        <p class="hint">Viewer: <a id="viewerLink" href="#" target="_blank" rel="noopener">—</a></p>
-        <label>给 Agent 的消息（运行中实时投递；结束后会开 follow-up）</label>
-        <textarea id="message" placeholder="继续验证刚才的 SSRF..."></textarea>
-        <div>
-          <button id="sendMsg">发送消息</button>
-          <button class="secondary" id="retryBtn">重试</button>
-          <button class="secondary" id="retestBtn">复测</button>
-          <button class="danger" id="cancelBtn">取消</button>
-          <button class="secondary" id="reportBtn">下载报告</button>
-        </div>
-        <h2 style="margin-top:1rem">事件流</h2>
-        <div id="events">选择任务后显示事件…</div>
+      <section class="panel empty-state" id="emptyState">
+        <h2>选择或新建任务</h2>
+        <p>左侧列表选中任务后，可查看 Live Viewer、对话、漏洞、报告与工件。</p>
       </section>
-    </div>
 
-    <section>
-      <h2>任务列表</h2>
-      <table>
-        <thead>
-          <tr><th>ID</th><th>类型</th><th>目标</th><th>状态</th><th>创建时间</th></tr>
-        </thead>
-        <tbody id="tasksBody"></tbody>
-      </table>
-    </section>
+      <section class="panel detail-panel hidden" id="detailPanel">
+        <div class="detail-head">
+          <div>
+            <div class="detail-id" id="selectedId">—</div>
+            <div class="detail-meta" id="selectedMeta"></div>
+          </div>
+          <div class="actions wrap">
+            <button type="button" class="btn ghost" id="retryBtn">重试</button>
+            <button type="button" class="btn ghost" id="retestBtn">复测</button>
+            <button type="button" class="btn danger" id="cancelBtn">取消</button>
+            <button type="button" class="btn ghost" id="refreshAll">刷新</button>
+          </div>
+        </div>
 
-    <section>
-      <h2>当前任务漏洞</h2>
-      <p class="hint">仅显示选中任务的结果，不跨任务汇总。</p>
-      <table>
-        <thead>
-          <tr><th>严重性</th><th>标题</th><th>资产</th><th>位置</th></tr>
-        </thead>
-        <tbody id="findingsBody"></tbody>
-      </table>
-    </section>
-  </main>
-  <script>
-    const $ = (id) => document.getElementById(id);
-    let selected = null;
-    let es = null;
+        <nav class="tabs" id="tabs">
+          <button type="button" class="tab active" data-tab="overview">概览</button>
+          <button type="button" class="tab" data-tab="viewer">Live Viewer</button>
+          <button type="button" class="tab" data-tab="chat">对话</button>
+          <button type="button" class="tab" data-tab="findings">漏洞</button>
+          <button type="button" class="tab" data-tab="report">报告</button>
+          <button type="button" class="tab" data-tab="artifacts">工件</button>
+        </nav>
 
-    function headers() {
-      const h = { "Content-Type": "application/json" };
-      const key = localStorage.getItem("strix_api_key") || $("apiKey").value.trim();
-      if (key) h["Authorization"] = `Bearer ${key}`;
-      return h;
-    }
+        <div class="tab-pane active" id="tab-overview">
+          <dl class="kv" id="overviewKv"></dl>
+          <h3>事件</h3>
+          <pre class="log" id="events">选择任务后显示事件…</pre>
+        </div>
 
-    async function api(path, opts = {}) {
-      const res = await fetch(path, { ...opts, headers: { ...headers(), ...(opts.headers || {}) } });
-      const text = await res.text();
-      let data = null;
-      try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
-      if (!res.ok) throw new Error((data && data.error && data.error.message) || res.statusText);
-      return data;
-    }
+        <div class="tab-pane" id="tab-viewer">
+          <div class="viewer-toolbar">
+            <a id="viewerDirect" class="muted" href="#" target="_blank" rel="noopener">直连调试链接</a>
+            <span class="muted" id="viewerHint"></span>
+          </div>
+          <iframe id="viewerFrame" class="viewer-frame" title="Strix Viewer" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+        </div>
 
-    $("saveKey").onclick = () => {
-      localStorage.setItem("strix_api_key", $("apiKey").value.trim());
-      alert("Token 已记住（仅本机浏览器）");
-    };
-    $("apiKey").value = localStorage.getItem("strix_api_key") || "";
+        <div class="tab-pane" id="tab-chat">
+          <div class="chat-log" id="chatLog"></div>
+          <div class="chat-compose">
+            <textarea id="message" placeholder="给 Agent 的消息（运行中实时投递；结束后会开 follow-up）"></textarea>
+            <button type="button" class="btn" id="sendMsg">发送</button>
+          </div>
+        </div>
 
-    $("taskType").onchange = () => {
-      const audit = $("taskType").value === "audit";
-      $("auditFields").style.display = audit ? "block" : "none";
-      $("pentestFields").style.display = audit ? "none" : "block";
-    };
+        <div class="tab-pane" id="tab-findings">
+          <table class="data">
+            <thead>
+              <tr><th>严重性</th><th>标题</th><th>资产</th><th>位置</th></tr>
+            </thead>
+            <tbody id="findingsBody"></tbody>
+          </table>
+        </div>
 
-    async function refreshAdmission() {
-      try {
-        const h = await fetch("/health").then(r => r.json());
-        const a = h.admission || {};
-        const sys = a.system || {};
-        $("admissionHint").textContent =
-          `排队: queued=${h.queued_tasks} running=${h.running_tasks} ` +
-          `slots=${a.allowed_slots ?? "?"} (${a.reason || "n/a"}) ` +
-          `load=${sys.load_1m ?? "?"} / cpus=${sys.cpu_count ?? "?"}`;
-      } catch (e) {
-        $("admissionHint").textContent = `健康检查失败: ${e.message}`;
-      }
-    }
+        <div class="tab-pane" id="tab-report">
+          <div class="actions">
+            <button type="button" class="btn ghost" id="downloadReport">下载 Markdown</button>
+          </div>
+          <article class="report-md" id="reportView"></article>
+        </div>
 
-    $("createTask").onclick = async () => {
-      const type = $("taskType").value;
-      const body = {
-        type,
-        scan_mode: $("scanMode").value,
-        instruction: $("instruction").value || null,
-      };
-      if (type === "pentest") body.target = $("target").value.trim();
-      else body.source = { type: "git", url: $("gitUrl").value.trim(), branch: $("gitBranch").value.trim() || null };
-      try {
-        const task = await api("/api/v1/tasks", { method: "POST", body: JSON.stringify(body) });
-        selected = task.id;
-        await refresh();
-        watchEvents(task.id);
-      } catch (e) { alert(e.message); }
-    };
-
-    async function refresh() {
-      try {
-        const tasks = await api("/api/v1/tasks");
-        $("tasksBody").innerHTML = tasks.tasks.map(t => `
-          <tr class="${t.id === selected ? "selected" : ""}" data-id="${t.id}" style="cursor:pointer">
-            <td>${t.id}</td>
-            <td>${t.type}</td>
-            <td>${t.target || t.source_url || ""}</td>
-            <td class="status ${t.status}">${t.status}</td>
-            <td>${t.created_at}</td>
-          </tr>`).join("");
-        [...$("tasksBody").querySelectorAll("tr")].forEach(tr => {
-          tr.onclick = () => {
-            selected = tr.dataset.id;
-            $("selectedId").textContent = selected;
-            const task = (tasks.tasks || []).find(t => t.id === selected);
-            const link = $("viewerLink");
-            if (task && task.viewer_url) {
-              link.href = task.viewer_url;
-              link.textContent = task.viewer_url;
-            } else {
-              link.href = "#";
-              link.textContent = "（运行后生成）";
-            }
-            watchEvents(selected);
-            refresh();
-          };
-        });
-        const findings = selected
-          ? await api(`/api/v1/tasks/${selected}/results`).catch(() => ({ findings: [] }))
-          : { findings: [] };
-        $("findingsBody").innerHTML = (findings.findings || []).map(f => {
-          const loc = f.location || {};
-          const where = loc.file
-            ? `${loc.file}:${loc.line || ""}`
-            : (loc.url || loc.endpoint || "");
-          return `
-          <tr>
-            <td class="sev-${(f.severity||'').toLowerCase()}">${f.severity || ""}</td>
-            <td>${f.title}</td>
-            <td>${f.asset || ""}</td>
-            <td>${where}</td>
-          </tr>`;
-        }).join("") || `<tr><td colspan="4" class="hint">${selected ? "该任务暂无漏洞" : "先选中一个任务"}</td></tr>`;
-        await refreshAdmission();
-      } catch (e) {
-        $("tasksBody").innerHTML = `<tr><td colspan="5">${e.message}</td></tr>`;
-      }
-    }
-
-    function watchEvents(taskId) {
-      if (es) es.close();
-      $("events").textContent = "连接事件流…\n";
-      const key = localStorage.getItem("strix_api_key") || $("apiKey").value.trim();
-      // EventSource cannot set Authorization; fall back to polling when key required.
-      if (key) {
-        pollEvents(taskId);
-        return;
-      }
-      es = new EventSource(`/api/v1/tasks/${taskId}/events/stream`);
-      es.addEventListener("progress", (ev) => {
-        const item = JSON.parse(ev.data);
-        $("events").textContent += `[${item.type || "event"}] ${item.message || ""}\n`;
-        $("events").scrollTop = $("events").scrollHeight;
-      });
-      es.addEventListener("status", (ev) => {
-        const item = JSON.parse(ev.data);
-        $("events").textContent += `— status=${item.status}\n`;
-      });
-      es.addEventListener("done", () => { es.close(); refresh(); });
-      es.onerror = () => { es.close(); pollEvents(taskId); };
-    }
-
-    async function pollEvents(taskId) {
-      try {
-        const data = await api(`/api/v1/tasks/${taskId}/events`);
-        $("events").textContent = (data.events || []).map(e =>
-          `[${e.type || "event"}] ${e.message || ""}`
-        ).join("\n") || "(暂无事件)";
-      } catch (e) {
-        $("events").textContent = e.message;
-      }
-    }
-
-    $("sendMsg").onclick = async () => {
-      if (!selected) return alert("先选任务");
-      try {
-        await api(`/api/v1/tasks/${selected}/messages`, {
-          method: "POST",
-          body: JSON.stringify({ content: $("message").value }),
-        });
-        $("message").value = "";
-        await refresh();
-      } catch (e) { alert(e.message); }
-    };
-    $("retryBtn").onclick = async () => {
-      if (!selected) return;
-      try { const t = await api(`/api/v1/tasks/${selected}/retry`, { method: "POST" }); selected = t.id; await refresh(); }
-      catch (e) { alert(e.message); }
-    };
-    $("retestBtn").onclick = async () => {
-      if (!selected) return;
-      try { const t = await api(`/api/v1/tasks/${selected}/retest`, { method: "POST" }); selected = t.id; await refresh(); }
-      catch (e) { alert(e.message); }
-    };
-    $("cancelBtn").onclick = async () => {
-      if (!selected) return;
-      try { await api(`/api/v1/tasks/${selected}/cancel`, { method: "POST" }); await refresh(); }
-      catch (e) { alert(e.message); }
-    };
-    $("reportBtn").onclick = async () => {
-      if (!selected) return;
-      try {
-        const data = await api(`/api/v1/tasks/${selected}/report`);
-        const blob = new Blob([data.content || ""], { type: "text/markdown" });
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = `${selected}-report.md`;
-        a.click();
-      } catch (e) { alert(e.message); }
-    };
-
-    $("refreshAll").onclick = refresh;
-    $("selectedId").textContent = "—";
-    refresh();
-    setInterval(refresh, 8000);
-  </script>
+        <div class="tab-pane" id="tab-artifacts">
+          <table class="data">
+            <thead>
+              <tr><th>名称</th><th>路径</th><th>大小</th><th></th></tr>
+            </thead>
+            <tbody id="artifactsBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/app.js"></script>
 </body>
 </html>

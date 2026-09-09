@@ -81,6 +81,8 @@ def test_inject_fetch_rewrite_contains_bootstrap():
     assert "Past runs" in text
     assert "Run in the cloud" in text
     assert "Run this pentest with more depth" in text
+    assert "overflow: hidden" in text
+    assert "zoom: 1" in text
     # Idempotent
     again = _inject_fetch_rewrite(out, "/api/v1/tasks/task_1/viewer")
     assert again.count(b"strix-viewer-proxy-bootstrap") == 1

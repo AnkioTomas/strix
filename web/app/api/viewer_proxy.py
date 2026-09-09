@@ -75,6 +75,34 @@ def _viewer_proxy_bootstrap(proxy_prefix: str) -> str:
     hide_labels = list(_PROXY_HIDE_NAV_LABELS)
     return f"""<style id="strix-viewer-proxy-chrome">
 .strix-proxy-hide {{ display: none !important; }}
+/* Fit iframe at 100% zoom: scroll inside main column, not the document/iframe chrome. */
+html {{
+  height: 100% !important;
+  overflow: hidden !important;
+  zoom: 1 !important;
+}}
+html, body {{
+  height: 100% !important;
+  max-height: 100% !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+}}
+#root {{
+  height: 100% !important;
+  overflow: hidden !important;
+}}
+#root > div {{
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow: hidden !important;
+}}
+#root > div > div:last-child {{
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow: auto !important;
+  -webkit-overflow-scrolling: touch;
+}}
 </style>
 <script id="strix-viewer-proxy-bootstrap">
 (function () {{

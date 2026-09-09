@@ -64,6 +64,8 @@
     document.querySelectorAll(".tab-pane").forEach((el) => {
       el.classList.toggle("active", el.id === `tab-${name}`);
     });
+    document.querySelector(".app")?.classList.toggle("viewer-focus", name === "viewer");
+    $("detailPanel")?.classList.toggle("viewer-mode", name === "viewer");
     if (name === "viewer") loadViewer();
     if (name === "report") loadReport();
     if (name === "findings") loadFindings();

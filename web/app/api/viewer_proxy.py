@@ -58,19 +58,31 @@ def parse_local_viewer(viewer_url: str) -> tuple[str, int]:
     return base, port
 
 
-def _inject_fetch_rewrite(html: bytes, proxy_prefix: str) -> bytes:
-    """Rewrite absolute /api/* fetches so the Viewer SPA stays under the proxy prefix."""
-    try:
-        text = html.decode("utf-8")
-    except UnicodeDecodeError:
-        return html
-    if "strix-viewer-proxy-bootstrap" in text:
-        return html
-    # Keep prefix without trailing slash; SPA calls start with "/api/..."
+# Sidebar / topbar chrome that belongs to the standalone OSS viewer, not the
+# embedded task console. Matched by visible label text (SPA class names churn).
+_PROXY_HIDE_NAV_LABELS = (
+    "Past runs",
+    "Feedback & support",
+    "PR Security Reviews",
+    "Integrations",
+    "Members",
+)
+
+
+def _viewer_proxy_bootstrap(proxy_prefix: str) -> str:
+    """Fetch rewrite + hide Cloud/marketing chrome when Viewer is iframed."""
     prefix = proxy_prefix.rstrip("/")
-    bootstrap = f"""<script id="strix-viewer-proxy-bootstrap">
+    hide_labels = list(_PROXY_HIDE_NAV_LABELS)
+    return f"""<style id="strix-viewer-proxy-chrome">
+.strix-proxy-hide {{ display: none !important; }}
+</style>
+<script id="strix-viewer-proxy-bootstrap">
 (function () {{
   var PREFIX = {prefix!r};
+  var HIDE_LABELS = {hide_labels!r};
+  var hideSet = Object.create(null);
+  for (var i = 0; i < HIDE_LABELS.length; i++) hideSet[HIDE_LABELS[i]] = 1;
+
   var origFetch = window.fetch.bind(window);
   function rewrite(url) {{
     if (typeof url !== "string") return url;
@@ -95,8 +107,92 @@ def _inject_fetch_rewrite(html: bytes, proxy_prefix: str) -> bytes:
     }}
     return origFetch(input, init);
   }};
+
+  function hide(el) {{
+    if (el && !el.classList.contains("strix-proxy-hide")) {{
+      el.classList.add("strix-proxy-hide");
+    }}
+  }}
+
+  function buttonMatchesHideLabel(el) {{
+    var spans = el.querySelectorAll("span");
+    for (var i = 0; i < spans.length; i++) {{
+      var t = (spans[i].textContent || "").trim();
+      if (hideSet[t]) return true;
+    }}
+    return false;
+  }}
+
+  function scrubChrome() {{
+    var aside = document.querySelector("aside");
+    if (aside) {{
+      var header = aside.querySelector(":scope > header");
+      if (header) hide(header);
+      var section = aside.querySelector(":scope > section");
+      if (section) hide(section);
+      var nav = aside.querySelector("nav");
+      if (nav) {{
+        var nodes = nav.querySelectorAll("button, hr");
+        for (var i = 0; i < nodes.length; i++) {{
+          var el = nodes[i];
+          if (el.tagName === "HR") {{
+            hide(el);
+          }} else if (buttonMatchesHideLabel(el)) {{
+            hide(el);
+          }}
+        }}
+      }}
+    }}
+    var links = document.querySelectorAll("a");
+    for (var j = 0; j < links.length; j++) {{
+      var a = links[j];
+      var text = (a.textContent || "").replace(/\\s+/g, " ").trim();
+      if (text.indexOf("Run in the cloud") !== -1) hide(a);
+    }}
+    var paras = document.querySelectorAll("p");
+    for (var k = 0; k < paras.length; k++) {{
+      var p = paras[k];
+      var pt = (p.textContent || "").replace(/\\s+/g, " ").trim();
+      if (pt === "Run this pentest with more depth" && p.parentElement) {{
+        hide(p.parentElement);
+      }}
+    }}
+  }}
+
+  var scheduled = false;
+  function scheduleScrub() {{
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(function () {{
+      scheduled = false;
+      scrubChrome();
+    }});
+  }}
+
+  if (typeof MutationObserver !== "undefined") {{
+    new MutationObserver(scheduleScrub).observe(document.documentElement, {{
+      childList: true,
+      subtree: true,
+    }});
+  }}
+  if (document.readyState === "loading") {{
+    document.addEventListener("DOMContentLoaded", scrubChrome);
+  }} else {{
+    scrubChrome();
+  }}
 }})();
 </script>"""
+
+
+def _inject_fetch_rewrite(html: bytes, proxy_prefix: str) -> bytes:
+    """Inject fetch rewrite + chrome-hide bootstrap into Viewer HTML."""
+    try:
+        text = html.decode("utf-8")
+    except UnicodeDecodeError:
+        return html
+    if "strix-viewer-proxy-bootstrap" in text:
+        return html
+    bootstrap = _viewer_proxy_bootstrap(proxy_prefix)
     lower = text.lower()
     idx = lower.find("</head>")
     if idx == -1:

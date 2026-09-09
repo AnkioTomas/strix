@@ -126,7 +126,11 @@ curl -sS -X POST http://127.0.0.1:8787/api/v1/tasks \
   → 校验 session/Bearer
   → 仅允许上游 127.0.0.1/localhost
   → 服务端注入 strix_viewer_session_{port}=viewer_token
-  → 对 index.html 注入 fetch 改写（把 /api/* 指回 proxy 前缀）
+  → 对 index.html 注入 bootstrap：
+       · fetch 改写（/api/* → proxy 前缀）
+       · 隐藏 OSS Viewer 营销壳（侧栏 Strix/Local 顶栏、Past runs /
+         Feedback / PR Reviews / Integrations / Members、Local viewer 底栏、
+         「Run in the cloud」按钮、「Run this pentest with more depth」升级卡）
 ```
 
 任务 JSON 字段：

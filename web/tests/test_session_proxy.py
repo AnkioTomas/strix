@@ -76,6 +76,14 @@ def test_inject_fetch_rewrite_contains_bootstrap():
     assert "strix-viewer-proxy-bootstrap" in text
     assert "/api/v1/tasks/task_1/viewer" in text
     assert "window.fetch" in text
+    assert "strix-viewer-proxy-chrome" in text
+    assert "strix-proxy-hide" in text
+    assert "Past runs" in text
+    assert "Run in the cloud" in text
+    assert "Run this pentest with more depth" in text
+    # Idempotent
+    again = _inject_fetch_rewrite(out, "/api/v1/tasks/task_1/viewer")
+    assert again.count(b"strix-viewer-proxy-bootstrap") == 1
 
 
 def test_viewer_proxy_not_ready(auth_client: TestClient):

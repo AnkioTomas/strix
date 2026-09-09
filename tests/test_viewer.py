@@ -250,123 +250,24 @@ def test_server_serves_api_and_static(tmp_path: Path, monkeypatch: pytest.Monkey
         httpd.server_close()
 
 
-def test_server_event_endpoint_forwards_cta(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    run_dir = _make_run(tmp_path, "evt", status="running", end_time=None)
-    assets = tmp_path / "bundle"
-    assets.mkdir()
-    (assets / "index.html").write_text("x", encoding="utf-8")
-    monkeypatch.setattr("strix.interface.viewer.server.bundle_dir", lambda: assets)
-
-    seen: list[tuple[str, str | None]] = []
-    monkeypatch.setattr(
-        "strix.telemetry.posthog.viewer_cta_clicked",
-        lambda cta, surface=None: seen.append((cta, surface)),
-    )
-
-    httpd, url, _ = serve(run_dir, open_browser=False)
-    try:
-        body = json.dumps(
-            {"event": "cta_clicked", "cta": "PR reviews", "surface": "sidebar_nav"}
-        ).encode()
-        req = urllib.request.Request(  # noqa: S310 - localhost test server
-            f"{url}/api/event", data=body, headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req) as resp:  # noqa: S310  # nosec B310
-            assert resp.status == 204
-        assert seen == [("PR reviews", "sidebar_nav")]
-    finally:
-        httpd.shutdown()
-        httpd.server_close()
-
-
-def test_server_event_endpoint_forwards_email_funnel(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    run_dir = _make_run(tmp_path, "evt2", status="running", end_time=None)
-    assets = tmp_path / "bundle"
-    assets.mkdir()
-    (assets / "index.html").write_text("x", encoding="utf-8")
-    monkeypatch.setattr("strix.interface.viewer.server.bundle_dir", lambda: assets)
-
-    seen: list[tuple[str, str | None]] = []
-    monkeypatch.setattr(
-        "strix.telemetry.posthog.viewer_email_event",
-        lambda step, purpose=None: seen.append((step, purpose)),
-    )
-
-    httpd, url, _ = serve(run_dir, open_browser=False)
-    try:
-        # A whitelisted funnel event is forwarded; an unknown event is ignored.
-        for payload, expected in (
-            ({"event": "email_verified", "purpose": "report"}, [("email_verified", "report")]),
-            ({"event": "not_a_real_event"}, [("email_verified", "report")]),
-        ):
-            req = urllib.request.Request(  # noqa: S310 - localhost test server
-                f"{url}/api/event",
-                data=json.dumps(payload).encode(),
-                headers={"Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(req) as resp:  # noqa: S310  # nosec B310
-                assert resp.status == 204
-            assert seen == expected
-    finally:
-        httpd.shutdown()
-        httpd.server_close()
-
-
-def test_server_event_endpoint_forwards_agent_steered(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    run_dir = _make_run(tmp_path, "steerevt", status="running", end_time=None)
-    _bundle(tmp_path, monkeypatch)
-
-    seen: list[bool] = []
-    monkeypatch.setattr("strix.telemetry.posthog.viewer_agent_steered", lambda: seen.append(True))
-
-    httpd, url, _ = serve(run_dir, open_browser=False)
-    try:
-        req = urllib.request.Request(  # noqa: S310 - localhost test server
-            f"{url}/api/event",
-            data=json.dumps({"event": "agent_steered"}).encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req) as resp:  # noqa: S310  # nosec B310
-            assert resp.status == 204
-        assert seen == [True]
-    finally:
-        httpd.shutdown()
-        httpd.server_close()
-
-
-def test_feedback_records_telemetry_on_success(
+def test_feedback_requires_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run_dir = _make_run(tmp_path, "fbtel", status="running", end_time=None)
     _bundle(tmp_path, monkeypatch)
 
-    sent: list[bool] = []
     monkeypatch.setattr("strix.interface.viewer.auth.feedback_submit", lambda *_a: None)
-    monkeypatch.setattr(
-        "strix.telemetry.posthog.viewer_feedback_submitted", lambda: sent.append(True)
-    )
 
     httpd, url, token = serve(run_dir, open_browser=False)
     try:
         cookie = _session_cookie(url, token)
-        # A successful, session-holding submission relays and records telemetry.
         status, _ = _post(
             url, "/api/feedback", {"email": "a@b.com", "message": "hi"}, cookie=cookie
         )
         assert status == 200
-        assert sent == [True]
 
-        # A cookie-less caller is rejected and records nothing.
-        sent.clear()
         status, _ = _post(url, "/api/feedback", {"email": "a@b.com", "message": "hi"})
         assert status == 403
-        assert sent == []
     finally:
         httpd.shutdown()
         httpd.server_close()

@@ -6,7 +6,7 @@
 
 1. 列出 / 创建任务（pentest + audit）
 2. 按系统负载排队（内存不足 / load 过高时不放行，任务留在 `queued`）
-3. 取消 / 重试 / 复测
+3. 取消 / 重试 / 续跑 / 复测
 4. 事件查询 + SSE
 5. 运行中实时与 Agent 交互（viewer steer / `POST .../messages`）
 6. 报告 / artifacts 下载（同源）
@@ -33,24 +33,49 @@ export STRIX_API_KEY="replace-me"
 
 ## 启动
 
+推荐用仓库根目录的启动工具（自动处理 `.env`、依赖、`PYTHONPATH`）：
+
+```bash
+# 仓库根目录
+./scripts/start-web.sh
+# 或
+make web
+
+# 可选
+./scripts/start-web.sh --reload          # 开发热重载
+./scripts/start-web.sh --host 0.0.0.0 --port 8787
+```
+
+首次运行若没有 `web/.env`，脚本会从 `.env.example` 复制一份。**扫描真正依赖** `STRIX_LLM` + `LLM_API_KEY`（会灌进进程环境）；缺了它们 API 能起来，任务会挂。
+
+等价手写启动：
+
 ```bash
 cd web
+cp -n .env.example .env   # 首次
+# 编辑 web/.env
+
 pip install -r requirements.txt   # 或: uv pip install -r requirements.txt
-
-cp .env.example .env              # 首次：写入 Token / LLM 等
-# 编辑 web/.env —— 扫描依赖 STRIX_LLM + LLM_API_KEY（会灌进进程环境）
-
 PYTHONPATH=. python -m app
 # → http://127.0.0.1:8787
 ```
 
 `web/.env` 在启动时通过 `python-dotenv` 载入 **`os.environ`**（shell 已 export 的变量优先生效）。只靠 pydantic `env_file` 不够：`STRIX_LLM` 等是 Strix 内核读环境变量，不在 web `Settings` 里。
 
-超时相关（写进 `.env` 即可）：
+常用环境变量（写进 `.env` 即可）：
 
 | 变量 | 默认 | 含义 |
 |------|------|------|
+| `STRIX_API_KEY` | （空） | Bearer Token；空且未关鉴权则拒绝 |
+| `STRIX_API_HOST` / `STRIX_API_PORT` | `127.0.0.1` / `8787` | 监听地址 |
+| `STRIX_LLM` | — | LiteLLM 模型 id（扫描必需） |
+| `LLM_API_KEY` | — | LLM 密钥（扫描必需） |
+| `OPENAI_API_BASE` / `LLM_API_BASE` | — | 本地/兼容 OpenAI 的 base URL |
 | `LLM_TIMEOUT` | 300 | 所有 AI/LLM 请求超时（秒） |
+| `STRIX_MAX_CONCURRENT` | 1 | 同时跑的扫描数 |
+| `STRIX_MIN_FREE_MEMORY_GB` | 2.0 | 可用内存低于此值则继续排队 |
+| `STRIX_MAX_LOAD_PER_CPU` | 1.5 | load1 / cpu_count 上限 |
+| `STRIX_ALLOW_PRIVATE_TARGETS` | 1 | 是否允许扫私网/localhost |
 
 浏览器根路径是控制台（`web/static/`：`index.html` + `css/` + `js/`）；静态资源在 `/static/*`。漏洞与报告页用 [Penna Markdown](https://penna.ankio.net/guide/getting-started) 只读渲染器（CDN `penna-markdown@0.2.5`）。OpenAPI 在 `/docs`。`GET /health` 返回 `admission`（当前是否放行、load/内存快照）。
 
@@ -71,11 +96,28 @@ PYTHONPATH=. python -m app
 | GET | `/api/v1/tasks/{id}/report` | Markdown 报告 |
 | GET | `/api/v1/tasks/{id}/events` | Agent 事件 |
 | GET | `/api/v1/tasks/{id}/events/stream` | SSE |
+| GET | `/api/v1/tasks/{id}/messages` | 消息历史 |
 | POST | `/api/v1/tasks/{id}/messages` | 用户消息 / follow-up |
 | GET | `/api/v1/tasks/{id}/artifacts` | 产物列表 |
 | GET | `/api/v1/tasks/{id}/artifacts/{path}` | 下载工件（含报告截图） |
 | * | `/api/v1/tasks/{id}/viewer/...` | 同源反代 Live Viewer |
 | GET | `/health` | 健康 + 准入状态 |
+
+创建任务示例：
+
+```bash
+# Black-box pentest
+curl -sS -X POST http://127.0.0.1:8787/api/v1/tasks \
+  -H "Authorization: Bearer $STRIX_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"pentest","target":"http://127.0.0.1:3000","scan_mode":"quick"}'
+
+# White-box audit（本地目录）
+curl -sS -X POST http://127.0.0.1:8787/api/v1/tasks \
+  -H "Authorization: Bearer $STRIX_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"audit","source":{"type":"local","path":"/path/to/app"},"scan_mode":"quick"}'
+```
 
 ## Viewer 代理
 

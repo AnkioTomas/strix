@@ -196,6 +196,18 @@ The dashboard shows the findings, a live map of the agent team, and past runs. N
 
 See the [viewer documentation](https://docs.strix.ai/usage/viewer) for the options and for reaching the viewer from another machine.
 
+### Local Security API (`web/`)
+
+Need a task queue, HTTP API, and browser console on top of local Strix (create / cancel / retry / resume / retest, SSE events, agent chat, report download) without touching the Cloud product? Use the orchestration layer in `web/`:
+
+```bash
+# From the repo root — creates web/.env from .env.example on first run
+./scripts/start-web.sh
+# or: make web
+```
+
+Then open `http://127.0.0.1:8787/` (console) or `/docs` (OpenAPI). Configure `STRIX_API_KEY`, `STRIX_LLM`, and `LLM_API_KEY` in `web/.env`. Details: [`web/README.md`](web/README.md).
+
 ---
 
 ## Usage Examples

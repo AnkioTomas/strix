@@ -78,6 +78,58 @@ def resolve_report_package(run_dir: Path) -> Path | None:
     return zip_path if zip_path.is_file() else None
 
 
+def summarize_llm_usage(raw: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Flatten run.json ``llm_usage`` into overview-friendly totals."""
+    if not isinstance(raw, dict) or not raw:
+        return None
+    cached = 0
+    cache_write = 0
+    details = raw.get("input_tokens_details")
+    if isinstance(details, list):
+        for item in details:
+            if not isinstance(item, dict):
+                continue
+            cached += int(item.get("cached_tokens") or 0)
+            cache_write += int(item.get("cache_write_tokens") or 0)
+    elif isinstance(details, dict):
+        cached = int(details.get("cached_tokens") or 0)
+        cache_write = int(details.get("cache_write_tokens") or 0)
+    return {
+        "requests": int(raw.get("requests") or 0),
+        "input_tokens": int(raw.get("input_tokens") or 0),
+        "output_tokens": int(raw.get("output_tokens") or 0),
+        "cached_tokens": cached,
+        "cache_write_tokens": cache_write,
+        "total_tokens": int(raw.get("total_tokens") or 0),
+        "cost": raw.get("cost"),
+    }
+
+
+def read_run_overview(run_dir: Path) -> dict[str, Any]:
+    """Scan timing + token totals for the task overview panel."""
+    from datetime import datetime
+
+    record = read_run_record(run_dir)
+    started = record.get("start_time")
+    finished = record.get("end_time")
+    duration_seconds: float | None = None
+    if isinstance(started, str) and isinstance(finished, str):
+        try:
+            start_dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
+            end_dt = datetime.fromisoformat(finished.replace("Z", "+00:00"))
+            duration_seconds = max(0.0, (end_dt - start_dt).total_seconds())
+        except ValueError:
+            duration_seconds = None
+    return {
+        "scan_started_at": started if isinstance(started, str) else None,
+        "scan_finished_at": finished if isinstance(finished, str) else None,
+        "duration_seconds": duration_seconds,
+        "llm_usage": summarize_llm_usage(
+            record.get("llm_usage") if isinstance(record.get("llm_usage"), dict) else None
+        ),
+    }
+
+
 def read_run_record(run_dir: Path) -> dict[str, Any]:
     path = run_dir / "run.json"
     if not path.is_file():

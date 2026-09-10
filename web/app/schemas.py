@@ -35,12 +35,22 @@ class LocalSource(BaseModel):
 Source = GitSource | LocalSource
 
 
+class LLMUsageSummary(BaseModel):
+    requests: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    cache_write_tokens: int = 0
+    total_tokens: int = 0
+    cost: float | None = None
+
+
 class CreateTaskRequest(BaseModel):
     type: TaskType
     target: str | None = None
     source: Source | None = None
     instruction: str | None = None
-    scan_mode: ScanMode = "standard"
+    scan_mode: ScanMode = "deep"
     max_budget: float | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
@@ -110,6 +120,10 @@ class TaskSummary(BaseModel):
     started_at: str | None = None
     finished_at: str | None = None
     updated_at: str | None = None
+    scan_started_at: str | None = None
+    scan_finished_at: str | None = None
+    duration_seconds: float | None = None
+    llm_usage: LLMUsageSummary | None = None
 
 
 class TaskListResponse(BaseModel):

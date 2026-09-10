@@ -116,6 +116,39 @@ def test_cancel_queued(client: TestClient):
     assert cancelled.json()["status"] in {"cancelled", "cancelling"}
 
 
+def test_run_overview_tokens(tmp_path: Path):
+    from app.services.results import read_run_overview
+
+    run_dir = tmp_path / "strix_runs" / "demo"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "run_name": "demo",
+                "start_time": "2026-01-01T00:00:00+00:00",
+                "end_time": "2026-01-01T01:30:00+00:00",
+                "llm_usage": {
+                    "requests": 3,
+                    "input_tokens": 1000,
+                    "output_tokens": 200,
+                    "total_tokens": 1200,
+                    "input_tokens_details": [
+                        {"cached_tokens": 400, "cache_write_tokens": 50}
+                    ],
+                    "cost": 0.12,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    overview = read_run_overview(run_dir)
+    assert overview["duration_seconds"] == 5400.0
+    assert overview["llm_usage"]["input_tokens"] == 1000
+    assert overview["llm_usage"]["cached_tokens"] == 400
+    assert overview["llm_usage"]["cache_write_tokens"] == 50
+    assert overview["llm_usage"]["total_tokens"] == 1200
+
+
 def test_normalize_finding():
     raw = {
         "id": "abc",

@@ -790,7 +790,7 @@ class TaskManager:
                 type="pentest",
                 target=task["target"],
                 instruction=task.get("instruction"),
-                scan_mode=task.get("scan_mode") or "standard",
+                scan_mode=task.get("scan_mode") or "deep",
                 max_budget=task.get("max_budget"),
             )
         if task.get("source_type") == "local":
@@ -806,6 +806,6 @@ class TaskManager:
             type="audit",
             source=source,
             instruction=task.get("instruction"),
-            scan_mode=task.get("scan_mode") or "standard",
+            scan_mode=task.get("scan_mode") or "deep",
             max_budget=task.get("max_budget"),
         )

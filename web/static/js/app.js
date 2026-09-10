@@ -156,16 +156,74 @@
     refreshDetails();
   }
 
-    function renderOverview() {
+  function formatUtc8(iso) {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso);
+    const parts = new Intl.DateTimeFormat("zh-CN", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).formatToParts(d);
+    const get = (type) => parts.find((p) => p.type === type)?.value || "";
+    return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}:${get("second")} (UTC+8)`;
+  }
+
+  function formatDuration(seconds) {
+    if (seconds == null || !Number.isFinite(Number(seconds))) return "—";
+    let s = Math.max(0, Math.floor(Number(seconds)));
+    const h = Math.floor(s / 3600);
+    s %= 3600;
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}h ${m}m ${sec}s`;
+    if (m > 0) return `${m}m ${sec}s`;
+    return `${sec}s`;
+  }
+
+  function formatTokens(n) {
+    if (n == null) return "—";
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "—";
+    return v.toLocaleString("en-US");
+  }
+
+  function renderOverview() {
     const t = currentTask();
     if (!t) return;
-    $("selectedMeta").textContent = `${t.status} · ${t.scan_mode || "—"} · ${t.created_at || ""}`;
+    const started = t.scan_started_at || t.started_at;
+    const finished = t.scan_finished_at || t.finished_at;
+    let duration = t.duration_seconds;
+    if ((duration == null || !Number.isFinite(Number(duration))) && started) {
+      const startMs = Date.parse(started);
+      const endMs = finished ? Date.parse(finished) : Date.now();
+      if (!Number.isNaN(startMs) && !Number.isNaN(endMs)) {
+        duration = Math.max(0, (endMs - startMs) / 1000);
+      }
+    }
+    const usage = t.llm_usage || {};
+    $("selectedMeta").textContent = `${t.status} · ${t.scan_mode || "—"} · ${formatUtc8(t.created_at)}`;
     const rows = [
       ["状态", t.status],
       ["类型", t.type],
       ["目标", t.target || t.source_url || "—"],
       ["动作", t.action || "—"],
+      ["Scan mode", t.scan_mode || "—"],
       ["Run", t.run_name || "—"],
+      ["启动时间", formatUtc8(started)],
+      ["结束时间", finished ? formatUtc8(finished) : "（进行中）"],
+      ["运行耗时", formatDuration(duration)],
+      ["Token 输入", formatTokens(usage.input_tokens)],
+      ["Token 输出", formatTokens(usage.output_tokens)],
+      ["Token 缓存命中", formatTokens(usage.cached_tokens)],
+      ["Token 缓存写入", formatTokens(usage.cache_write_tokens)],
+      ["Token 总计", formatTokens(usage.total_tokens)],
+      ["请求次数", formatTokens(usage.requests)],
       ["Viewer 代理", t.viewer_proxy_url || "（运行后生成）"],
       ["错误", t.error || "—"],
     ];
@@ -303,22 +361,9 @@
     }
   }
 
-  async function loadEvents() {
-    if (!selected) return;
-    try {
-      const data = await api.api(`/api/v1/tasks/${selected}/events`);
-      $("events").textContent =
-        (data.events || [])
-          .map((e) => `[${e.type || "event"}] ${e.message || ""}`)
-          .join("\n") || "(暂无事件)";
-    } catch (e) {
-      $("events").textContent = e.message;
-    }
-  }
-
   async function refreshDetails() {
     renderOverview();
-    await Promise.all([loadEvents(), loadFindings()]);
+    await loadFindings();
     if (activeTab === "viewer") await loadViewer();
     if (activeTab === "report") await loadReport();
     if (activeTab === "artifacts") await loadArtifacts();

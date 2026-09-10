@@ -70,7 +70,7 @@ async def _parse_create_payload(
             raise TaskError("INVALID_REQUEST", "type is required")
         payload: dict[str, Any] = {
             "type": task_type,
-            "scan_mode": _form_value(form, "scan_mode") or "standard",
+            "scan_mode": _form_value(form, "scan_mode") or "deep",
             "instruction": _form_value(form, "instruction"),
         }
         max_budget = _form_value(form, "max_budget")

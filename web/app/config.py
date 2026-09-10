@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     cancel_grace_seconds: int = Field(default=15, ge=1, alias="STRIX_CANCEL_GRACE")
 
     strix_bin: str = Field(default="strix", alias="STRIX_BIN")
-    default_scan_mode: str = Field(default="standard", alias="STRIX_DEFAULT_SCAN_MODE")
+    default_scan_mode: str = Field(default="deep", alias="STRIX_DEFAULT_SCAN_MODE")
     default_max_budget: float | None = Field(default=None, alias="STRIX_DEFAULT_MAX_BUDGET")
 
     # Comma-separated host/URL prefixes. Empty = no prefix allowlist.

@@ -327,4 +327,26 @@ def attach_viewer_proxy_url(task: dict[str, Any]) -> dict[str, Any]:
         data["viewer_proxy_url"] = viewer_proxy_path(task["id"])
     else:
         data["viewer_proxy_url"] = None
+
+    # Overview extras from run.json (timing + tokens). Best-effort only.
+    try:
+        from pathlib import Path
+
+        from app.services.results import (
+            discover_run_name,
+            read_run_overview,
+            workspace_run_dir,
+        )
+
+        workspace = Path(task["workspace"]) if task.get("workspace") else None
+        run_name = task.get("run_name")
+        run_dir = workspace_run_dir(workspace, run_name) if workspace else None
+        if run_dir is None and workspace is not None:
+            discovered = discover_run_name(workspace)
+            if discovered:
+                run_dir = workspace_run_dir(workspace, discovered)
+        if run_dir is not None:
+            data.update(read_run_overview(run_dir))
+    except Exception:
+        logger.debug("attach overview stats failed task=%s", task.get("id"), exc_info=True)
     return data

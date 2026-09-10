@@ -26,6 +26,7 @@ from app.schemas import (
     ResumeTaskRequest,
     TaskListResponse,
     TaskSummary,
+    UpdateTaskRequest,
 )
 from app.api.viewer_proxy import attach_viewer_proxy_url
 from app.security.auth import require_api_key
@@ -72,6 +73,9 @@ async def _parse_create_payload(
             "type": task_type,
             "scan_mode": _form_value(form, "scan_mode") or "deep",
             "instruction": _form_value(form, "instruction"),
+            "name": _form_value(form, "name"),
+            "notes": _form_value(form, "notes"),
+            "held": str(form.get("held") or "").lower() in {"1", "true", "yes", "on"},
         }
         max_budget = _form_value(form, "max_budget")
         if max_budget:
@@ -167,6 +171,45 @@ async def list_tasks(
 async def get_task(task_id: str, manager: TaskManager = Depends(get_manager)):
     try:
         task = await asyncio.to_thread(manager.get_task, task_id)
+    except TaskError as exc:
+        return _error(exc)
+    return _summary(task)
+
+
+@router.patch("/tasks/{task_id}", response_model=TaskSummary)
+async def update_task(
+    task_id: str,
+    payload: UpdateTaskRequest,
+    manager: TaskManager = Depends(get_manager),
+):
+    fields = payload.model_dump(exclude_unset=True)
+    try:
+        task = await asyncio.to_thread(
+            manager.update_task_meta,
+            task_id,
+            name=fields.get("name"),
+            notes=fields.get("notes"),
+            has_name="name" in fields,
+            has_notes="notes" in fields,
+        )
+    except TaskError as exc:
+        return _error(exc)
+    return _summary(task)
+
+
+@router.post("/tasks/{task_id}/hold", response_model=TaskSummary)
+async def hold_task(task_id: str, manager: TaskManager = Depends(get_manager)):
+    try:
+        task = await asyncio.to_thread(manager.hold_task, task_id)
+    except TaskError as exc:
+        return _error(exc)
+    return _summary(task)
+
+
+@router.post("/tasks/{task_id}/release", status_code=202, response_model=TaskSummary)
+async def release_task(task_id: str, manager: TaskManager = Depends(get_manager)):
+    try:
+        task = await asyncio.to_thread(manager.release_task, task_id)
     except TaskError as exc:
         return _error(exc)
     return _summary(task)

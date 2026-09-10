@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,
     status TEXT NOT NULL,
+    name TEXT,
+    notes TEXT,
     target TEXT,
     source_type TEXT,
     source_url TEXT,
@@ -98,6 +100,10 @@ class Database:
             conn.execute("ALTER TABLE tasks ADD COLUMN viewer_url TEXT")
         if "viewer_token" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN viewer_token TEXT")
+        if "name" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN name TEXT")
+        if "notes" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN notes TEXT")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

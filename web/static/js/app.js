@@ -84,16 +84,27 @@
 
   const TERMINAL = new Set(["completed", "failed", "cancelled"]);
   const ACTIVE = new Set(["queued", "starting", "running", "cancelling"]);
+  const DELETABLE = new Set(["completed", "failed", "cancelled", "held"]);
 
   function updateActionButtons() {
     const t = currentTask();
     const terminal = !!(t && TERMINAL.has(t.status));
     const active = !!(t && ACTIVE.has(t.status));
-    $("deleteBtn").disabled = !terminal;
+    const held = !!(t && t.status === "held");
+    const queued = !!(t && t.status === "queued");
+    $("deleteBtn").disabled = !(t && DELETABLE.has(t.status));
     $("retryBtn").disabled = !terminal;
     $("retestBtn").disabled = !terminal;
     $("resumeBtn").disabled = !terminal;
     $("cancelBtn").disabled = !active;
+    $("holdBtn").disabled = !queued;
+    $("releaseBtn").disabled = !held;
+    $("renameBtn").disabled = !t;
+    $("saveNotesBtn").disabled = !t;
+  }
+
+  function taskDisplayName(t) {
+    return (t && (t.name || t.target || t.source_url || t.id)) || "—";
   }
 
   function setTab(name) {
@@ -124,9 +135,13 @@
     }
     list.innerHTML = tasksCache
       .map((t) => {
-        const title = t.target || t.source_url || t.id;
+        const title = taskDisplayName(t);
+        const subTarget = t.name && (t.target || t.source_url)
+          ? `<div class="task-sub muted">${esc(t.target || t.source_url)}</div>`
+          : "";
         return `<li class="${t.id === selected ? "active" : ""}" data-id="${esc(t.id)}">
           <div class="task-title">${esc(title)}</div>
+          ${subTarget}
           <div class="task-sub">
             <span class="status-dot ${esc(t.status)}"></span>
             <span>${esc(t.status)}</span>
@@ -149,7 +164,9 @@
     showCreate(false);
     $("emptyState").classList.add("hidden");
     $("detailPanel").classList.remove("hidden");
-    $("selectedId").textContent = id;
+    const cur = currentTask();
+    $("selectedId").textContent = cur ? taskDisplayName(cur) : id;
+    $("selectedId").title = id;
     renderTaskList();
     renderOverview();
     setTab(activeTab);

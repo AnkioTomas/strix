@@ -305,10 +305,39 @@ button, input, select, textarea {
 .status-dot.starting,
 .status-dot.running,
 .status-dot.cancelling { background: #2f6fed; }
+.status-dot.held { background: var(--warn); }
 .status-dot.completed { background: var(--accent); }
 .status-dot.failed,
 .status-dot.cancelled { background: var(--danger); }
 
+.notes-box {
+  margin-top: 1.1rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.85rem;
+}
+
+.notes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.45rem;
+}
+
+.notes-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.notes-box textarea {
+  width: 100%;
+  min-height: 96px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 0.65rem;
+  background: var(--surface);
+  resize: vertical;
+}
 .main {
   grid-area: main;
   min-width: 0;

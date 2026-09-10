@@ -65,6 +65,9 @@
       <section class="panel create-panel hidden" id="createPanel">
         <h2>新建任务</h2>
         <div class="form-grid">
+          <label class="span-2">名称
+            <input id="taskName" placeholder="例如：DVWA 深扫 / 客户A 复测" />
+          </label>
           <label>类型
             <select id="taskType">
               <option value="pentest">pentest</option>
@@ -92,9 +95,16 @@
           <label class="span-2">Instruction
             <textarea id="instruction" placeholder="重点测试 IDOR / SQL Injection …"></textarea>
           </label>
+          <label class="span-2">备注
+            <textarea id="taskNotes" placeholder="可选。给自己看的说明，不会发给模型。"></textarea>
+          </label>
           <label class="span-2">附件（挂载到沙箱 /workspace，并告知模型）
             <input id="attachments" type="file" multiple />
             <span class="field-hint" id="attachmentsHint">可选。例如 PoC、wordlist、凭证说明。</span>
+          </label>
+          <label class="check">
+            <input id="taskHeld" type="checkbox" />
+            挂起（创建后不进入执行队列）
           </label>
         </div>
         <div class="actions">
@@ -138,6 +148,9 @@
             <div class="detail-meta" id="selectedMeta"></div>
           </div>
           <div class="actions wrap">
+            <button type="button" class="btn ghost" id="renameBtn">重命名</button>
+            <button type="button" class="btn ghost" id="holdBtn">挂起</button>
+            <button type="button" class="btn ghost" id="releaseBtn">放行</button>
             <button type="button" class="btn ghost" id="retryBtn">重试</button>
             <button type="button" class="btn ghost" id="resumeBtn">继续 (Resume)</button>
             <button type="button" class="btn ghost" id="retestBtn">复测</button>
@@ -157,6 +170,13 @@
 
         <div class="tab-pane active" id="tab-overview">
           <dl class="kv" id="overviewKv"></dl>
+          <div class="notes-box">
+            <div class="notes-head">
+              <h3>备注</h3>
+              <button type="button" class="btn ghost" id="saveNotesBtn">保存备注</button>
+            </div>
+            <textarea id="overviewNotes" placeholder="写点给自己看的备注…"></textarea>
+          </div>
         </div>
 
         <div class="tab-pane" id="tab-viewer">

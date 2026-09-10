@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, model_validator
 ScanMode = Literal["quick", "standard", "deep"]
 TaskType = Literal["pentest", "audit"]
 TaskStatus = Literal[
+    "held",
     "queued",
     "starting",
     "running",
@@ -50,6 +51,9 @@ class CreateTaskRequest(BaseModel):
     target: str | None = None
     source: Source | None = None
     instruction: str | None = None
+    name: str | None = Field(default=None, max_length=200)
+    notes: str | None = Field(default=None, max_length=4000)
+    held: bool = False
     scan_mode: ScanMode = "deep"
     max_budget: float | None = Field(default=None, gt=0)
 
@@ -61,6 +65,13 @@ class CreateTaskRequest(BaseModel):
         elif self.source is None:
             raise ValueError("audit tasks require source")
         return self
+
+
+class UpdateTaskRequest(BaseModel):
+    """Rename and/or update notes. Omitted fields are left unchanged."""
+
+    name: str | None = Field(default=None, max_length=200)
+    notes: str | None = Field(default=None, max_length=4000)
 
 
 class ResumeTaskRequest(BaseModel):
@@ -103,6 +114,8 @@ class TaskSummary(BaseModel):
     id: str
     type: TaskType
     status: TaskStatus
+    name: str | None = None
+    notes: str | None = None
     target: str | None = None
     source_type: str | None = None
     source_url: str | None = None

@@ -40,6 +40,9 @@ logger = logging.getLogger(__name__)
 ACTIVE = {"queued", "starting", "running", "cancelling"}
 TERMINAL = {"completed", "failed", "cancelled"}
 CANCELLABLE = {"queued", "starting", "running"}
+DELETABLE = TERMINAL | {"held"}
+HOLDABLE = {"queued"}
+RELEASABLE = {"held"}
 
 
 class TaskError(Exception):
@@ -122,10 +125,14 @@ class TaskManager:
             raise TaskError("INVALID_ATTACHMENT", str(exc)) from exc
 
         now = utc_now()
+        name = (req.name or "").strip() or None
+        notes = (req.notes or "").strip() or None
         row = {
             "id": task_id,
             "type": req.type,
-            "status": "queued",
+            "status": "held" if req.held else "queued",
+            "name": name,
+            "notes": notes,
             "target": target,
             **source_fields,
             "instruction": req.instruction,
@@ -206,12 +213,12 @@ class TaskManager:
         )
 
     def delete_task(self, task_id: str) -> None:
-        """Permanently remove a finished task (DB + workspace on disk)."""
+        """Permanently remove a finished or held task (DB + workspace on disk)."""
         task = self.get_task(task_id)
-        if task["status"] not in TERMINAL:
+        if task["status"] not in DELETABLE:
             raise TaskError(
                 "TASK_NOT_DELETABLE",
-                f"Only finished tasks can be deleted (status={task['status']})",
+                f"Only finished or held tasks can be deleted (status={task['status']})",
                 status_code=409,
             )
         self._processes.pop(task_id, None)
@@ -229,6 +236,54 @@ class TaskManager:
             raise TaskError("TASK_NOT_FOUND", "Task not found", status_code=404)
         if workspace.exists():
             shutil.rmtree(workspace, ignore_errors=True)
+
+    def update_task_meta(
+        self,
+        task_id: str,
+        *,
+        name: str | None = None,
+        notes: str | None = None,
+        has_name: bool = False,
+        has_notes: bool = False,
+    ) -> dict[str, Any]:
+        """Update display name and/or notes. Pass has_* when the field was provided."""
+        self.get_task(task_id)
+        fields: dict[str, Any] = {}
+        if has_name:
+            fields["name"] = (name or "").strip() or None
+        if has_notes:
+            fields["notes"] = (notes or "").strip() or None
+        if not fields:
+            raise TaskError("INVALID_REQUEST", "No fields to update")
+        updated = self.db.update_task(task_id, **fields)
+        assert updated is not None
+        return updated
+
+    def hold_task(self, task_id: str) -> dict[str, Any]:
+        """Park a queued task so the worker pool will not claim it."""
+        task = self.get_task(task_id)
+        if task["status"] not in HOLDABLE:
+            raise TaskError(
+                "TASK_NOT_HOLDABLE",
+                f"Only queued tasks can be held (status={task['status']})",
+                status_code=409,
+            )
+        updated = self.db.update_task(task_id, status="held")
+        assert updated is not None
+        return updated
+
+    def release_task(self, task_id: str) -> dict[str, Any]:
+        """Move a held task into the execution queue."""
+        task = self.get_task(task_id)
+        if task["status"] not in RELEASABLE:
+            raise TaskError(
+                "TASK_NOT_RELEASABLE",
+                f"Only held tasks can be released (status={task['status']})",
+                status_code=409,
+            )
+        updated = self.db.update_task(task_id, status="queued")
+        assert updated is not None
+        return updated
 
     def import_runs(
         self,
@@ -790,6 +845,8 @@ class TaskManager:
                 type="pentest",
                 target=task["target"],
                 instruction=task.get("instruction"),
+                name=task.get("name"),
+                notes=task.get("notes"),
                 scan_mode=task.get("scan_mode") or "deep",
                 max_budget=task.get("max_budget"),
             )
@@ -806,6 +863,8 @@ class TaskManager:
             type="audit",
             source=source,
             instruction=task.get("instruction"),
+            name=task.get("name"),
+            notes=task.get("notes"),
             scan_mode=task.get("scan_mode") or "deep",
             max_budget=task.get("max_budget"),
         )

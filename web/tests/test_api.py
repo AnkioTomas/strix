@@ -283,6 +283,31 @@ def test_ingest_results(client: TestClient):
     assert "zip" in zipped.headers.get("content-type", "")
     assert zipped.content[:2] == b"PK"
 
+    empty_logs = client.get(f"/api/v1/tasks/{task['id']}/logs")
+    assert empty_logs.status_code == 200
+    assert empty_logs.json()["logs"] == []
+    missing_bundle = client.get(f"/api/v1/tasks/{task['id']}/logs?download=1")
+    assert missing_bundle.status_code == 404
+
+    workspace = Path(task["workspace"])
+    (workspace / "scan_worker.stdout.log").write_text("hello stdout\n", encoding="utf-8")
+    (workspace / "scan_worker.stderr.log").write_text("warn stderr\n", encoding="utf-8")
+    (workspace / "logs").mkdir(exist_ok=True)
+    (workspace / "logs" / "extra.log").write_text("extra\n", encoding="utf-8")
+    listed = client.get(f"/api/v1/tasks/{task['id']}/logs").json()["logs"]
+    names = {item["name"] for item in listed}
+    assert "scan_worker.stdout.log" in names
+    assert "scan_worker.stderr.log" in names
+    assert "logs/extra.log" in names
+    one = client.get(f"/api/v1/tasks/{task['id']}/logs/scan_worker.stdout.log")
+    assert one.status_code == 200
+    assert one.content == b"hello stdout\n"
+    traversal = client.get(f"/api/v1/tasks/{task['id']}/logs/../scan_worker.stdout.log")
+    assert traversal.status_code == 404
+    logs_zip = client.get(f"/api/v1/tasks/{task['id']}/logs?download=1")
+    assert logs_zip.status_code == 200
+    assert logs_zip.content[:2] == b"PK"
+
 
 def test_start_strix_job_preserves_resume_fields(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

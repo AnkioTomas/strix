@@ -197,6 +197,70 @@ def list_artifacts(run_dir: Path) -> list[dict[str, Any]]:
     return artifacts
 
 
+_WORKER_LOG_FILES = (
+    "scan_worker.stdout.log",
+    "scan_worker.stderr.log",
+)
+
+
+def list_task_logs(workspace: Path) -> list[dict[str, Any]]:
+    """List worker / task log files under the web task workspace (not sandbox)."""
+    root = Path(workspace)
+    logs: list[dict[str, Any]] = []
+    for name in _WORKER_LOG_FILES:
+        path = root / name
+        if path.is_file():
+            try:
+                size = path.stat().st_size
+            except OSError:
+                continue
+            logs.append({"name": name, "path": name, "size": size})
+    logs_dir = root / "logs"
+    if logs_dir.is_dir():
+        for path in sorted(logs_dir.rglob("*")):
+            if not path.is_file():
+                continue
+            try:
+                rel = path.relative_to(root).as_posix()
+                size = path.stat().st_size
+            except (OSError, ValueError):
+                continue
+            logs.append({"name": rel, "path": rel, "size": size})
+    return logs
+
+
+def resolve_task_log(workspace: Path, name: str) -> Path | None:
+    """Resolve a single log path under the task workspace (no traversal)."""
+    root = Path(workspace).resolve()
+    rel = (name or "").strip().lstrip("/")
+    if not rel or ".." in Path(rel).parts:
+        return None
+    allowed = {item["path"] for item in list_task_logs(root)}
+    if rel not in allowed:
+        return None
+    candidate = (root / rel).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    return candidate if candidate.is_file() else None
+
+
+def build_task_logs_zip(workspace: Path) -> Path | None:
+    """Bundle available task logs into ``task_logs.zip`` under the workspace."""
+    files = list_task_logs(workspace)
+    if not files:
+        return None
+    root = Path(workspace)
+    zip_path = root / "task_logs.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for item in files:
+            path = root / item["path"]
+            if path.is_file():
+                zf.write(path, arcname=item["path"])
+    return zip_path
+
+
 def resolve_artifact(run_dir: Path, name: str) -> Path | None:
     candidate = (run_dir / name).resolve()
     try:

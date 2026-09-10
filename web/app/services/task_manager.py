@@ -907,6 +907,26 @@ class TaskManager:
             raise TaskError("RESULT_NOT_READY", "Report package not found", status_code=404)
         return package
 
+    def list_logs(self, task_id: str) -> list[dict[str, Any]]:
+        from app.services.results import list_task_logs
+
+        task = self.get_task(task_id)
+        return list_task_logs(Path(task["workspace"]))
+
+    def get_logs_package(self, task_id: str) -> Path:
+        """Zip of scan_worker stdout/stderr (+ workspace/logs/* if any)."""
+        from app.services.results import build_task_logs_zip
+
+        task = self.get_task(task_id)
+        package = build_task_logs_zip(Path(task["workspace"]))
+        if package is None:
+            raise TaskError(
+                "LOGS_NOT_FOUND",
+                "No execution logs found for this task yet",
+                status_code=404,
+            )
+        return package
+
     def get_events(self, task_id: str, *, limit: int = 500) -> list[dict[str, Any]]:
         task = self.get_task(task_id)
         run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))

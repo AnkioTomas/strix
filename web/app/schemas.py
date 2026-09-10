@@ -230,6 +230,11 @@ class ArtifactsResponse(BaseModel):
     artifacts: list[ArtifactItem]
 
 
+class TaskLogsResponse(BaseModel):
+    task_id: str
+    logs: list[ArtifactItem]
+
+
 class HealthResponse(BaseModel):
     status: str
     strix: bool

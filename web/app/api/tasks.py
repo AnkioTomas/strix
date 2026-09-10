@@ -25,12 +25,13 @@ from app.schemas import (
     ReportResponse,
     ResumeTaskRequest,
     TaskListResponse,
+    TaskLogsResponse,
     TaskSummary,
     UpdateTaskRequest,
 )
 from app.api.viewer_proxy import attach_viewer_proxy_url
 from app.security.auth import require_api_key
-from app.services.results import list_artifacts, resolve_artifact, workspace_run_dir
+from app.services.results import list_artifacts, resolve_artifact, resolve_task_log, workspace_run_dir
 from app.services.task_manager import TaskError, TaskManager
 
 
@@ -425,6 +426,45 @@ async def task_artifacts(task_id: str, manager: TaskManager = Depends(get_manage
     run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
     artifacts = list_artifacts(run_dir) if run_dir else []
     return ArtifactsResponse(task_id=task_id, artifacts=artifacts)
+
+
+@router.get("/tasks/{task_id}/logs", response_model=TaskLogsResponse)
+async def task_logs(
+    task_id: str,
+    download: bool = False,
+    manager: TaskManager = Depends(get_manager),
+):
+    if download:
+        try:
+            package = await asyncio.to_thread(manager.get_logs_package, task_id)
+        except TaskError as exc:
+            return _error(exc)
+        return FileResponse(
+            package,
+            media_type="application/zip",
+            filename=f"{task_id}-logs.zip",
+        )
+    try:
+        logs = await asyncio.to_thread(manager.list_logs, task_id)
+    except TaskError as exc:
+        return _error(exc)
+    return TaskLogsResponse(task_id=task_id, logs=logs)
+
+
+@router.get("/tasks/{task_id}/logs/{log_path:path}")
+async def download_task_log(
+    task_id: str,
+    log_path: str,
+    manager: TaskManager = Depends(get_manager),
+):
+    try:
+        task = await asyncio.to_thread(manager.get_task, task_id)
+    except TaskError as exc:
+        return _error(exc)
+    path = resolve_task_log(Path(task["workspace"]), log_path)
+    if path is None:
+        return _error(TaskError("LOGS_NOT_FOUND", "Log file not found", 404))
+    return FileResponse(path, filename=path.name)
 
 
 @router.get("/tasks/{task_id}/artifacts/{artifact_path:path}")

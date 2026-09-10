@@ -10,7 +10,7 @@
 4. **导入**旧版 CLI `strix_runs/`（`POST /api/v1/tasks/import`）
 5. 事件查询 + SSE
 6. 运行中通过 Live Viewer 与 Agent 交互（同源反代）
-7. 报告 / artifacts 下载（同源）
+7. 报告 / artifacts / **执行日志** 下载（同源）
 8. **按任务**查看漏洞列表与详情 `GET /api/v1/tasks/{id}/results`（不跨任务）
 9. **同源反代**官方 Live Viewer：`/api/v1/tasks/{id}/viewer/`
 
@@ -109,6 +109,9 @@ PYTHONPATH=. python -m app
 | POST | `/api/v1/tasks/{id}/messages` | 用户消息 / follow-up |
 | GET | `/api/v1/tasks/{id}/artifacts` | 产物列表 |
 | GET | `/api/v1/tasks/{id}/artifacts/{path}` | 下载工件（含报告截图） |
+| GET | `/api/v1/tasks/{id}/logs` | 执行日志列表（`scan_worker.*.log` 等） |
+| GET | `/api/v1/tasks/{id}/logs?download=1` | 打包下载执行日志 ZIP |
+| GET | `/api/v1/tasks/{id}/logs/{path}` | 下载单个日志文件 |
 | * | `/api/v1/tasks/{id}/viewer/...` | 同源反代 Live Viewer |
 | GET | `/health` | 健康 + 准入状态 |
 

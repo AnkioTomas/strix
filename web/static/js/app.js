@@ -373,6 +373,32 @@
       notesEl.value = t.notes || "";
     }
     updateActionButtons();
+    void refreshOverviewLogs();
+  }
+
+  async function refreshOverviewLogs() {
+    const hint = $("overviewLogsHint");
+    const btn = $("downloadLogsBtn");
+    if (!hint || !btn) return;
+    if (!selected) {
+      hint.textContent = "";
+      btn.disabled = true;
+      return;
+    }
+    try {
+      const data = await api.api(`/api/v1/tasks/${selected}/logs`);
+      const logs = data.logs || [];
+      btn.disabled = logs.length === 0;
+      if (!logs.length) {
+        hint.textContent = "尚无 worker 日志（任务启动后生成）";
+        return;
+      }
+      const total = logs.reduce((sum, item) => sum + (Number(item.size) || 0), 0);
+      hint.textContent = `${logs.length} 个文件 · ${total.toLocaleString("en-US")} bytes`;
+    } catch (e) {
+      btn.disabled = true;
+      hint.textContent = e.message || "日志不可用";
+    }
   }
 
   async function loadViewer() {
@@ -986,6 +1012,39 @@
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = `${selected}-report.zip`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
+  $("downloadLogsBtn").onclick = async () => {
+    if (!selected) return;
+    try {
+      await api.ensureSession();
+      const key = api.getKey();
+      const res = await fetch(
+        `/api/v1/tasks/${encodeURIComponent(selected)}/logs?download=1`,
+        {
+          credentials: "include",
+          headers: key ? { Authorization: `Bearer ${key}` } : {},
+        }
+      );
+      if (!res.ok) {
+        let msg = res.statusText;
+        try {
+          const data = await res.json();
+          msg = (data && data.error && data.error.message) || msg;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(msg);
+      }
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${selected}-logs.zip`;
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (e) {

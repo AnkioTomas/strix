@@ -219,6 +219,7 @@ Then open `http://127.0.0.1:8787/` (console) or `/docs` (OpenAPI). Configure `ST
 | **Delivery report layout** | No invented metadata table; agent narrative + structured findings (each finding is an `h2`); “复测情况” table when retest data exists |
 | **Online report UX** | Penna Markdown render, left TOC from headings, ZIP download of report + images |
 | **Reliable finish / resume** | Interactive park no longer leaves tasks stuck “running”; resume is not killed by a stale `completed` `run.json` |
+| **TCP preflight** | Create parks unreachable HTTP(S) host:port as `held` with a `[连通性]` note; release / resume re-check and refuse until reachable |
 | **Artifacts & overview** | List sandbox `workspace/`; overview shows UTC+8 times, duration, and token usage |
 
 Full API reference: [`web/README.md`](web/README.md).

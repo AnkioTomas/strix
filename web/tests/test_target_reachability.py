@@ -87,7 +87,7 @@ def test_check_tcp_reachable_fails_closed_port() -> None:
     assert exc.value.code == "TARGET_UNREACHABLE"
 
 
-def test_create_task_rejects_unreachable_target(client: TestClient) -> None:
+def test_create_task_holds_unreachable_target(client: TestClient) -> None:
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     probe.bind(("127.0.0.1", 0))
     port = int(probe.getsockname()[1])
@@ -98,11 +98,39 @@ def test_create_task_rejects_unreachable_target(client: TestClient) -> None:
             "type": "pentest",
             "target": f"http://127.0.0.1:{port}/",
             "scan_mode": "quick",
+            "notes": "用户备注",
         },
     )
-    assert resp.status_code == 400, resp.text
+    assert resp.status_code == 202, resp.text
     body = resp.json()
-    assert body["error"]["code"] == "TARGET_UNREACHABLE"
+    assert body["status"] == "held"
+    assert "用户备注" in (body.get("notes") or "")
+    assert "[连通性]" in (body.get("notes") or "")
+    assert "TARGET_UNREACHABLE" not in resp.text
+
+
+def test_release_unreachable_stays_held(client: TestClient) -> None:
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    port = int(probe.getsockname()[1])
+    probe.close()
+    created = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": f"http://127.0.0.1:{port}/",
+            "scan_mode": "quick",
+        },
+    )
+    assert created.status_code == 202, created.text
+    task_id = created.json()["id"]
+    released = client.post(f"/api/v1/tasks/{task_id}/release")
+    assert released.status_code == 400, released.text
+    assert released.json()["error"]["code"] == "TARGET_UNREACHABLE"
+    got = client.get(f"/api/v1/tasks/{task_id}")
+    assert got.status_code == 200
+    assert got.json()["status"] == "held"
+    assert "[连通性]" in (got.json().get("notes") or "")
 
 
 def test_create_task_accepts_reachable_target(

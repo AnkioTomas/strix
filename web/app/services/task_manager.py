@@ -49,6 +49,20 @@ CANCELLABLE = {"queued", "starting", "running"}
 DELETABLE = TERMINAL | {"held"}
 HOLDABLE = {"queued"}
 RELEASABLE = {"held"}
+_NOTES_MAX_LEN = 4000
+
+
+def _merge_connectivity_note(existing: str | None, detail: str) -> str:
+    """Append a TCP preflight failure line; de-dupe exact repeats; cap length."""
+    line = f"[连通性] {detail.strip()}"
+    base = (existing or "").strip()
+    if not base:
+        merged = line
+    elif line in base:
+        merged = base
+    else:
+        merged = f"{base}\n{line}"
+    return merged[:_NOTES_MAX_LEN]
 
 
 class TaskError(Exception):
@@ -93,11 +107,20 @@ class TaskManager:
             "source_path": None,
         }
 
+        hold_for_unreachable = False
+        unreachable_note: str | None = None
         try:
             if req.type == "pentest":
                 assert req.target is not None
                 target = validate_pentest_target(req.target, self.settings)
-                check_tcp_reachable(target)
+                try:
+                    check_tcp_reachable(target)
+                except TargetValidationError as exc:
+                    if exc.code != "TARGET_UNREACHABLE":
+                        raise
+                    # Keep the task: park it and record why, instead of 400.
+                    hold_for_unreachable = True
+                    unreachable_note = exc.message
             else:
                 assert req.source is not None
                 source = validate_source(req.source, self.settings)
@@ -134,10 +157,12 @@ class TaskManager:
         now = utc_now()
         name = (req.name or "").strip() or None
         notes = (req.notes or "").strip() or None
+        if unreachable_note:
+            notes = _merge_connectivity_note(notes, unreachable_note)
         row = {
             "id": task_id,
             "type": req.type,
-            "status": "held" if req.held else "queued",
+            "status": "held" if (req.held or hold_for_unreachable) else "queued",
             "name": name,
             "notes": notes,
             "target": target,
@@ -288,6 +313,14 @@ class TaskManager:
                 f"Only held tasks can be released (status={task['status']})",
                 status_code=409,
             )
+        if task.get("type") == "pentest" and task.get("target"):
+            try:
+                check_tcp_reachable(str(task["target"]))
+            except TargetValidationError as exc:
+                if exc.code == "TARGET_UNREACHABLE":
+                    notes = _merge_connectivity_note(task.get("notes"), exc.message)
+                    self.db.update_task(task_id, notes=notes)
+                raise TaskError(exc.code, exc.message) from exc
         updated = self.db.update_task(task_id, status="queued")
         assert updated is not None
         return updated
@@ -471,6 +504,9 @@ class TaskManager:
             try:
                 check_tcp_reachable(str(task["target"]))
             except TargetValidationError as exc:
+                if exc.code == "TARGET_UNREACHABLE":
+                    notes = _merge_connectivity_note(task.get("notes"), exc.message)
+                    self.db.update_task(task_id, notes=notes)
                 raise TaskError(exc.code, exc.message) from exc
         run_name = task.get("run_name")
         if not run_name:

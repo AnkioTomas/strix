@@ -276,9 +276,17 @@ class LiveStrixSession:
                 ),
                 name=f"strix-scan-{self.task_id}",
             )
+            # Arm exit detection only after we've observed a live "running" report.
+            # Resume hydrates agents.json with a terminal root; without this arming
+            # step a stale completed report (or a resume race) would kill the scan
+            # before the agent is woken.
+            armed = str(report_state.run_record.get("status") or "") == "running"
             try:
                 while not scan.done():
-                    if _web_scan_should_exit(report_state, coordinator):
+                    status_now = str(report_state.run_record.get("status") or "")
+                    if status_now == "running":
+                        armed = True
+                    if armed and _web_scan_should_exit(report_state, coordinator):
                         scan.cancel()
                         with contextlib.suppress(asyncio.CancelledError):
                             await scan
@@ -563,11 +571,22 @@ class DetachedScanHandle:
         return int(st["exit_code"]) if st.get("exit_code") is not None else 1
 
     def _reap_finished_interactive(self) -> int | None:
-        """If run.json is already terminal, record exit_code and stop the worker."""
+        """If run.json is terminal after a live run, record exit_code and stop the worker.
+
+        Must not fire on resume startup: the prior run leaves ``status=completed``
+        on disk until the worker rewrites it to ``running``. Ready is only set
+        after that rewrite, so requiring ``ready`` kills the race without
+        breaking stuck-park reap after API restart.
+        """
         import signal
 
         from app.services.results import read_run_record, read_vulnerabilities
         from app.services.scan_state import pid_alive, write_state
+
+        st = self._state()
+        # Worker has not finished set_scan_config / ready handshake yet.
+        if not st.get("ready"):
+            return None
 
         run_name = self.run_name
         if not run_name:

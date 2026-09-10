@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import uuid
@@ -480,6 +481,27 @@ class TaskManager:
             note_path.write_text(note, encoding="utf-8")
         elif note_path.exists():
             note_path.unlink()
+
+        # Clear stale terminal status before the worker boots. Otherwise the API
+        # pool can reap the new process while run.json still says "completed".
+        run_json = workspace / RUNS_DIR_NAME / run_name / "run.json"
+        if run_json.is_file():
+            try:
+                record = json.loads(run_json.read_text(encoding="utf-8"))
+                if isinstance(record, dict):
+                    record["status"] = "running"
+                    record["end_time"] = None
+                    run_json.write_text(
+                        json.dumps(record, ensure_ascii=False, indent=2) + "\n",
+                        encoding="utf-8",
+                    )
+            except (OSError, json.JSONDecodeError, TypeError):
+                logger.warning(
+                    "could not reset run.json status for resume task=%s run=%s",
+                    task_id,
+                    run_name,
+                    exc_info=True,
+                )
 
         updated = self.db.update_task(
             task_id,

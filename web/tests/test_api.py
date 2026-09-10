@@ -391,7 +391,7 @@ def test_resume_requires_agent_snapshot(client: TestClient):
     state_dir = workspace / "strix_runs" / run_name / ".state"
     state_dir.mkdir(parents=True)
     (workspace / "strix_runs" / run_name / "run.json").write_text(
-        '{"run_name":"example_resume_1","targets_info":[{"type":"web","details":{}}]}',
+        '{"run_name":"example_resume_1","status":"completed","targets_info":[{"type":"web","details":{}}]}',
         encoding="utf-8",
     )
     manager.db.update_task(
@@ -421,6 +421,52 @@ def test_resume_requires_agent_snapshot(client: TestClient):
     note = workspace / ".web_resume_instruction"
     assert note.is_file()
     assert note.read_text(encoding="utf-8") == "继续找 SQLi"
+    run_record = json.loads(
+        (workspace / "strix_runs" / run_name / "run.json").read_text(encoding="utf-8")
+    )
+    assert run_record["status"] == "running"
+    assert run_record.get("end_time") is None
+
+
+def test_reap_skips_until_worker_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from app.services.scan_state import write_state
+    from app.services.strix_runner import DetachedScanHandle
+
+    workspace = tmp_path / "task"
+    run_dir = workspace / "strix_runs" / "run_a"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text(
+        '{"status":"completed","run_name":"run_a"}',
+        encoding="utf-8",
+    )
+    write_state(workspace, pid=12345, ready=False, run_name="run_a", exit_code=None)
+    handle = DetachedScanHandle(workspace, "task_x")
+    monkeypatch.setattr("app.services.scan_state.pid_alive", lambda _pid: True)
+    assert handle._reap_finished_interactive() is None
+
+    write_state(workspace, ready=True)
+    assert handle._reap_finished_interactive() == 0
+    assert handle._state().get("exit_code") == 0
+
+
+def test_web_scan_exit_requires_report_and_root():
+    from types import SimpleNamespace
+
+    from app.services.strix_runner import _web_scan_should_exit
+
+    report = SimpleNamespace(run_record={"status": "completed"})
+    coordinator = SimpleNamespace(
+        parent_of={"root": None},
+        statuses={"root": "completed"},
+    )
+    assert _web_scan_should_exit(report, coordinator) is True
+
+    report.run_record["status"] = "running"
+    assert _web_scan_should_exit(report, coordinator) is False
+
+    report.run_record["status"] = "completed"
+    coordinator.statuses["root"] = "running"
+    assert _web_scan_should_exit(report, coordinator) is False
 
 
 def test_task_name_notes_hold_release(client: TestClient):

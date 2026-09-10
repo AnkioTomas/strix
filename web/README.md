@@ -4,13 +4,13 @@
 
 ## 能力
 
-1. 列出 / 创建任务（pentest + audit）
+1. 列出 / 创建任务（pentest + audit；创建时可上传附件挂到 `/workspace` 并告知模型）
 2. 按系统负载排队（内存不足 / load 过高时不放行，任务留在 `queued`）
 3. 取消 / 重试 / 续跑 / 复测
 4. 事件查询 + SSE
-5. 运行中实时与 Agent 交互（viewer steer / `POST .../messages`）
+5. 运行中通过 Live Viewer 与 Agent 交互（同源反代）
 6. 报告 / artifacts 下载（同源）
-7. **按任务**查看漏洞 `GET /api/v1/tasks/{id}/results`（不跨任务）
+7. **按任务**查看漏洞列表与详情 `GET /api/v1/tasks/{id}/results`（不跨任务）
 8. **同源反代**官方 Live Viewer：`/api/v1/tasks/{id}/viewer/`
 
 ## 鉴权

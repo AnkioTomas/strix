@@ -186,9 +186,10 @@ class LiveStrixSession:
                 raise RuntimeError("resume requested but task has no run_name")
             build_targets_info(args)
             prepare_run(args)
-        # Attachments live under task workspace/attachments/; mount + tell the model.
-        if not getattr(args, "workspace_files", None):
-            args.workspace_files = resolve_task_workspace_files(Path(task["workspace"]))
+        # Attachments under task workspace/attachments/ are authoritative for web tasks.
+        attached = resolve_task_workspace_files(Path(task["workspace"]))
+        if attached:
+            args.workspace_files = attached
         self.run_name = args.run_name
         assert self.run_name
         if task.get("action") == "resume" and self.run_name != task.get("run_name"):

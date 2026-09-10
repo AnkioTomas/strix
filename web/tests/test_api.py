@@ -75,6 +75,35 @@ def test_create_and_list_pentest(client: TestClient):
     assert any(t["id"] == task["id"] for t in listed.json()["tasks"])
 
 
+def test_create_task_with_attachments(client: TestClient, tmp_path: Path):
+    from app.services.attachments import resolve_task_workspace_files
+    from app.config import get_settings
+
+    res = client.post(
+        "/api/v1/tasks",
+        data={
+            "type": "pentest",
+            "target": "https://example.com",
+            "scan_mode": "quick",
+            "instruction": "Use the wordlist",
+        },
+        files=[
+            ("attachments", ("notes.txt", b"admin:admin\n", "text/plain")),
+            ("attachments", ("paths.txt", b"/api/v1\n/admin\n", "text/plain")),
+        ],
+    )
+    assert res.status_code == 202, res.text
+    task = res.json()
+    settings = get_settings()
+    workspace = settings.tasks_dir / task["id"]
+    attached = resolve_task_workspace_files(workspace)
+    assert len(attached) == 2
+    names = {Path(item["workspace_path"]).name for item in attached}
+    assert names == {"notes.txt", "paths.txt"}
+    for item in attached:
+        assert Path(item["source_path"]).is_file()
+
+
 def test_cancel_queued(client: TestClient):
     res = client.post(
         "/api/v1/tasks",

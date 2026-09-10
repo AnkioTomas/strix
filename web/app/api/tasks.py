@@ -9,12 +9,15 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from pydantic import ValidationError
 
 from app.schemas import (
     ArtifactsResponse,
     CreateTaskRequest,
     EventsResponse,
     FindingsResponse,
+    GitSource,
+    LocalSource,
     MessageCreate,
     MessagesResponse,
     ReportResponse,
@@ -46,13 +49,82 @@ def _summary(task: dict[str, Any]) -> TaskSummary:
     return TaskSummary.model_validate(attach_viewer_proxy_url(task))
 
 
+def _form_value(form: Any, key: str) -> str | None:
+    value = form.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+async def _parse_create_payload(
+    request: Request,
+) -> tuple[CreateTaskRequest, list[tuple[str, bytes]]]:
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        task_type = _form_value(form, "type")
+        if not task_type:
+            raise TaskError("INVALID_REQUEST", "type is required")
+        payload: dict[str, Any] = {
+            "type": task_type,
+            "scan_mode": _form_value(form, "scan_mode") or "standard",
+            "instruction": _form_value(form, "instruction"),
+        }
+        max_budget = _form_value(form, "max_budget")
+        if max_budget:
+            payload["max_budget"] = float(max_budget)
+        if task_type == "pentest":
+            payload["target"] = _form_value(form, "target")
+        else:
+            source_type = _form_value(form, "source_type") or "git"
+            if source_type == "local":
+                payload["source"] = LocalSource(
+                    type="local",
+                    path=_form_value(form, "source_path") or "",
+                )
+            else:
+                payload["source"] = GitSource(
+                    type="git",
+                    url=_form_value(form, "source_url") or "",
+                    branch=_form_value(form, "source_branch"),
+                    commit=_form_value(form, "source_commit"),
+                )
+        try:
+            req = CreateTaskRequest.model_validate(payload)
+        except ValidationError as exc:
+            raise TaskError("INVALID_REQUEST", str(exc.errors())) from exc
+
+        uploads: list[tuple[str, bytes]] = []
+        for item in form.getlist("attachments"):
+            if not hasattr(item, "read"):
+                continue
+            upload = item  # UploadFile-like
+            content = await upload.read()
+            name = getattr(upload, "filename", None) or "attachment.bin"
+            uploads.append((str(name), content))
+        return req, uploads
+
+    body = await request.json()
+    try:
+        req = CreateTaskRequest.model_validate(body)
+    except ValidationError as exc:
+        raise TaskError("INVALID_REQUEST", str(exc.errors())) from exc
+    return req, []
+
+
 @router.post("/tasks", status_code=202, response_model=TaskSummary)
 async def create_task(
-    payload: CreateTaskRequest,
+    request: Request,
     manager: TaskManager = Depends(get_manager),
 ):
     try:
-        task = await asyncio.to_thread(manager.create_task, payload)
+        payload, uploads = await _parse_create_payload(request)
+        task = await asyncio.to_thread(
+            manager.create_task,
+            payload,
+            attachments=uploads or None,
+        )
     except TaskError as exc:
         return _error(exc)
     return _summary(task)

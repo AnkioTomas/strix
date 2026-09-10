@@ -257,7 +257,11 @@ class LiveStrixSession:
         async def _main() -> int:
             # Keep a handle to the scan task so terminate() / finish-reap can cancel it.
             # Interactive mode parks forever after finish_scan; web must exit when the
-            # report reaches a terminal status, otherwise the task stays "running".
+            # engagement is truly finished. Do NOT key off report status alone:
+            # save_run_data(mark_complete=True) sets status="completed" BEFORE
+            # _save_artifacts() returns, so cancelling on status alone can interrupt
+            # the zip / vulnerabilities.json write. Wait until the root agent is also
+            # terminal (set only after finish_scan's persistence returns).
             self._scan_task = asyncio.current_task()
             scan = asyncio.create_task(
                 run_strix_scan(
@@ -274,8 +278,7 @@ class LiveStrixSession:
             )
             try:
                 while not scan.done():
-                    status = str(report_state.run_record.get("status") or "")
-                    if status in {"completed", "failed", "interrupted", "stopped"}:
+                    if _web_scan_should_exit(report_state, coordinator):
                         scan.cancel()
                         with contextlib.suppress(asyncio.CancelledError):
                             await scan
@@ -295,8 +298,7 @@ class LiveStrixSession:
                     scan.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await scan
-                status = str(report_state.run_record.get("status") or "")
-                if status == "completed":
+                if str(report_state.run_record.get("status") or "") == "completed":
                     return _exit_code_from_report(report_state)
                 logger.info("scan cancelled task=%s", self.task_id)
                 return 130
@@ -343,6 +345,38 @@ class LiveStrixSession:
         with contextlib.suppress(Exception):
             httpd.shutdown()
             httpd.server_close()
+
+
+_ROOT_TERMINAL = frozenset({"completed", "stopped", "failed", "crashed"})
+_REPORT_DONE = frozenset({"completed", "failed", "interrupted"})
+
+
+def _web_scan_should_exit(report_state: Any, coordinator: Any) -> bool:
+    """True only when both the report and the root agent have finished.
+
+    ``completed`` alone is not enough: ReportState flips that bit before the
+    final artifact write finishes. The root agent's ``completed`` status is set
+    by ``finish_scan`` only after persistence returns.
+    """
+    report_status = str(report_state.run_record.get("status") or "")
+    if report_status not in _REPORT_DONE:
+        return False
+    if coordinator is None:
+        return False
+    root_id = None
+    parent_of = getattr(coordinator, "parent_of", {}) or {}
+    for agent_id, parent in parent_of.items():
+        if parent is None:
+            root_id = str(agent_id)
+            break
+    if root_id is None:
+        statuses = getattr(coordinator, "statuses", {}) or {}
+        if statuses:
+            root_id = str(next(iter(statuses)))
+    if root_id is None:
+        return False
+    root_status = str((getattr(coordinator, "statuses", {}) or {}).get(root_id) or "")
+    return root_status in _ROOT_TERMINAL
 
 
 def _exit_code_from_report(report_state: Any) -> int:

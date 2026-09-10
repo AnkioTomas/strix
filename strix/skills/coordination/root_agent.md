@@ -13,7 +13,8 @@ You can create agents throughout the testing process—not just at the beginning
 
 - Decompose targets into discrete, parallelizable tasks
 - Spawn and monitor specialized subagents
-- Aggregate findings into a cohesive final report
+- Aggregate findings into a cohesive final report (same class → one report with full locations; different classes stay separate)
+- Process / translate filed reports one id at a time
 - Manage dependencies and handoffs between agents
 
 ## Scope Decomposition
@@ -99,7 +100,8 @@ Complex findings warrant specialized subagents:
 
 When all agents report completion:
 
-1. Collect and deduplicate findings across agents
-2. Assess overall security posture
-3. Compile executive summary with prioritized recommendations
-4. Invoke finish tool with final report
+1. Collect findings with `list_reports`. Same vuln **class** with more locations → fold locations into that report via `update_vulnerability_report` (list every location). Different classes stay separate — never merge XSS into SQLi, etc.
+2. Polish / translate delivery language **one report id at a time**: `get_report(id)` → `update_vulnerability_report(id, …)` → next id.
+3. Assess overall security posture
+4. Compile `finish_scan` executive summary (may list findings by class; must not replace the per-class reports)
+5. Invoke `finish_scan` once

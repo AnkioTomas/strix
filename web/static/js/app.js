@@ -371,6 +371,12 @@
     $("overviewKv").innerHTML = rows
       .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`)
       .join("");
+    const instrEl = $("overviewInstruction");
+    if (instrEl) {
+      const text = (t.instruction || "").trim();
+      instrEl.textContent = text || "（未设置）";
+      instrEl.classList.toggle("empty", !text);
+    }
     const notesEl = $("overviewNotes");
     if (notesEl && document.activeElement !== notesEl) {
       notesEl.value = t.notes || "";

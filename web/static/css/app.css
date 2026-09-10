@@ -363,6 +363,28 @@ button, input, select, textarea {
   background: var(--surface);
   resize: vertical;
 }
+
+.overview-instruction {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #f6f8fa;
+  max-height: 18rem;
+  overflow: auto;
+}
+
+.overview-instruction.empty {
+  color: var(--muted);
+  font-family: inherit;
+  font-style: italic;
+}
+
 .main {
   grid-area: main;
   min-width: 0;

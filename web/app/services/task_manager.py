@@ -903,6 +903,7 @@ class TaskManager:
         )
         if updated:
             self.ingest_results(updated)
+            self._stop_task_sandbox(updated)
         logger.info(
             "finalized orphaned task %s from run.json status=%s → %s",
             task["id"],
@@ -948,10 +949,25 @@ class TaskManager:
             finished_at=utc_now(),
             pid=None,
             error=error_msg,
+            viewer_url=None,
+            viewer_token=None,
         )
         assert updated is not None
         self.ingest_results(updated)
+        self._stop_task_sandbox(updated)
         return updated
+
+    def _stop_task_sandbox(self, task: dict[str, Any]) -> None:
+        """Stop the Docker sandbox even if the scan worker skipped cleanup."""
+        from strix.runtime.session_manager import stop_sandbox_from_run_dir
+
+        run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
+        if run_dir is None:
+            from app.services.results import discover_run_name
+
+            name = discover_run_name(Path(task["workspace"]))
+            run_dir = workspace_run_dir(Path(task["workspace"]), name)
+        stop_sandbox_from_run_dir(run_dir)
 
     def ingest_results(self, task: dict[str, Any]) -> None:
         run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))

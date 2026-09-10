@@ -12,9 +12,28 @@ if [ -n "${STRIX_HOST_UID:-}" ] && [ "${STRIX_HOST_UID}" != "0" ] && [ "${STRIX_
     sed -i "s|^pentester:x:${old_uid}:${old_gid}:|pentester:x:${STRIX_HOST_UID}:${gid}:|" /etc/passwd
     sed -i "s|^pentester:x:${old_gid}:|pentester:x:${gid}:|" /etc/group
     chown -R "${STRIX_HOST_UID}:${gid}" /home/pentester /app/certs
-    chown "${STRIX_HOST_UID}:${gid}" /workspace
+    # Recursive: nested files created as root on the host (web API as root)
+    # would otherwise stay unwritable after remap.
+    chown -R "${STRIX_HOST_UID}:${gid}" /workspace
     exec setpriv --reuid "${STRIX_HOST_UID}" --regid "${gid}" --init-groups "$0" "$@"
   ' "$0" "$(id -u)" "$(id -g)" "$PATH" "$@"
+fi
+
+# When the host API runs as root, STRIX_HOST_UID=0 and the remap above is
+# skipped. The image still runs as ``pentester``, so a root-owned bind mount
+# makes /workspace read-only → mkdir .tool-output fails with Permission denied.
+if [ -d /workspace ] && [ ! -w /workspace ]; then
+  echo "Fixing /workspace ownership for sandbox user $(id -un) ($(id -u):$(id -g))"
+  sudo chown -R "$(id -u):$(id -g)" /workspace || true
+fi
+if [ -d /workspace ]; then
+  if ! touch /workspace/.strix-write-probe 2>/dev/null; then
+    echo "WARN: /workspace still not writable after chown; retrying chmod"
+    sudo chmod -R u+rwX /workspace || true
+    sudo chown -R "$(id -u):$(id -g)" /workspace || true
+  else
+    rm -f /workspace/.strix-write-probe
+  fi
 fi
 
 CAIDO_PORT=48080

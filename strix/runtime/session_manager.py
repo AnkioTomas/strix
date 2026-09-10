@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import shutil
@@ -21,6 +22,7 @@ from strix.runtime.backends import backend_supports_bind_mounts, get_backend
 from strix.runtime.caido_bootstrap import bootstrap_caido
 from strix.runtime.cjk_fonts import ensure_cjk_fonts
 from strix.runtime.caido_handle import CaidoBootstrapHandle
+from strix.runtime.workspace_perms import ensure_workspace_writable
 
 
 if TYPE_CHECKING:
@@ -84,11 +86,35 @@ def build_run_workspace_mount(host_workspace: Path) -> dict[str, Any]:
     # here (not only in create_or_reuse) so the path exists at create time.
     source.mkdir(parents=True, exist_ok=True)
     (source / ".keep").touch(exist_ok=True)
+    _ensure_host_workspace_matches_sandbox_user(source)
     return {
         "source": str(source),
         "target": _WORKSPACE_ROOT,
         "read_only": False,
     }
+
+
+def _ensure_host_workspace_matches_sandbox_user(source: Path) -> None:
+    """When the API runs as root, skip UID remap and keep image USER=pentester.
+
+    Root-owned bind mounts then make ``/workspace`` unwritable inside the
+    container (``mkdir .tool-output: Permission denied``). Match the common
+    image uid (1000) on Linux hosts so the mount is writable without rebuilding
+    the sandbox image. The entrypoint also chowns as a belt-and-suspenders fix.
+    """
+    if sys.platform != "linux":
+        return
+    try:
+        if os.geteuid() != 0:
+            return
+    except AttributeError:
+        return
+    uid, gid = 1000, 1000
+    with contextlib.suppress(OSError):
+        os.chown(source, uid, gid)
+    for path in source.rglob("*"):
+        with contextlib.suppress(OSError):
+            os.chown(path, uid, gid)
 
 
 def read_sandbox_record(run_dir: Path) -> dict[str, Any] | None:
@@ -419,10 +445,12 @@ async def create_or_reuse(  # noqa: PLR0915
             reuse_container_id=reuse_container_id,
         )
 
-        # Stock sandbox images lack CJK fonts; install into the live container
-        # (bind-mounted script + root exec). No image rebuild. Skip when there
-        # is no host workspace mount to stage the script into.
+        # Stock remote images: fix /workspace ownership (root host → pentester)
+        # and install CJK fonts. Both run as root via bind-mounted scripts —
+        # no sandbox image rebuild required.
         if backend_supports_bind_mounts(backend_name):
+            report("Preparing sandbox workspace")
+            await ensure_workspace_writable(session, host_workspace)
             report("Ensuring Chinese font support")
             await ensure_cjk_fonts(session, host_workspace)
 
@@ -585,3 +613,54 @@ async def cleanup(scan_id: str) -> None:
             docker_client.close()
         except Exception:  # noqa: BLE001
             logger.debug("cleanup(%s): docker_client.close() raised", scan_id, exc_info=True)
+
+
+def stop_sandbox_from_run_dir(run_dir: Path | None) -> bool:
+    """Best-effort stop of a retained sandbox using ``run.json``'s container id.
+
+    The in-process ``cleanup(scan_id)`` path only works inside the scan worker.
+    When the API reaps a parked interactive worker (or the worker crashes), that
+    cache is gone — this still stops the container so it does not leak.
+    Container is stopped, not removed, so resume can attach later.
+    """
+    if run_dir is None:
+        return False
+    record = read_sandbox_record(run_dir)
+    if not isinstance(record, dict):
+        return False
+    container_id = record.get("container_id")
+    if not isinstance(container_id, str) or not container_id.strip():
+        return False
+    try:
+        import docker
+    except ImportError:
+        logger.warning("stop_sandbox_from_run_dir: docker package unavailable")
+        return False
+    client = None
+    try:
+        client = docker.from_env(timeout=60)
+        container = client.containers.get(container_id)
+        container.reload()
+        if container.status != "running":
+            logger.info(
+                "Sandbox container %s already %s (retained)",
+                container_id[:12],
+                container.status,
+            )
+            return True
+        container.stop(timeout=10)
+        logger.info(
+            "Stopped sandbox container %s from run record (retained for resume)",
+            container_id[:12],
+        )
+        return True
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "stop_sandbox_from_run_dir: failed for container %s",
+            container_id[:12],
+        )
+        return False
+    finally:
+        if client is not None:
+            with contextlib.suppress(Exception):
+                client.close()

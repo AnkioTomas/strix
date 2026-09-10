@@ -618,14 +618,20 @@ class DetachedScanHandle:
         )
         pid = self.pid
         if pid and pid_alive(pid):
+            # Prefer SIGTERM so the worker finally-block can stop the sandbox.
             with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
                 os.killpg(pid, signal.SIGTERM)
             with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
                 os.kill(pid, signal.SIGTERM)
-            deadline = time.time() + 5
+            # docker stop inside cleanup can take ~10s; give it room before SIGKILL.
+            deadline = time.time() + 25
             while time.time() < deadline and pid_alive(pid):
                 time.sleep(0.2)
             if pid_alive(pid):
+                logger.warning(
+                    "worker pid=%s still alive after SIGTERM; sending SIGKILL",
+                    pid,
+                )
                 with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
                     os.killpg(pid, signal.SIGKILL)
                 with contextlib.suppress(ProcessLookupError, PermissionError, OSError):

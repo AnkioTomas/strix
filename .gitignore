@@ -102,3 +102,4 @@ schema.graphql
 # Local Strix API service runtime data
 web/data/
 web/*.sqlite
+.cjk-verify/

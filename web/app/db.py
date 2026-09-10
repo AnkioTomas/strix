@@ -77,6 +77,16 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
 CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
 CREATE INDEX IF NOT EXISTS idx_messages_task ON messages(task_id);
+
+CREATE TABLE IF NOT EXISTS finding_flags (
+    task_id TEXT NOT NULL,
+    finding_id TEXT NOT NULL,
+    review_status TEXT NOT NULL DEFAULT 'active',
+    request_test INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (task_id, finding_id),
+    FOREIGN KEY(task_id) REFERENCES tasks(id)
+);
 """
 
 
@@ -320,6 +330,83 @@ class Database:
             if not existing:
                 return False
             conn.execute("DELETE FROM findings WHERE task_id = ?", (task_id,))
+            conn.execute("DELETE FROM finding_flags WHERE task_id = ?", (task_id,))
             conn.execute("DELETE FROM messages WHERE task_id = ?", (task_id,))
             conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
         return True
+
+    def upsert_finding_flag(
+        self,
+        task_id: str,
+        finding_id: str,
+        *,
+        review_status: str | None = None,
+        request_test: bool | None = None,
+    ) -> dict[str, Any]:
+        """Create/update console-side flags that survive Strix result re-ingest."""
+        now = utc_now()
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM finding_flags WHERE task_id = ? AND finding_id = ?",
+                (task_id, finding_id),
+            ).fetchone()
+            current = dict(row) if row else {
+                "task_id": task_id,
+                "finding_id": finding_id,
+                "review_status": "active",
+                "request_test": 0,
+            }
+            status = review_status if review_status is not None else current["review_status"]
+            if status not in {"active", "invalid"}:
+                raise ValueError(f"invalid review_status: {status}")
+            req = (
+                int(bool(request_test))
+                if request_test is not None
+                else int(current.get("request_test") or 0)
+            )
+            conn.execute(
+                """
+                INSERT INTO finding_flags (task_id, finding_id, review_status, request_test, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(task_id, finding_id) DO UPDATE SET
+                    review_status = excluded.review_status,
+                    request_test = excluded.request_test,
+                    updated_at = excluded.updated_at
+                """,
+                (task_id, finding_id, status, req, now),
+            )
+            out = conn.execute(
+                "SELECT * FROM finding_flags WHERE task_id = ? AND finding_id = ?",
+                (task_id, finding_id),
+            ).fetchone()
+        item = dict(out)
+        item["request_test"] = bool(item.get("request_test"))
+        return item
+
+    def list_finding_flags(self, task_id: str) -> dict[str, dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM finding_flags WHERE task_id = ?",
+                (task_id,),
+            ).fetchall()
+        out: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            item = dict(row)
+            item["request_test"] = bool(item.get("request_test"))
+            out[str(item["finding_id"])] = item
+        return out
+
+    def clear_finding_request_test(self, task_id: str, finding_ids: list[str]) -> None:
+        if not finding_ids:
+            return
+        now = utc_now()
+        with self.connect() as conn:
+            for fid in finding_ids:
+                conn.execute(
+                    """
+                    UPDATE finding_flags
+                    SET request_test = 0, updated_at = ?
+                    WHERE task_id = ? AND finding_id = ?
+                    """,
+                    (now, task_id, fid),
+                )

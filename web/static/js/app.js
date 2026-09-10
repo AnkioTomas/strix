@@ -475,6 +475,32 @@
     $("findingsDetailPane").classList.remove("hidden");
     renderWithPenna(ensureFindingsRenderer(), penna.findingToMarkdown(finding), selected);
     renderFindingsTable();
+    syncFindingActionButtons(finding);
+  }
+
+  function syncFindingActionButtons(finding) {
+    const invalid = String(finding?.review_status || "active") === "invalid";
+    const terminal = (() => {
+      const t = currentTask();
+      return !!(t && TERMINAL.has(t.status));
+    })();
+    $("findingInvalidateBtn").disabled = !finding || invalid;
+    $("findingRestoreBtn").disabled = !finding || !invalid;
+    $("findingTestBtn").disabled = !finding || invalid || !terminal;
+  }
+
+  function findingStatusCell(f) {
+    const bits = [];
+    if (String(f.review_status || "") === "invalid") {
+      bits.push('<span class="finding-badge invalid">无效</span>');
+    }
+    if (f.request_test) {
+      bits.push('<span class="finding-badge request-test">待测</span>');
+    }
+    if (!bits.length) {
+      bits.push('<span class="muted">有效</span>');
+    }
+    return bits.join(" ");
   }
 
   function renderFindingsTable() {
@@ -485,16 +511,22 @@
       body.innerHTML = `<tr><td colspan="4" class="muted">该任务暂无漏洞</td></tr>`;
       return;
     }
-    count.textContent = `共 ${findingsCache.length} 条 · 点击查看详情`;
+    const invalidCount = findingsCache.filter((f) => f.review_status === "invalid").length;
+    const pendingCount = findingsCache.filter((f) => f.request_test).length;
+    const extra = [];
+    if (invalidCount) extra.push(`无效 ${invalidCount}`);
+    if (pendingCount) extra.push(`待测 ${pendingCount}`);
+    count.textContent = `共 ${findingsCache.length} 条${extra.length ? ` · ${extra.join(" · ")}` : ""} · 点击查看详情`;
     body.innerHTML = findingsCache
       .map((f) => {
         const sev = String(f.severity || "unknown").toLowerCase();
         const where = penna.locationLabel(f);
-        return `<tr data-id="${esc(f.id)}" class="${f.id === selectedFindingId ? "active" : ""}">
+        const invalid = String(f.review_status || "") === "invalid";
+        return `<tr data-id="${esc(f.id)}" class="${f.id === selectedFindingId ? "active" : ""} ${invalid ? "finding-invalid" : ""}">
           <td><span class="sev-${esc(sev)}">${esc((f.severity || "unknown").toUpperCase())}</span></td>
           <td>${esc(f.title || "Untitled")}</td>
           <td>${esc(where)}</td>
-          <td>${esc(f.confidence || "—")}</td>
+          <td>${findingStatusCell(f)}</td>
         </tr>`;
       })
       .join("");
@@ -733,6 +765,56 @@
   $("findingsBack").onclick = () => {
     showFindingsList();
     renderFindingsTable();
+  };
+
+  async function patchFinding(body) {
+    if (!selected || !selectedFindingId) return;
+    const updated = await api.api(`/api/v1/tasks/${selected}/findings/${selectedFindingId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    const idx = findingsCache.findIndex((f) => f.id === selectedFindingId);
+    if (idx >= 0) findingsCache[idx] = { ...findingsCache[idx], ...updated };
+    showFindingDetail(selectedFindingId);
+  }
+
+  $("findingInvalidateBtn").onclick = async () => {
+    if (!selectedFindingId) return;
+    if (!confirm("标记为无效后：报告不再显示该漏洞，复测也会跳过。继续？")) return;
+    try {
+      await patchFinding({ review_status: "invalid" });
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
+  $("findingRestoreBtn").onclick = async () => {
+    if (!selectedFindingId) return;
+    try {
+      await patchFinding({ review_status: "active" });
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
+  $("findingTestBtn").onclick = async () => {
+    if (!selected || !selectedFindingId) return;
+    const finding = findingsCache.find((f) => f.id === selectedFindingId);
+    if (!finding) return;
+    if (!confirm(`对漏洞「${finding.title || finding.id}」发起指定复测？`)) return;
+    try {
+      const res = await api.api(`/api/v1/tasks/${selected}/findings/${selectedFindingId}/test`, {
+        method: "POST",
+        body: "{}",
+      });
+      await refresh();
+      if (res.task?.id) {
+        selectTask(res.task.id);
+      }
+      alert(`已创建复测任务 ${res.task?.id || ""}`);
+    } catch (e) {
+      alert(e.message);
+    }
   };
 
   $("taskType").onchange = syncCreateTypeFields;

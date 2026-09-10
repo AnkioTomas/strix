@@ -589,6 +589,37 @@ button, input, select, textarea {
   justify-content: space-between;
   gap: 0.75rem;
   margin-bottom: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.findings-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.finding-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.finding-badge.invalid {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+}
+
+.finding-badge.request-test {
+  background: color-mix(in srgb, var(--warn) 22%, transparent);
+  color: var(--warn);
+}
+
+.findings-table tbody tr.finding-invalid {
+  opacity: 0.55;
 }
 
 .findings-table tbody tr {

@@ -40,3 +40,24 @@ RETEST_INSTRUCTION = """\
 
 先 list_reports 拿到全部已有标题，再逐条复测与更新，最后 finish_scan 一次。
 """
+
+
+def focused_retest_instruction(titles: list[str]) -> str:
+    """Retest only the listed finding titles (console-selected / request-test)."""
+    lines = "\n".join(f"- {title}" for title in titles if str(title).strip())
+    return f"""\
+[指定漏洞复测 — 强制]
+
+只复测下列漏洞，禁止扩大到其它标题，禁止只写口头结论：
+
+{lines}
+
+对每一个列出的标题：
+1. 验证是否仍可利用。
+2. 用 update_vulnerability_report 写入 retest_status：
+   fixed / not_fixed / partial / regressed。
+3. 必须提供 screenshots 和/或 evidence / fix_verification 硬证据；无证据不得标 fixed。
+4. 未列出的漏洞不要复测、不要改。
+
+完成后 finish_scan 一次；executive_summary 概括本次指定复测结论。
+"""

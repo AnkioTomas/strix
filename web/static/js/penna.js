@@ -73,6 +73,11 @@
     parts.push(`| ID | \`${f.id || "—"}\` |`);
     parts.push(`| 资产 | ${f.asset || "—"} |`);
     parts.push(`| 位置 | ${where} |`);
+    parts.push(
+      `| 审核 | ${f.review_status === "invalid" ? "无效（报告/复测排除）" : "有效"}${
+        f.request_test ? " · 已要求测试" : ""
+      } |`
+    );
     if (f.cwe) parts.push(`| CWE | ${f.cwe} |`);
     if (f.cvss != null) parts.push(`| CVSS | ${f.cvss} |`);
     parts.push("");

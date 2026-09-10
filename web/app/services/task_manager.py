@@ -19,7 +19,12 @@ from app.security.target import (
     validate_pentest_target,
 )
 from app.services.attachments import copy_attachments, save_uploads
-from app.services.agent_prompts import REFRESH_REPORT_INSTRUCTION, RETEST_INSTRUCTION
+from app.services.agent_prompts import (
+    REFRESH_REPORT_INSTRUCTION,
+    RETEST_INSTRUCTION,
+    focused_retest_instruction,
+)
+from app.services.findings import apply_finding_flags, invalid_finding_ids
 from app.services.git_clone import GitError, clone_repository
 from app.services.results import (
     load_normalized_findings,
@@ -459,17 +464,73 @@ class TaskManager:
             copy_attachments_from=parent["workspace"],
         )
 
-    def retest_task(self, task_id: str, instruction: str | None = None) -> dict[str, Any]:
+    def retest_task(
+        self,
+        task_id: str,
+        instruction: str | None = None,
+        *,
+        finding_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
         parent = self.get_task(task_id)
         if parent["status"] not in TERMINAL:
             raise TaskError("TASK_ALREADY_RUNNING", "Only finished tasks can be retested")
         base = self._request_from_task(parent)
+        findings = self.get_results(task_id)
+        flags = self.db.list_finding_flags(task_id)
+        skipped_invalid = invalid_finding_ids(flags)
+
+        selected_ids = [str(x) for x in (finding_ids or []) if str(x).strip()]
+        if not selected_ids:
+            selected_ids = [
+                str(flag["finding_id"])
+                for flag in flags.values()
+                if flag.get("request_test") and str(flag.get("review_status") or "") != "invalid"
+            ]
+
+        if selected_ids:
+            targets = [
+                item
+                for item in findings
+                if str(item.get("id")) in set(selected_ids)
+                and str(item.get("id")) not in skipped_invalid
+            ]
+            if not targets:
+                raise TaskError(
+                    "NO_FINDINGS_TO_RETEST",
+                    "No eligible findings to retest (missing or marked invalid)",
+                )
+            note = focused_retest_instruction(
+                [str(item.get("title") or item.get("id")) for item in targets]
+            )
+            self.db.clear_finding_request_test(
+                task_id, [str(item.get("id")) for item in targets]
+            )
+        else:
+            valid = [
+                item
+                for item in findings
+                if str(item.get("id")) not in skipped_invalid
+            ]
+            if findings and not valid:
+                raise TaskError(
+                    "NO_FINDINGS_TO_RETEST",
+                    "All findings are marked invalid; nothing to retest",
+                )
+            note = RETEST_INSTRUCTION
+            if skipped_invalid:
+                skipped_titles = [
+                    str(item.get("title") or item.get("id"))
+                    for item in findings
+                    if str(item.get("id")) in skipped_invalid
+                ]
+                note = (
+                    f"{note}\n\n[控制台排除 — 无效漏洞，勿复测]\n"
+                    + "\n".join(f"- {title}" for title in skipped_titles)
+                )
+
         extra = (instruction or "").strip()
-        note = (
-            f"{RETEST_INSTRUCTION}\n\n[附加说明]\n{extra}"
-            if extra
-            else RETEST_INSTRUCTION
-        )
+        if extra:
+            note = f"{note}\n\n[附加说明]\n{extra}"
         if base.instruction:
             base.instruction = f"{base.instruction}\n\n{note}"
         else:
@@ -480,6 +541,60 @@ class TaskManager:
             action="retest",
             copy_attachments_from=parent["workspace"],
         )
+
+    def update_finding_review(
+        self,
+        task_id: str,
+        finding_id: str,
+        *,
+        review_status: str | None = None,
+        request_test: bool | None = None,
+    ) -> dict[str, Any]:
+        """Mark a finding invalid / restore it / queue it for focused retest."""
+        self.get_task(task_id)
+        findings = self.get_results(task_id)
+        match = next((item for item in findings if str(item.get("id")) == finding_id), None)
+        if match is None:
+            raise TaskError("FINDING_NOT_FOUND", f"Finding {finding_id} not found", status_code=404)
+        if review_status == "invalid":
+            request_test = False
+        try:
+            flag = self.db.upsert_finding_flag(
+                task_id,
+                finding_id,
+                review_status=review_status,
+                request_test=request_test,
+            )
+        except ValueError as exc:
+            raise TaskError("INVALID_FINDING_FLAG", str(exc), status_code=400) from exc
+        if flag["review_status"] == "invalid" and flag["request_test"]:
+            flag = self.db.upsert_finding_flag(
+                task_id, finding_id, review_status="invalid", request_test=False
+            )
+        self._rebuild_report_for_task(task_id)
+        match["review_status"] = flag["review_status"]
+        match["request_test"] = flag["request_test"]
+        return match
+
+    def request_finding_test(self, task_id: str, finding_id: str) -> dict[str, Any]:
+        """Queue + start a focused retest for one finding (terminal tasks only)."""
+        finding = self.update_finding_review(
+            task_id, finding_id, review_status="active", request_test=True
+        )
+        if finding.get("review_status") == "invalid":
+            raise TaskError("FINDING_INVALID", "Cannot retest an invalid finding", status_code=400)
+        child = self.retest_task(task_id, finding_ids=[finding_id])
+        return {"finding": finding, "task": child}
+
+    def _rebuild_report_for_task(self, task_id: str) -> None:
+        task = self.get_task(task_id)
+        run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
+        if not run_dir:
+            return
+        from app.services.results import rebuild_delivery_report
+
+        flags = self.db.list_finding_flags(task_id)
+        rebuild_delivery_report(run_dir, exclude_ids=invalid_finding_ids(flags))
 
     def refresh_report(self, task_id: str) -> dict[str, Any]:
         """Ask Strix to rewrite the delivery report in-place (resume or live steer)."""
@@ -867,14 +982,15 @@ class TaskManager:
             if name:
                 self.db.update_task(task_id, run_name=name)
                 run_dir = workspace_run_dir(Path(task["workspace"]), name)
+        flags = self.db.list_finding_flags(task_id)
         if run_dir is not None:
             # Always re-read disk: early polls must not freeze a partial cache.
             findings = load_normalized_findings(run_dir, task_id=task_id)
             self.db.replace_findings(task_id, findings)
-            return findings
+            return apply_finding_flags(findings, flags)
         cached = self.db.list_findings(task_id=task_id, limit=1000)
         if cached:
-            return cached
+            return apply_finding_flags(cached, flags)
         if task["status"] in ACTIVE:
             raise TaskError("RESULT_NOT_READY", "Results not ready", status_code=409)
         return []
@@ -886,7 +1002,8 @@ class TaskManager:
             raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
         from app.services.results import rebuild_delivery_report
 
-        rebuilt = rebuild_delivery_report(run_dir)
+        exclude = invalid_finding_ids(self.db.list_finding_flags(task_id))
+        rebuilt = rebuild_delivery_report(run_dir, exclude_ids=exclude)
         content = rebuilt if rebuilt is not None else read_report_markdown(run_dir)
         if not content and task["status"] in ACTIVE:
             raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)

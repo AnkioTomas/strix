@@ -224,7 +224,7 @@
                   <th>严重度</th>
                   <th>标题</th>
                   <th>资产 / 位置</th>
-                  <th>置信度</th>
+                  <th>状态</th>
                 </tr>
               </thead>
               <tbody id="findingsBody"></tbody>
@@ -233,6 +233,11 @@
           <div id="findingsDetailPane" class="hidden">
             <div class="findings-toolbar">
               <button type="button" class="btn ghost" id="findingsBack">← 返回列表</button>
+              <div class="findings-actions" id="findingsActions">
+                <button type="button" class="btn ghost" id="findingInvalidateBtn">标记无效</button>
+                <button type="button" class="btn ghost" id="findingRestoreBtn">恢复有效</button>
+                <button type="button" class="btn" id="findingTestBtn">要求测试</button>
+              </div>
             </div>
             <div id="findingsView" class="penna-render penna-host"></div>
           </div>

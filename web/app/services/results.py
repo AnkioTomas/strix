@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import zipfile
 from pathlib import Path
@@ -54,7 +55,11 @@ def read_report_markdown(run_dir: Path) -> str:
     return ""
 
 
-def rebuild_delivery_report(run_dir: Path) -> str | None:
+def rebuild_delivery_report(
+    run_dir: Path,
+    *,
+    exclude_ids: set[str] | None = None,
+) -> str | None:
     """Re-assemble the customer markdown from run.json + vulnerabilities.json.
 
     Lets chrome/layout fixes (retest gate, heading demotion, title tags) show up
@@ -65,6 +70,12 @@ def rebuild_delivery_report(run_dir: Path) -> str | None:
 
     record = read_run_record(run_dir)
     vulns = read_vulnerabilities(run_dir)
+    if exclude_ids:
+        vulns = [
+            item
+            for item in vulns
+            if str(item.get("id") or item.get("report_id") or "") not in exclude_ids
+        ]
     if not record and not vulns:
         return None
     scan_results = record.get("scan_results") if isinstance(record, dict) else None
@@ -79,6 +90,11 @@ def rebuild_delivery_report(run_dir: Path) -> str | None:
         )
     except Exception:
         return None
+    # Stale zip would still contain previously-included findings.
+    zip_path = run_dir / "penetration_test_report.zip"
+    if zip_path.is_file():
+        with contextlib.suppress(OSError):
+            zip_path.unlink()
     return read_report_markdown(run_dir)
 
 

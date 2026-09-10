@@ -15,6 +15,7 @@ from app.schemas import (
     ArtifactsResponse,
     CreateTaskRequest,
     EventsResponse,
+    Finding,
     FindingsResponse,
     GitSource,
     ImportRunsRequest,
@@ -23,10 +24,13 @@ from app.schemas import (
     MessageCreate,
     MessagesResponse,
     ReportResponse,
+    RequestFindingTestResponse,
     ResumeTaskRequest,
+    RetestTaskRequest,
     TaskListResponse,
     TaskLogsResponse,
     TaskSummary,
+    UpdateFindingRequest,
     UpdateTaskRequest,
 )
 from app.api.viewer_proxy import attach_viewer_proxy_url
@@ -257,16 +261,62 @@ async def retry_task(task_id: str, manager: TaskManager = Depends(get_manager)):
 @router.post("/tasks/{task_id}/retest", status_code=202, response_model=TaskSummary)
 async def retest_task(
     task_id: str,
-    payload: ResumeTaskRequest | None = None,
+    payload: RetestTaskRequest | None = None,
     instruction: str | None = Query(default=None),
     manager: TaskManager = Depends(get_manager),
 ):
     note = (payload.instruction if payload else None) or instruction
+    finding_ids = payload.finding_ids if payload else None
     try:
-        task = await asyncio.to_thread(manager.retest_task, task_id, note)
+        task = await asyncio.to_thread(
+            manager.retest_task,
+            task_id,
+            note,
+            finding_ids=finding_ids,
+        )
     except TaskError as exc:
         return _error(exc)
     return _summary(task)
+
+
+@router.patch("/tasks/{task_id}/findings/{finding_id}", response_model=Finding)
+async def update_finding(
+    task_id: str,
+    finding_id: str,
+    payload: UpdateFindingRequest,
+    manager: TaskManager = Depends(get_manager),
+):
+    try:
+        finding = await asyncio.to_thread(
+            manager.update_finding_review,
+            task_id,
+            finding_id,
+            review_status=payload.review_status,
+            request_test=payload.request_test,
+        )
+    except TaskError as exc:
+        return _error(exc)
+    return Finding.model_validate(finding)
+
+
+@router.post(
+    "/tasks/{task_id}/findings/{finding_id}/test",
+    status_code=202,
+    response_model=RequestFindingTestResponse,
+)
+async def request_finding_test(
+    task_id: str,
+    finding_id: str,
+    manager: TaskManager = Depends(get_manager),
+):
+    try:
+        result = await asyncio.to_thread(manager.request_finding_test, task_id, finding_id)
+    except TaskError as exc:
+        return _error(exc)
+    return RequestFindingTestResponse(
+        finding=Finding.model_validate(result["finding"]),
+        task=_summary(result["task"]),
+    )
 
 
 @router.post("/tasks/{task_id}/refresh-report", status_code=202, response_model=TaskSummary)

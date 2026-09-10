@@ -100,8 +100,10 @@ PYTHONPATH=. python -m app
 | POST | `/api/v1/tasks/{id}/retry` | 同配置立刻重跑（新 run，API 兼容） |
 | POST | `/api/v1/tasks/{id}/resume` | 原地续跑同一任务（同 `run_name`，需 `agents.json`） |
 | POST | `/api/v1/tasks/{id}/refresh-report` | 要求 Agent 按交付规范重写报告（resume 或 live 投递） |
-| POST | `/api/v1/tasks/{id}/retest` | 复测子任务（强制标记修复状态 + 佐证；JSON `instruction` 可附凭证/环境说明） |
-| GET | `/api/v1/tasks/{id}/results` | 该任务 Finding |
+| POST | `/api/v1/tasks/{id}/retest` | 复测子任务（强制标记修复状态 + 佐证；JSON `instruction` 可附凭证；`finding_ids` 可指定漏洞；跳过已标无效项；若存在待测标记则只测那些） |
+| PATCH | `/api/v1/tasks/{id}/findings/{fid}` | 漏洞审核：`review_status=active\|invalid`，`request_test`；无效项不进报告、不参与复测 |
+| POST | `/api/v1/tasks/{id}/findings/{fid}/test` | 对指定漏洞发起聚焦复测子任务 |
+| GET | `/api/v1/tasks/{id}/results` | 该任务 Finding（含 `review_status` / `request_test`） |
 | GET | `/api/v1/tasks/{id}/report` | Markdown 报告 |
 | GET | `/api/v1/tasks/{id}/events` | Agent 事件 |
 | GET | `/api/v1/tasks/{id}/events/stream` | SSE |

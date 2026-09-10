@@ -73,6 +73,26 @@ def normalize_findings(raw_items: list[Any], *, task_id: str) -> list[dict[str, 
     return findings
 
 
+def apply_finding_flags(
+    findings: list[dict[str, Any]],
+    flags: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Attach console review flags without mutating Strix source reports."""
+    for item in findings:
+        flag = flags.get(str(item.get("id") or ""), {})
+        item["review_status"] = str(flag.get("review_status") or "active")
+        item["request_test"] = bool(flag.get("request_test"))
+    return findings
+
+
+def invalid_finding_ids(flags: dict[str, dict[str, Any]]) -> set[str]:
+    return {
+        fid
+        for fid, flag in flags.items()
+        if str(flag.get("review_status") or "") == "invalid"
+    }
+
+
 def _combine_poc(raw: dict[str, Any]) -> str | None:
     """Keep both narrative steps and the reproducible script."""
     desc = _as_text(raw.get("poc_description"))

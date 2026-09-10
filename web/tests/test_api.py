@@ -536,6 +536,135 @@ def test_retest_embeds_mandatory_instruction(client: TestClient):
     assert RETEST_INSTRUCTION.strip() in child2["instruction"]
 
 
+def _seed_completed_task_with_vulns(client: TestClient) -> tuple[dict, Path]:
+    created = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com",
+            "scan_mode": "quick",
+        },
+    ).json()
+    manager = client.app.state.manager
+    task = manager.get_task(created["id"])
+    run_name = "finding-flags"
+    run_dir = Path(task["workspace"]) / "strix_runs" / run_name
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "run_name": run_name,
+                "status": "completed",
+                "scan_results": {
+                    "executive_summary": "摘要",
+                    "methodology": "方法",
+                    "technical_analysis": "分析",
+                    "recommendations": "建议",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "vulnerabilities.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "v-keep",
+                    "title": "Keep Me",
+                    "severity": "high",
+                    "description": "real",
+                    "target": "https://example.com",
+                },
+                {
+                    "id": "v-drop",
+                    "title": "Drop Me",
+                    "severity": "medium",
+                    "description": "noise",
+                    "target": "https://example.com",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    manager.db.update_task(
+        created["id"],
+        status="completed",
+        run_name=run_name,
+        finished_at="2026-01-01T00:00:00Z",
+    )
+    manager._processes.pop(created["id"], None)
+    return manager.get_task(created["id"]), run_dir
+
+
+def test_mark_finding_invalid_hides_from_report_and_retest(client: TestClient):
+    created, _run_dir = _seed_completed_task_with_vulns(client)
+    task_id = created["id"]
+
+    findings = client.get(f"/api/v1/tasks/{task_id}/results").json()["findings"]
+    assert {f["id"] for f in findings} == {"v-keep", "v-drop"}
+    assert all(f["review_status"] == "active" for f in findings)
+
+    patched = client.patch(
+        f"/api/v1/tasks/{task_id}/findings/v-drop",
+        json={"review_status": "invalid"},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["review_status"] == "invalid"
+    assert patched.json()["request_test"] is False
+
+    findings2 = client.get(f"/api/v1/tasks/{task_id}/results").json()["findings"]
+    by_id = {f["id"]: f for f in findings2}
+    assert by_id["v-drop"]["review_status"] == "invalid"
+    assert by_id["v-keep"]["review_status"] == "active"
+
+    report = client.get(f"/api/v1/tasks/{task_id}/report").json()["content"]
+    assert "Keep Me" in report
+    assert "Drop Me" not in report
+
+    retest = client.post(f"/api/v1/tasks/{task_id}/retest")
+    assert retest.status_code == 202, retest.text
+    child = client.app.state.manager.get_task(retest.json()["id"])
+    assert "Drop Me" in child["instruction"]
+    assert "勿复测" in child["instruction"] or "无效" in child["instruction"]
+
+
+def test_request_finding_test_creates_focused_retest(client: TestClient):
+    created, _run_dir = _seed_completed_task_with_vulns(client)
+    task_id = created["id"]
+
+    res = client.post(f"/api/v1/tasks/{task_id}/findings/v-keep/test")
+    assert res.status_code == 202, res.text
+    body = res.json()
+    assert body["finding"]["id"] == "v-keep"
+    child = client.app.state.manager.get_task(body["task"]["id"])
+    assert child["action"] == "retest"
+    assert "指定漏洞复测" in child["instruction"]
+    assert "Keep Me" in child["instruction"]
+    assert "Drop Me" not in child["instruction"]
+
+
+def test_retest_respects_request_test_queue(client: TestClient):
+    created, _run_dir = _seed_completed_task_with_vulns(client)
+    task_id = created["id"]
+
+    queued = client.patch(
+        f"/api/v1/tasks/{task_id}/findings/v-keep",
+        json={"request_test": True},
+    )
+    assert queued.status_code == 200, queued.text
+    assert queued.json()["request_test"] is True
+
+    retest = client.post(f"/api/v1/tasks/{task_id}/retest")
+    assert retest.status_code == 202, retest.text
+    child = client.app.state.manager.get_task(retest.json()["id"])
+    assert "指定漏洞复测" in child["instruction"]
+    assert "Keep Me" in child["instruction"]
+    assert "Drop Me" not in child["instruction"]
+
+    flags = client.app.state.manager.db.list_finding_flags(task_id)
+    assert flags["v-keep"]["request_test"] is False
+
+
 def test_reap_skips_until_worker_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from app.services.scan_state import write_state
     from app.services.strix_runner import DetachedScanHandle

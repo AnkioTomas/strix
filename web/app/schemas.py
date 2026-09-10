@@ -174,11 +174,36 @@ class Finding(BaseModel):
     cwe: str | None = None
     cvss: float | None = None
     created_at: str | None = None
+    review_status: Literal["active", "invalid"] = "active"
+    request_test: bool = False
 
 
 class FindingsResponse(BaseModel):
     task_id: str | None = None
     findings: list[Finding]
+
+
+class UpdateFindingRequest(BaseModel):
+    """Console-side triage for one finding (survives Strix re-ingest)."""
+
+    review_status: Literal["active", "invalid"] | None = None
+    request_test: bool | None = None
+
+    @model_validator(mode="after")
+    def require_change(self) -> UpdateFindingRequest:
+        if self.review_status is None and self.request_test is None:
+            raise ValueError("provide review_status and/or request_test")
+        return self
+
+
+class RetestTaskRequest(BaseModel):
+    instruction: str | None = None
+    finding_ids: list[str] | None = None
+
+
+class RequestFindingTestResponse(BaseModel):
+    finding: Finding
+    task: TaskSummary
 
 
 class ReportResponse(BaseModel):

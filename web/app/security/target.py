@@ -1,4 +1,4 @@
-"""Pentest target validation (SSRF / private network guards)."""
+"""Pentest target validation (SSRF / private network guards) + TCP reachability."""
 
 from __future__ import annotations
 
@@ -21,6 +21,9 @@ _BLOCKED_HOSTNAMES = {
     "metadata.google.internal",
     "metadata",
 }
+
+# Fast preflight — fail create/retry before queueing a dead host:port.
+TCP_CONNECT_TIMEOUT_SECONDS = 2.0
 
 
 def validate_pentest_target(target: str, settings: Settings) -> str:
@@ -51,6 +54,68 @@ def validate_pentest_target(target: str, settings: Settings) -> str:
         raise TargetValidationError("INVALID_TARGET", "URL missing hostname")
     _assert_host_safe(parsed.hostname, settings)
     return raw
+
+
+def parse_tcp_endpoint(target: str) -> tuple[str, int] | None:
+    """Return ``(host, port)`` for a quick TCP probe, or ``None`` if unknown."""
+    raw = (target or "").strip()
+    if not raw:
+        return None
+
+    if "://" in raw:
+        parsed = urlparse(raw)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return None
+        if parsed.port is not None:
+            return parsed.hostname, int(parsed.port)
+        return parsed.hostname, 443 if parsed.scheme == "https" else 80
+
+    head = raw.split("/")[0]
+    if head.startswith("["):
+        # [ipv6]:port
+        end = head.find("]")
+        if end <= 1:
+            return None
+        host = head[1:end]
+        rest = head[end + 1 :]
+        if rest.startswith(":") and rest[1:].isdigit():
+            return host, int(rest[1:])
+        return None
+
+    if head.count(":") == 1:
+        host, port_s = head.split(":", 1)
+        if host and port_s.isdigit():
+            return host, int(port_s)
+    return None
+
+
+def check_tcp_reachable(
+    target: str,
+    *,
+    timeout: float = TCP_CONNECT_TIMEOUT_SECONDS,
+) -> None:
+    """Fail fast when the target host:port does not accept TCP connections.
+
+    Skips quietly when the target has no clear TCP endpoint (bare hostname,
+    local path, etc.).
+    """
+    endpoint = parse_tcp_endpoint(target)
+    if endpoint is None:
+        return
+    host, port = endpoint
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return
+    except TimeoutError as exc:
+        raise TargetValidationError(
+            "TARGET_UNREACHABLE",
+            f"TCP connect to {host}:{port} timed out after {timeout:g}s",
+        ) from exc
+    except OSError as exc:
+        raise TargetValidationError(
+            "TARGET_UNREACHABLE",
+            f"TCP connect to {host}:{port} failed: {exc}",
+        ) from exc
 
 
 def _assert_host_safe(hostname: str, settings: Settings) -> None:

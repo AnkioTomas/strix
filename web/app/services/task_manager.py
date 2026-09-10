@@ -13,7 +13,11 @@ from app.config import Settings
 from app.db import Database, utc_now
 from app.schemas import CreateTaskRequest, GitSource, LocalSource
 from app.security.source import SourceValidationError, validate_source
-from app.security.target import TargetValidationError, validate_pentest_target
+from app.security.target import (
+    TargetValidationError,
+    check_tcp_reachable,
+    validate_pentest_target,
+)
 from app.services.attachments import copy_attachments, save_uploads
 from app.services.agent_prompts import REFRESH_REPORT_INSTRUCTION, RETEST_INSTRUCTION
 from app.services.git_clone import GitError, clone_repository
@@ -93,6 +97,7 @@ class TaskManager:
             if req.type == "pentest":
                 assert req.target is not None
                 target = validate_pentest_target(req.target, self.settings)
+                check_tcp_reachable(target)
             else:
                 assert req.source is not None
                 source = validate_source(req.source, self.settings)
@@ -462,6 +467,11 @@ class TaskManager:
         task = self.get_task(task_id)
         if task["status"] not in TERMINAL:
             raise TaskError("TASK_ALREADY_RUNNING", "Only finished tasks can be resumed")
+        if task.get("type") == "pentest" and task.get("target"):
+            try:
+                check_tcp_reachable(str(task["target"]))
+            except TargetValidationError as exc:
+                raise TaskError(exc.code, exc.message) from exc
         run_name = task.get("run_name")
         if not run_name:
             raise TaskError(

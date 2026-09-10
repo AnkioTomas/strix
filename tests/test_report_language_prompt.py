@@ -86,11 +86,13 @@ def test_system_prompt_embeds_port_scope_and_authorized_ports(
             ],
         },
     )
-    assert "PORT SCOPE (HARD CONSTRAINT" in prompt
+    assert "PORT SCOPE" in prompt
     assert "authorized_ports" in prompt
     assert "ports: 443" in prompt
     assert "full port scan" in prompt
     assert "测试全端口" in prompt
+    assert "Incidental leak" in prompt
+    assert "briefly verify" in prompt
 
 
 def test_system_prompt_injects_freeform_language(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -31,10 +31,11 @@ High-signal flags:
 - `-silent` compact output
 - `-o <file>` output file
 
-Authorization first (HARD):
-- Only scan ports listed in the system prompt ``authorized_ports`` for that host.
-- Default: `-p <authorized_ports>` only. Never use `-top-ports` or guessed common ports unless Special instructions explicitly authorize full/extra ports.
-- If ``authorized_ports`` is empty, do not run naabu against that host for discovery.
+Authorization first:
+- Default: only scan ports listed in the system prompt ``authorized_ports`` for that host (`-p <authorized_ports>`).
+- Never use `-top-ports` or guessed common ports unless Special instructions explicitly authorize full/extra ports.
+- If ``authorized_ports`` is empty, do not run proactive discovery naabu on that host.
+- Incidental leak: if testing already disclosed a concrete port on an authorized host, you may run a minimal `-p <leaked_ports>` check to verify impact — not a broader sweep.
 
 Agent-safe baseline for automation (authorized ports only):
 `naabu -list hosts.txt -p <authorized_ports> -scan-type c -Pn -rate 300 -c 25 -timeout 1000 -retries 1 -verify -silent -j -o naabu.jsonl`

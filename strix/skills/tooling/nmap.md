@@ -29,10 +29,11 @@ High-signal flags:
 - `--script-timeout <time>` bound NSE script runtime
 - `-oA <prefix>` output in normal/XML/grepable formats
 
-Authorization first (HARD):
-- Only scan ports listed in the system prompt ``authorized_ports`` for that host.
-- Default: `-p <authorized_ports>` only. Never use `--top-ports`, `-p-`, or guessed common ports unless Special instructions explicitly authorize full/extra ports.
-- If ``authorized_ports`` is empty, do not run nmap against that host for discovery.
+Authorization first:
+- Default: only scan ports listed in the system prompt ``authorized_ports`` for that host (`-p <authorized_ports>`).
+- Never use `--top-ports`, `-p-`, or guessed common ports unless Special instructions explicitly authorize full/extra ports.
+- If ``authorized_ports`` is empty, do not run proactive discovery nmap on that host.
+- Incidental leak: if testing already disclosed a concrete port on an authorized host, you may run a minimal `-p <leaked_ports>` check to verify impact — not a broader sweep.
 
 Agent-safe baseline for automation (authorized ports only):
 `nmap -n -Pn --open -p <authorized_ports> -T4 --max-retries 1 --host-timeout 90s -oA nmap_quick <host>`

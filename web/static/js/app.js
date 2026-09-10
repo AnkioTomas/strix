@@ -118,7 +118,7 @@
     refreshDetails();
   }
 
-  function renderOverview() {
+    function renderOverview() {
     const t = currentTask();
     if (!t) return;
     $("selectedMeta").textContent = `${t.status} · ${t.scan_mode || "—"} · ${t.created_at || ""}`;

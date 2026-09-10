@@ -75,9 +75,9 @@ def test_create_and_list_pentest(client: TestClient):
     assert any(t["id"] == task["id"] for t in listed.json()["tasks"])
 
 
-def test_create_task_with_attachments(client: TestClient, tmp_path: Path):
-    from app.services.attachments import resolve_task_workspace_files
+def test_create_task_with_attachments(client: TestClient):
     from app.config import get_settings
+    from app.services.attachments import resolve_task_workspace_files
 
     res = client.post(
         "/api/v1/tasks",

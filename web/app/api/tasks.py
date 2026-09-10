@@ -77,6 +77,10 @@ async def _parse_create_payload(
             "notes": _form_value(form, "notes"),
             "held": str(form.get("held") or "").lower() in {"1", "true", "yes", "on"},
         }
+        parent_task_id = _form_value(form, "parent_task_id")
+        if parent_task_id:
+            payload["parent_task_id"] = parent_task_id
+            payload["action"] = _form_value(form, "action") or "retry"
         max_budget = _form_value(form, "max_budget")
         if max_budget:
             payload["max_budget"] = float(max_budget)
@@ -126,10 +130,17 @@ async def create_task(
 ):
     try:
         payload, uploads = await _parse_create_payload(request)
+        copy_from = None
+        if payload.parent_task_id:
+            parent = await asyncio.to_thread(manager.get_task, payload.parent_task_id)
+            copy_from = parent["workspace"]
         task = await asyncio.to_thread(
             manager.create_task,
             payload,
+            parent_task_id=payload.parent_task_id,
+            action=payload.action,
             attachments=uploads or None,
+            copy_attachments_from=copy_from,
         )
     except TaskError as exc:
         return _error(exc)

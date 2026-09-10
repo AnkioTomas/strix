@@ -56,6 +56,8 @@ class CreateTaskRequest(BaseModel):
     held: bool = False
     scan_mode: ScanMode = "deep"
     max_budget: float | None = Field(default=None, gt=0)
+    parent_task_id: str | None = None
+    action: str | None = None
 
     @model_validator(mode="after")
     def validate_shape(self) -> CreateTaskRequest:
@@ -119,6 +121,7 @@ class TaskSummary(BaseModel):
     target: str | None = None
     source_type: str | None = None
     source_url: str | None = None
+    source_branch: str | None = None
     instruction: str | None = None
     scan_mode: str | None = None
     run_name: str | None = None

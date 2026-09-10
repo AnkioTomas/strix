@@ -11,6 +11,8 @@
   let reportRenderer = null;
   let findingsCache = [];
   let selectedFindingId = null;
+  /** @type {{ parentId: string, action: string } | null} */
+  let createDraft = null;
 
   function esc(s) {
     return String(s ?? "")
@@ -60,6 +62,50 @@
       $("emptyState").classList.add("hidden");
       $("detailPanel").classList.remove("hidden");
     }
+  }
+
+  function syncCreateTypeFields() {
+    const audit = $("taskType").value === "audit";
+    $("auditFields").classList.toggle("hidden", !audit);
+    $("pentestFields").classList.toggle("hidden", audit);
+  }
+
+  function resetCreateForm() {
+    createDraft = null;
+    const title = $("createPanel").querySelector("h2");
+    if (title) title.textContent = "新建任务";
+    $("createTask").textContent = "创建";
+    $("taskName").value = "";
+    $("taskNotes").value = "";
+    $("taskHeld").checked = false;
+    $("taskType").value = "pentest";
+    $("scanMode").value = "deep";
+    $("target").value = "";
+    $("gitUrl").value = "";
+    $("gitBranch").value = "";
+    $("instruction").value = "";
+    $("attachments").value = "";
+    syncCreateTypeFields();
+    updateAttachmentsHint();
+  }
+
+  function fillCreateFormFromTask(t, action) {
+    createDraft = { parentId: t.id, action };
+    const title = $("createPanel").querySelector("h2");
+    if (title) title.textContent = action === "retry" ? "重试任务" : "新建任务";
+    $("createTask").textContent = action === "retry" ? "创建重试" : "创建";
+    $("taskName").value = t.name || "";
+    $("taskNotes").value = t.notes || "";
+    $("taskHeld").checked = false;
+    $("taskType").value = t.type || "pentest";
+    $("scanMode").value = t.scan_mode || "deep";
+    $("instruction").value = t.instruction || "";
+    $("target").value = t.type === "pentest" ? t.target || "" : "";
+    $("gitUrl").value = t.type === "audit" ? t.source_url || "" : "";
+    $("gitBranch").value = t.source_branch || "";
+    $("attachments").value = "";
+    syncCreateTypeFields();
+    updateAttachmentsHint();
   }
 
   function showImport(show) {
@@ -500,7 +546,9 @@
     if (!input || !hint) return;
     const files = Array.from(input.files || []);
     if (!files.length) {
-      hint.textContent = "可选。例如 PoC、wordlist、凭证说明。";
+      hint.textContent = createDraft
+        ? "父任务附件会自动复制；也可另加新附件。"
+        : "可选。例如 PoC、wordlist、凭证说明。";
       return;
     }
     hint.textContent = `已选 ${files.length} 个：${files.map((f) => f.name).join(", ")}`;
@@ -527,10 +575,15 @@
   $("sidebarToggle").onclick = () => $("sidebar").classList.toggle("open");
   $("newTaskBtn").onclick = () => {
     showImport(false);
+    resetCreateForm();
     showCreate(true);
   };
-  $("cancelCreate").onclick = () => showCreate(false);
+  $("cancelCreate").onclick = () => {
+    resetCreateForm();
+    showCreate(false);
+  };
   $("importTaskBtn").onclick = () => {
+    resetCreateForm();
     showCreate(false);
     showImport(true);
   };
@@ -541,11 +594,7 @@
     renderFindingsTable();
   };
 
-  $("taskType").onchange = () => {
-    const audit = $("taskType").value === "audit";
-    $("auditFields").classList.toggle("hidden", !audit);
-    $("pentestFields").classList.toggle("hidden", audit);
-  };
+  $("taskType").onchange = syncCreateTypeFields;
 
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.onclick = () => setTab(tab.dataset.tab);
@@ -572,15 +621,15 @@
       const branch = $("gitBranch").value.trim();
       if (branch) form.append("source_branch", branch);
     }
+    if (createDraft?.parentId) {
+      form.append("parent_task_id", createDraft.parentId);
+      form.append("action", createDraft.action || "retry");
+    }
     files.forEach((file) => form.append("attachments", file));
     try {
       await api.ensureSession();
       const task = await api.apiForm("/api/v1/tasks", form);
-      $("attachments").value = "";
-      $("taskName").value = "";
-      $("taskNotes").value = "";
-      $("taskHeld").checked = false;
-      updateAttachmentsHint();
+      resetCreateForm();
       showCreate(false);
       await refresh();
       selectTask(task.id);
@@ -641,15 +690,12 @@
     }
   };
 
-  $("retryBtn").onclick = async () => {
-    if (!selected) return;
-    try {
-      const t = await api.api(`/api/v1/tasks/${selected}/retry`, { method: "POST" });
-      await refresh();
-      selectTask(t.id);
-    } catch (e) {
-      alert(e.message);
-    }
+  $("retryBtn").onclick = () => {
+    const t = currentTask();
+    if (!t) return;
+    showImport(false);
+    fillCreateFormFromTask(t, "retry");
+    showCreate(true);
   };
 
   function openResumeModal() {

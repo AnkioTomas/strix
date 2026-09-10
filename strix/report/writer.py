@@ -229,9 +229,9 @@ def render_vulnerability_md(report: dict[str, Any]) -> str:
     sev = severity_label(report.get("severity"), labels)
     title = report.get("title") or labels["untitled"]
     body = render_zh_vulnerability_section(report, index=1)
-    # Drop the leading "1. [ sev ] title" line from the section renderer.
+    # Drop the leading "## 1. [ sev ] title" line from the section renderer.
     lines = body.splitlines()
-    if lines and lines[0].startswith("1. [ "):
+    if lines and lines[0].startswith("## 1. [ "):
         lines = lines[1:]
         if lines and lines[0] == "":
             lines = lines[1:]

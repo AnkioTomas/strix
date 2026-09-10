@@ -96,6 +96,8 @@ def test_delivery_report_chrome_follows_language(monkeypatch: pytest.MonkeyPatch
     assert "# Executive Summary" in md
     assert "# Findings" in md
     assert "No reproducible findings" in md
+    assert "| System |" not in md
+    assert "OWASP WSTG / PTES" not in md
 
 
 def test_delivery_report_chrome_chinese_default(monkeypatch: pytest.MonkeyPatch) -> None:

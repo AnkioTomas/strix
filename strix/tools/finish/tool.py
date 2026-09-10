@@ -223,20 +223,27 @@ async def finish_scan(
     - Each section has a specific role:
 
         - ``executive_summary`` — for non-technical leadership **and**
-          the Chinese delivery report's「测试概述」. Risk posture,
+          the delivery report's overview section. Risk posture,
           business impact (data exposure / compliance / reputation),
           notable criticals, overarching remediation theme. Keep it
           factual; this text is copied into the customer zip.
         - ``methodology`` — frameworks followed (OWASP WSTG, PTES,
           OSSTMM, NIST), engagement type (black/gray/white box), scope
-          and constraints, categories of testing performed. **No**
-          internal execution detail.
+          and constraints, categories of testing performed. Copied into
+          the delivery report when present. **No** internal execution
+          detail.
         - ``technical_analysis`` — consolidated findings overview with
           severity model and systemic root causes. Reference individual
           vuln reports for repro steps; don't duplicate raw evidence.
+          Copied into the delivery report when present.
         - ``recommendations`` — prioritized actions grouped by urgency
           (Immediate / Short-term / Medium-term), each with concrete
           remediation steps. End with retest/validation guidance.
+          Copied into the delivery report when present.
+
+        Do **not** invent a metadata table (system name / tech stack /
+        standards / engagement type). Put that context in these prose
+        fields if it matters.
 
     - **Formatting — use markdown in every field.** These fields may be
       rendered into generated reports, so structure them clearly: lead

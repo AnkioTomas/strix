@@ -675,16 +675,19 @@ class ReportState:
                 write_vulnerabilities(run_dir, self.vulnerability_reports, self._saved_vuln_ids)
 
             # Customer-facing delivery report + zip (md + relative-path images).
-            # Chrome language follows STRIX_REPORT_LANGUAGE.
+            # Chrome language follows STRIX_REPORT_LANGUAGE. Narrative comes from
+            # finish_scan fields; engagement metadata is not invented.
             try:
                 overview = None
-                if isinstance(self.scan_results, dict):
-                    overview = self.scan_results.get("executive_summary")
+                scan_results = self.scan_results if isinstance(self.scan_results, dict) else None
+                if scan_results is None and self.final_scan_result:
+                    overview = self.final_scan_result
                 write_zh_delivery_bundle(
                     run_dir,
                     run_record=self.run_record,
                     vulnerability_reports=self.vulnerability_reports,
-                    overview=str(overview) if overview else self.final_scan_result,
+                    overview=overview,
+                    scan_results=scan_results,
                     file_bytes=self._pull_screenshot_bytes(),
                 )
             except Exception:

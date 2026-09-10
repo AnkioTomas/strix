@@ -85,19 +85,12 @@ class ReportLabels(TypedDict):
     fixed_version: str
     code_location: str
     found_at: str
-    engagement_gray: str
-    engagement_white: str
-    engagement_black: str
     default_system: str
-    system_name: str
-    tech_stack: str
-    tech_stack_fallback: str
-    test_standard: str
-    test_standard_value: str
-    assessment_type: str
-    test_scope: str
     report_title_suffix: str
     overview_heading: str
+    methodology_heading: str
+    technical_analysis_heading: str
+    recommendations_heading: str
     findings_heading: str
     overview_with_findings: str
     overview_clean: str
@@ -143,19 +136,12 @@ _LABELS_ZH: ReportLabels = {
     "fixed_version": "修复版本",
     "code_location": "代码位置：",
     "found_at": "发现时间",
-    "engagement_gray": "灰盒（源码 + 线上目标）",
-    "engagement_white": "白盒",
-    "engagement_black": "黑盒",
     "default_system": "目标系统",
-    "system_name": "系统名称",
-    "tech_stack": "技术架构",
-    "tech_stack_fallback": "见测试范围与目标技术识别结果",
-    "test_standard": "测试标准",
-    "test_standard_value": "OWASP WSTG / PTES",
-    "assessment_type": "评估类型",
-    "test_scope": "测试范围",
     "report_title_suffix": "安全渗透测试报告",
     "overview_heading": "测试概述",
+    "methodology_heading": "测试方法",
+    "technical_analysis_heading": "技术分析",
+    "recommendations_heading": "修复建议",
     "findings_heading": "漏洞清单",
     "overview_with_findings": (
         "本次测试共确认 **{count}** 个漏洞。危害较大的问题包括：{top}。"
@@ -203,19 +189,12 @@ _LABELS_EN: ReportLabels = {
     "fixed_version": "Fixed version",
     "code_location": "Code location:",
     "found_at": "Found",
-    "engagement_gray": "Gray-box (source + live target)",
-    "engagement_white": "White-box",
-    "engagement_black": "Black-box",
     "default_system": "Target system",
-    "system_name": "System",
-    "tech_stack": "Tech stack",
-    "tech_stack_fallback": "See scope and technology fingerprinting results",
-    "test_standard": "Standard",
-    "test_standard_value": "OWASP WSTG / PTES",
-    "assessment_type": "Engagement type",
-    "test_scope": "Scope",
     "report_title_suffix": "Penetration Test Report",
     "overview_heading": "Executive Summary",
+    "methodology_heading": "Methodology",
+    "technical_analysis_heading": "Technical Analysis",
+    "recommendations_heading": "Recommendations",
     "findings_heading": "Findings",
     "overview_with_findings": (
         "This assessment confirmed **{count}** finding(s). Notable issues: {top}."

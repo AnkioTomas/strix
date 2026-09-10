@@ -157,38 +157,6 @@ def _vuln_meta_table(report: dict[str, Any]) -> str:
     )
 
 
-def _engagement_type(run_record: dict[str, Any]) -> str:
-    labels = report_labels()
-    targets = run_record.get("targets_info") or []
-    has_code = any(
-        isinstance(t, dict) and t.get("type") in {"local_code", "repository", "git_repo"}
-        for t in targets
-    )
-    has_url = any(
-        isinstance(t, dict) and t.get("type") in {"web", "url", "domain", "ip", "api_spec"}
-        for t in targets
-    )
-    if has_code and has_url:
-        return labels["engagement_gray"]
-    if has_code:
-        return labels["engagement_white"]
-    return labels["engagement_black"]
-
-
-def _scope_text(run_record: dict[str, Any]) -> str:
-    targets = run_record.get("targets_info") or []
-    parts: list[str] = []
-    for target in targets:
-        if not isinstance(target, dict):
-            continue
-        original = target.get("original") or target.get("details", {})
-        if isinstance(original, dict):
-            original = original.get("url") or original.get("path") or original.get("repo_url")
-        if original:
-            parts.append(str(original))
-    return "<br>".join(parts) if parts else "—"
-
-
 def _system_name(run_record: dict[str, Any]) -> str:
     labels = report_labels()
     targets = run_record.get("targets_info") or []
@@ -198,17 +166,48 @@ def _system_name(run_record: dict[str, Any]) -> str:
     return str(run_record.get("run_name") or labels["default_system"])
 
 
+def _narrative_sections(
+    *,
+    overview: str | None,
+    scan_results: dict[str, Any] | None,
+) -> list[str]:
+    """Agent-authored narrative only — no invented engagement metadata."""
+    labels = report_labels()
+    lines: list[str] = []
+
+    def _append(heading: str, body: object | None) -> None:
+        text = str(body or "").strip()
+        if not text:
+            return
+        lines.extend([f"# {heading}", "", text, ""])
+
+    if isinstance(scan_results, dict):
+        _append(labels["overview_heading"], scan_results.get("executive_summary"))
+        _append(labels["methodology_heading"], scan_results.get("methodology"))
+        _append(
+            labels["technical_analysis_heading"],
+            scan_results.get("technical_analysis"),
+        )
+        _append(labels["recommendations_heading"], scan_results.get("recommendations"))
+        if lines:
+            return lines
+
+    if overview and overview.strip():
+        lines.extend([f"# {labels['overview_heading']}", "", overview.strip(), ""])
+    return lines
+
+
 def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
     """Render one finding block for the consolidated delivery report."""
     labels = report_labels()
     sev = severity_label(report.get("severity"), labels)
     title = report.get("title") or labels["untitled"]
     lines: list[str] = [
-        f"{index}. [ {sev} ] {title}",
+        f"## {index}. [ {sev} ] {title}",
         "",
         _vuln_meta_table(report),
         "",
-        f"## {labels['description']}",
+        f"### {labels['description']}",
         "",
         str(
             report.get("description")
@@ -216,7 +215,7 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
             or labels["no_description"]
         ),
         "",
-        f"## {labels['reproduction']}",
+        f"### {labels['reproduction']}",
         "",
     ]
     if report.get("poc_description"):
@@ -249,11 +248,11 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
 
     lines.extend(
         [
-            f"## {labels['impact']}",
+            f"### {labels['impact']}",
             "",
             str(report.get("impact") or labels["impact_missing"]),
             "",
-            f"## {labels['remediation']}",
+            f"### {labels['remediation']}",
             "",
             str(report.get("remediation_steps") or labels["remediation_missing"]),
             "",
@@ -314,7 +313,7 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
             else:
                 appendix_bits.append("")
     if appendix_bits:
-        lines.extend([f"## {labels['appendix']}", "", *appendix_bits])
+        lines.extend([f"### {labels['appendix']}", "", *appendix_bits])
     return "\n".join(lines).rstrip()
 
 
@@ -323,8 +322,13 @@ def render_zh_penetration_report(
     run_record: dict[str, Any],
     vulnerability_reports: list[dict[str, Any]],
     overview: str | None = None,
+    scan_results: dict[str, Any] | None = None,
 ) -> str:
-    """Build the consolidated penetration test report markdown."""
+    """Build the consolidated penetration test report markdown.
+
+    Top matter is agent narrative only. Findings are structurally assembled;
+    each finding is an ``h2``.
+    """
     labels = report_labels()
     system = _system_name(run_record)
     sorted_reports = sorted(
@@ -335,51 +339,43 @@ def render_zh_penetration_report(
         ),
     )
 
-    if overview and overview.strip():
-        overview_body = overview.strip()
-    elif sorted_reports:
-        top = ", ".join(
-            f"{severity_label(r.get('severity'), labels)}·{r.get('title')}"
-            for r in sorted_reports[:5]
-        )
-        overview_body = labels["overview_with_findings"].format(
-            count=len(sorted_reports),
-            top=top,
-        )
-    else:
-        overview_body = labels["overview_clean"]
-
-    meta = _md_table(
-        [
-            (labels["system_name"], system),
-            (labels["tech_stack"], run_record.get("tech_stack") or labels["tech_stack_fallback"]),
-            (labels["test_standard"], labels["test_standard_value"]),
-            (labels["assessment_type"], _engagement_type(run_record)),
-            (labels["test_scope"], _scope_text(run_record)),
-        ],
-        field=labels["field"],
-        value=labels["value"],
-    )
-
-    # Chinese title is "{system}{suffix}" with no separator; English uses an em dash.
     title = (
         f"# {system}{labels['report_title_suffix']}"
         if chrome_locale() == "zh"
         else f"# {system} — {labels['report_title_suffix']}"
     )
 
-    lines: list[str] = [
-        title,
-        "",
-        meta,
-        "",
-        f"# {labels['overview_heading']}",
-        "",
-        overview_body,
-        "",
-        f"# {labels['findings_heading']}",
-        "",
-    ]
+    lines: list[str] = [title, ""]
+    narrative = _narrative_sections(overview=overview, scan_results=scan_results)
+    if narrative:
+        lines.extend(narrative)
+    elif sorted_reports:
+        top = ", ".join(
+            f"{severity_label(r.get('severity'), labels)}·{r.get('title')}"
+            for r in sorted_reports[:5]
+        )
+        lines.extend(
+            [
+                f"# {labels['overview_heading']}",
+                "",
+                labels["overview_with_findings"].format(
+                    count=len(sorted_reports),
+                    top=top,
+                ),
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                f"# {labels['overview_heading']}",
+                "",
+                labels["overview_clean"],
+                "",
+            ]
+        )
+
+    lines.extend([f"# {labels['findings_heading']}", ""])
     if not sorted_reports:
         lines.append(labels["no_findings"])
         lines.append("")
@@ -399,6 +395,7 @@ def write_zh_delivery_bundle(
     run_record: dict[str, Any],
     vulnerability_reports: list[dict[str, Any]],
     overview: str | None = None,
+    scan_results: dict[str, Any] | None = None,
     file_bytes: dict[str, bytes] | None = None,
 ) -> Path:
     """Write delivery markdown, materialise images, and zip them.
@@ -410,6 +407,7 @@ def write_zh_delivery_bundle(
         run_record=run_record,
         vulnerability_reports=vulnerability_reports,
         overview=overview,
+        scan_results=scan_results,
     )
     md_path = run_dir / "penetration_test_report.md"
     atomic_write_text(md_path, md)

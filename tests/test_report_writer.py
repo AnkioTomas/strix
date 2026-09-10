@@ -71,11 +71,11 @@ def test_render_vulnerability_md_includes_core_sections() -> None:
         ),
     )
     assert "# [ 高危 ] SQL Injection" in md
-    assert "## 描述" in md
-    assert "## 影响" in md
-    assert "## 复现步骤" in md
-    assert "## 修复建议" in md
-    assert "## 附录" in md
+    assert "### 描述" in md
+    assert "### 影响" in md
+    assert "### 复现步骤" in md
+    assert "### 修复建议" in md
+    assert "### 附录" in md
     assert "Root cause in UserDAO." in md
     assert "| 端点 | /api/login |" in md
 
@@ -109,7 +109,7 @@ def test_render_vulnerability_md_includes_dependency_fields() -> None:
     assert "**已安装版本：** 4.17.20" in md
     assert "**修复版本：** 4.17.21" in md
     assert "| CWE | CWE-94 |" in md
-    assert "## 附录" in md
+    assert "### 附录" in md
     assert "Assumes lodash ships in deployed builds." in md
 
 
@@ -119,7 +119,7 @@ def test_render_vulnerability_md_poc_code_cannot_break_out_of_fence() -> None:
     injected = "curl x\n```\n\n## Injected Heading\n![x](https://evil.example/beacon.png)"
     md = render_vulnerability_md(_sample_report(poc_script_code=injected))
     lines = md.split("\n")
-    opening = next(ln for ln in lines[lines.index("## 复现步骤") + 1 :] if ln.startswith("`"))
+    opening = next(ln for ln in lines[lines.index("### 复现步骤") + 1 :] if ln.startswith("`"))
     ticks = opening[: len(opening) - len(opening.lstrip("`"))]
     assert len(ticks) >= 4  # wider than the payload's 3-backtick run
     assert "`" not in opening.removeprefix(ticks)  # backtick run + language tag only

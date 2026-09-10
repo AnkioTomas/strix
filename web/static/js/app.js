@@ -325,20 +325,19 @@
     return `${sec}s`;
   }
 
+  /** Token totals in millions so large runs stay readable (e.g. 12.35M). */
   function formatTokens(n) {
     if (n == null) return "—";
     const v = Number(n);
     if (!Number.isFinite(v)) return "—";
-    const abs = Math.abs(v);
-    if (abs >= 1_000_000) {
-      const m = v / 1_000_000;
-      return `${m >= 10 || m <= -10 ? m.toFixed(1) : m.toFixed(2)}M`;
-    }
-    if (abs >= 1_000) {
-      const k = v / 1_000;
-      return `${k >= 10 || k <= -10 ? k.toFixed(1) : k.toFixed(2)}K`;
-    }
-    return String(Math.round(v));
+    if (v === 0) return "0M";
+    const m = v / 1_000_000;
+    const abs = Math.abs(m);
+    let digits = 2;
+    if (abs < 0.01) digits = 4;
+    else if (abs < 0.1) digits = 3;
+    else if (abs >= 10) digits = 1;
+    return `${m.toFixed(digits)}M`;
   }
 
   function formatCount(n) {

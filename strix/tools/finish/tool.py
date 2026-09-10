@@ -230,16 +230,16 @@ async def finish_scan(
         - ``methodology`` — frameworks followed (OWASP WSTG, PTES,
           OSSTMM, NIST), engagement type (black/gray/white box), scope
           and constraints, categories of testing performed. Copied into
-          the delivery report when present. **No** internal execution
+          the delivery report **appendix**. **No** internal execution
           detail.
         - ``technical_analysis`` — consolidated findings overview with
           severity model and systemic root causes. Reference individual
           vuln reports for repro steps; don't duplicate raw evidence.
-          Copied into the delivery report when present.
+          Copied into the delivery report **appendix**.
         - ``recommendations`` — prioritized actions grouped by urgency
           (Immediate / Short-term / Medium-term), each with concrete
           remediation steps. End with retest/validation guidance.
-          Copied into the delivery report when present.
+          Copied into the delivery report **appendix**.
 
         Do **not** invent a metadata table (system name / tech stack /
         standards / engagement type). Put that context in these prose

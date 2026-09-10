@@ -137,10 +137,16 @@ def test_render_zh_report_includes_finish_scan_sections() -> None:
     )
     assert "# 测试概述" in md
     assert "整体风险中等。" in md
-    assert "# 测试方法" in md
+    assert "# 附录" in md
+    assert "## 测试方法" in md
     assert "按 OWASP WSTG 黑盒测试。" in md
-    assert "# 技术分析" in md
-    assert "# 修复建议" in md
+    assert "## 技术分析" in md
+    assert "## 修复建议" in md
+    # Long finish_scan sections must not sit as peer top-level chapters.
+    assert md.index("# 附录") > md.index("# 测试概述")
+    assert re.search(r"^# 测试方法\s*$", md, re.MULTILINE) is None
+    assert re.search(r"^# 技术分析\s*$", md, re.MULTILINE) is None
+    assert re.search(r"^# 修复建议\s*$", md, re.MULTILINE) is None
     assert "| 技术架构 |" not in md
     assert "见测试范围" not in md
 

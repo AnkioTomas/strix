@@ -202,31 +202,43 @@ def _narrative_sections(
     overview: str | None,
     scan_results: dict[str, Any] | None,
 ) -> list[str]:
-    """Agent-authored narrative only — no invented engagement metadata."""
+    """Front-matter overview only — long finish_scan extras go to the appendix."""
     labels = report_labels()
-    lines: list[str] = []
-
-    def _append(heading: str, body: object | None) -> None:
-        text = demote_markdown_headings(str(body or "").strip(), min_level=3)
-        if not text:
-            return
-        lines.extend([f"# {heading}", "", text, ""])
-
     if isinstance(scan_results, dict):
-        _append(labels["overview_heading"], scan_results.get("executive_summary"))
-        _append(labels["methodology_heading"], scan_results.get("methodology"))
-        _append(
-            labels["technical_analysis_heading"],
-            scan_results.get("technical_analysis"),
+        text = demote_markdown_headings(
+            str(scan_results.get("executive_summary") or "").strip(),
+            min_level=3,
         )
-        _append(labels["recommendations_heading"], scan_results.get("recommendations"))
-        if lines:
-            return lines
+        if text:
+            return [f"# {labels['overview_heading']}", "", text, ""]
 
     if overview and overview.strip():
         body = demote_markdown_headings(overview.strip(), min_level=3)
-        lines.extend([f"# {labels['overview_heading']}", "", body, ""])
-    return lines
+        return [f"# {labels['overview_heading']}", "", body, ""]
+    return []
+
+
+def _render_report_appendix(scan_results: dict[str, Any] | None) -> list[str]:
+    """Park methodology / technical analysis / recommendations under「附录」."""
+    if not isinstance(scan_results, dict):
+        return []
+    labels = report_labels()
+    bits: list[str] = []
+    for heading_key, field in (
+        ("methodology_heading", "methodology"),
+        ("technical_analysis_heading", "technical_analysis"),
+        ("recommendations_heading", "recommendations"),
+    ):
+        text = demote_markdown_headings(
+            str(scan_results.get(field) or "").strip(),
+            min_level=3,
+        )
+        if not text:
+            continue
+        bits.extend([f"## {labels[heading_key]}", "", text, ""])
+    if not bits:
+        return []
+    return [f"# {labels['appendix']}", "", *bits]
 
 
 def _retest_status_label(status: object | None) -> str:
@@ -320,11 +332,7 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
         else f"## {index}. [ {sev} ] {title}"
     )
     description = demote_markdown_headings(
-        str(
-            report.get("description")
-            or report.get("technical_analysis")
-            or labels["no_description"]
-        ),
+        str(report.get("description") or labels["no_description"]),
         min_level=4,
     )
     lines: list[str] = [
@@ -523,6 +531,8 @@ def render_zh_penetration_report(
             lines.append("")
             lines.append("---")
             lines.append("")
+
+    lines.extend(_render_report_appendix(scan_results))
 
     return "\n".join(lines).rstrip() + "\n"
 

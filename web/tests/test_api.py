@@ -265,7 +265,10 @@ def test_ingest_results(client: TestClient):
     findings = manager.get_results(task["id"])
     assert len(findings) == 1
     assert findings[0]["title"] == "XSS"
-    assert "Report" in manager.get_report(task["id"])
+    assert "XSS" in manager.get_report(task["id"])
+    assert "漏洞清单" in manager.get_report(task["id"]) or "Findings" in manager.get_report(
+        task["id"]
+    )
     package = manager.get_report_package(task["id"])
     assert package.name == "penetration_test_report.zip"
     assert package.is_file()

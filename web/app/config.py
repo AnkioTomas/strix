@@ -46,10 +46,11 @@ class Settings(BaseSettings):
     auth_disabled: bool = Field(default=False, alias="STRIX_API_AUTH_DISABLED")
 
     data_dir: Path = Field(default=WEB_ROOT / "data", alias="STRIX_API_DATA_DIR")
-    max_concurrent: int = Field(default=1, ge=1, alias="STRIX_MAX_CONCURRENT")
-    # Admission control: keep tasks queued when the host is under pressure.
-    min_free_memory_gb: float = Field(default=2.0, ge=0.0, alias="STRIX_MIN_FREE_MEMORY_GB")
-    max_load_per_cpu: float = Field(default=1.5, ge=0.0, alias="STRIX_MAX_LOAD_PER_CPU")
+    # Hard ceiling; actual parallelism is packed from task CPU%/memory estimates.
+    max_concurrent: int = Field(default=8, ge=1, alias="STRIX_MAX_CONCURRENT")
+    # Per-task resource estimate for admission packing (top-style CPU%: 100% = 1 core).
+    task_cpu_percent: float = Field(default=30.0, gt=0.0, alias="STRIX_TASK_CPU_PERCENT")
+    task_memory_gb: float = Field(default=2.0, gt=0.0, alias="STRIX_TASK_MEMORY_GB")
     cancel_grace_seconds: int = Field(default=15, ge=1, alias="STRIX_CANCEL_GRACE")
 
     strix_bin: str = Field(default="strix", alias="STRIX_BIN")

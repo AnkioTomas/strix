@@ -604,9 +604,14 @@
       $("statRunning").textContent = String(h.running_tasks ?? 0);
       $("statQueued").textContent = String(h.queued_tasks ?? 0);
       $("statSlots").textContent = slots == null ? "—" : String(slots);
+      const estCpu = a.task_cpu_percent;
+      const estMem = a.task_memory_gb;
+      if (estCpu != null && estMem != null) {
+        $("statSlots").title = `按每任务约 ${estCpu}% CPU + ${estMem} GiB 装箱；硬上限 ${a.max_concurrent ?? "—"}`;
+      }
 
       const pill = $("admitPill");
-      const paused = slots === 0 || /pause|pressure|memory|load/i.test(reason);
+      const paused = slots === 0 || /pause|no_capacity/i.test(reason);
       const down = h.status && h.status !== "ok";
       pill.className = "admit-pill " + (down ? "down" : paused ? "paused" : "ok");
       pill.textContent = down
@@ -639,6 +644,7 @@
 
   function humanReason(reason) {
     const r = String(reason || "");
+    if (/no_capacity/i.test(r)) return "资源不足";
     if (/memory/i.test(r)) return "内存不足";
     if (/load/i.test(r)) return "负载过高";
     if (/pause/i.test(r)) return "准入暂停";

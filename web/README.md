@@ -5,7 +5,7 @@
 ## 能力
 
 1. 列出 / 创建任务（pentest + audit；创建时可上传附件挂到 `/workspace` 并告知模型）
-2. 按系统负载排队（内存不足 / load 过高时不放行，任务留在 `queued`）
+2. 按资源装箱排队（每任务约 `STRIX_TASK_CPU_PERCENT`% CPU + `STRIX_TASK_MEMORY_GB` GiB；满则留在 `queued`）
 3. 取消 / 重试 / 续跑 / 复测 / **删除已结束任务**
 4. **导入**旧版 CLI `strix_runs/`（`POST /api/v1/tasks/import`）
 5. 事件查询 + SSE
@@ -74,9 +74,9 @@ PYTHONPATH=. python -m app
 | `OPENAI_API_BASE` / `LLM_API_BASE` | — | 本地/兼容 OpenAI 的 base URL |
 | `LLM_TIMEOUT` | 300 | 所有 AI/LLM 请求超时（秒） |
 | `STRIX_REPORT_LANGUAGE` | `zh` | 报告叙事/交付包语言（`zh`/`en`/`ja`/`Français`/…；空=不强制） |
-| `STRIX_MAX_CONCURRENT` | 1 | 同时跑的扫描数 |
-| `STRIX_MIN_FREE_MEMORY_GB` | 2.0 | 可用内存低于此值则继续排队 |
-| `STRIX_MAX_LOAD_PER_CPU` | 1.5 | load1 / cpu_count 上限 |
+| `STRIX_MAX_CONCURRENT` | 8 | 同时跑的扫描硬上限 |
+| `STRIX_TASK_CPU_PERCENT` | 30 | 单任务 CPU 估算（top 风格：100%=1 核） |
+| `STRIX_TASK_MEMORY_GB` | 2 | 单任务内存估算（GiB）；用可用内存装箱 |
 | `STRIX_ALLOW_PRIVATE_TARGETS` | 1 | 是否允许扫私网/localhost |
 
 浏览器根路径是控制台（`web/static/`：`index.html` + `css/` + `js/`）；静态资源在 `/static/*`。漏洞与报告页用 [Penna Markdown](https://penna.ankio.net/guide/getting-started) 只读渲染器（CDN `penna-markdown@0.2.5`）。OpenAPI 在 `/docs`。`GET /health` 返回 `admission`（当前是否放行、load/内存快照）。
@@ -152,17 +152,22 @@ curl -sS -X POST http://127.0.0.1:8787/api/v1/tasks \
 
 ## 排队策略
 
+按「单任务成本」装箱，而不是死板只跑 1 个：
+
 ```text
 创建任务 → status=queued
          ↓
-Worker 每秒检查：
-  - 运行中数量 < STRIX_MAX_CONCURRENT
-  - 可用内存 ≥ STRIX_MIN_FREE_MEMORY_GB
-  - load1 < cpu_count * STRIX_MAX_LOAD_PER_CPU
+Worker 每秒估算可跑槽位：
+  free_cpu% ≈ cpu_count*100 − load1*100     # top 风格：100% = 1 核
+  cpu_slots  = floor(free_cpu% / STRIX_TASK_CPU_PERCENT)
+  mem_slots  = floor(mem_available_GiB / STRIX_TASK_MEMORY_GB)
+  allowed    = min(STRIX_MAX_CONCURRENT, cpu_slots, mem_slots)
          ↓
-通过才 claim → starting → running
-否则继续排队，避免把机器打满
+运行中数量 < allowed 才 claim → starting → running
+否则继续排队
 ```
+
+默认估算：每任务约 **30% CPU + 2 GiB**（可用 `STRIX_TASK_CPU_PERCENT` / `STRIX_TASK_MEMORY_GB` 调）。
 
 ## 设计约束
 

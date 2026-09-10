@@ -53,10 +53,10 @@ class WorkerPool:
 
     async def _loop(self) -> None:
         logger.info(
-            "worker pool started max_concurrent=%s min_free_mem=%sGiB max_load_per_cpu=%s",
+            "worker pool started max_concurrent=%s task_est=%s%%CPU+%sGiB",
             self.settings.max_concurrent,
-            self.settings.min_free_memory_gb,
-            self.settings.max_load_per_cpu,
+            self.settings.task_cpu_percent,
+            self.settings.task_memory_gb,
         )
         while not self._stop.is_set():
             try:
@@ -84,13 +84,16 @@ class WorkerPool:
         snap = sample_system()
         allowed, reason = effective_concurrency(
             max_concurrent=self.settings.max_concurrent,
-            min_free_memory_gb=self.settings.min_free_memory_gb,
-            max_load_per_cpu=self.settings.max_load_per_cpu,
+            task_cpu_percent=self.settings.task_cpu_percent,
+            task_memory_gb=self.settings.task_memory_gb,
             snapshot=snap,
         )
         self._last_admission = {
             "allowed_slots": allowed,
             "reason": reason,
+            "task_cpu_percent": self.settings.task_cpu_percent,
+            "task_memory_gb": self.settings.task_memory_gb,
+            "max_concurrent": self.settings.max_concurrent,
             "system": snap.as_dict(),
         }
 

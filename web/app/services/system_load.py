@@ -51,31 +51,59 @@ def sample_system() -> SystemSnapshot:
 def effective_concurrency(
     *,
     max_concurrent: int,
-    min_free_memory_gb: float,
-    max_load_per_cpu: float,
+    task_cpu_percent: float,
+    task_memory_gb: float,
     snapshot: SystemSnapshot | None = None,
 ) -> tuple[int, str]:
-    """Return ``(allowed_running_slots, reason)``.
+    """Return ``(allowed_running_slots, reason)`` by packing estimated task cost.
 
-    ``0`` means do not start new tasks; keep them queued until the host cools down.
+    Estimates use top-style CPU percent (100% = one full core) and GiB RAM:
+
+    - each task ≈ ``task_cpu_percent`` CPU% and ``task_memory_gb`` GiB
+    - free CPU% ≈ ``cpu_count * 100 - load_1m * 100``
+    - free mem slots ≈ ``mem_available / task_memory_gb``
+    - final slots = min(hard ceiling, cpu slots, mem slots)
+
+    ``0`` means do not start new tasks; keep them queued.
     """
     snap = snapshot or sample_system()
     ceiling = max(1, max_concurrent)
+    cpu_pct = max(1.0, float(task_cpu_percent))
+    mem_gb = max(0.1, float(task_memory_gb))
 
-    if snap.mem_available_bytes is not None:
+    # CPU packing (top %): one core == 100%.
+    capacity_cpu_pct = snap.cpu_count * 100.0
+    used_cpu_pct = float(snap.load_1m) * 100.0 if snap.load_1m is not None else 0.0
+    free_cpu_pct = max(0.0, capacity_cpu_pct - used_cpu_pct)
+    cpu_slots = int(free_cpu_pct // cpu_pct)
+
+    # Memory packing from currently available RAM.
+    if snap.mem_available_bytes is None:
+        mem_slots = ceiling
+        free_gb = None
+    else:
         free_gb = snap.mem_available_bytes / (1024**3)
-        if free_gb < min_free_memory_gb:
-            return 0, f"paused_low_memory:{free_gb:.2f}GiB<{min_free_memory_gb}GiB"
+        mem_slots = int(free_gb // mem_gb)
 
-    if snap.load_1m is not None and max_load_per_cpu > 0:
-        limit = snap.cpu_count * max_load_per_cpu
-        if snap.load_1m >= limit:
-            return 0, f"paused_high_load:{snap.load_1m:.2f}>={limit:.2f}"
+    allowed = min(ceiling, cpu_slots, mem_slots)
+    if allowed <= 0:
+        parts = [
+            f"cpu_free={free_cpu_pct:.0f}%/{cpu_pct:g}%→{cpu_slots}",
+            (
+                f"mem_free={free_gb:.2f}GiB/{mem_gb:g}GiB→{mem_slots}"
+                if free_gb is not None
+                else f"mem_slots={mem_slots}"
+            ),
+            f"ceiling={ceiling}",
+        ]
+        return 0, "paused_no_capacity:" + ",".join(parts)
 
-    # Extra caution on small hosts: never exceed roughly half the cores for Strix.
-    soft_cap = max(1, snap.cpu_count // 2)
-    allowed = min(ceiling, soft_cap)
-    return allowed, f"ok:slots={allowed}"
+    reason = (
+        f"ok:slots={allowed}"
+        f"(cpu={cpu_slots},mem={mem_slots},ceiling={ceiling},"
+        f"est={cpu_pct:g}%+{mem_gb:g}GiB/task)"
+    )
+    return allowed, reason
 
 
 def _memory_bytes() -> tuple[int | None, int | None]:

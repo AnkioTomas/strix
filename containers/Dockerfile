@@ -58,7 +58,12 @@ RUN apt-get update && \
     libcap2-bin \
     gdb \
     libnss3-tools \
-    chromium fonts-liberation
+    chromium fonts-liberation \
+    fontconfig fonts-noto-cjk fonts-wqy-zenhei
+
+# CJK fonts: without these, agent-browser screenshots show Chinese/Japanese/Korean
+# UI text as empty tofu boxes. Refresh the font cache so Chromium resolves them.
+RUN fc-cache -f
 
 
 RUN setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip $(which nmap)
@@ -115,9 +120,13 @@ RUN npm install -g retire@latest && \
 
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV AGENT_BROWSER_USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+# Keep en-US as primary Accept-Language; font coverage (not --lang) fixes CJK tofu.
 ENV AGENT_BROWSER_ARGS="--disable-blink-features=AutomationControlled,--no-first-run,--no-default-browser-check,--lang=en-US"
 ENV AGENT_BROWSER_SCREENSHOT_DIR=/workspace/.agent-browser-screenshots
 ENV AGENT_BROWSER_IDLE_TIMEOUT_MS=180000
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV LANGUAGE=C.UTF-8
 USER root
 RUN set -eu; \
     { \

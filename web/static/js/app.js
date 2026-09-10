@@ -329,7 +329,23 @@
     if (n == null) return "—";
     const v = Number(n);
     if (!Number.isFinite(v)) return "—";
-    return v.toLocaleString("en-US");
+    const abs = Math.abs(v);
+    if (abs >= 1_000_000) {
+      const m = v / 1_000_000;
+      return `${m >= 10 || m <= -10 ? m.toFixed(1) : m.toFixed(2)}M`;
+    }
+    if (abs >= 1_000) {
+      const k = v / 1_000;
+      return `${k >= 10 || k <= -10 ? k.toFixed(1) : k.toFixed(2)}K`;
+    }
+    return String(Math.round(v));
+  }
+
+  function formatCount(n) {
+    if (n == null) return "—";
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "—";
+    return Math.round(v).toLocaleString("en-US");
   }
 
   function renderOverview() {
@@ -364,7 +380,7 @@
       ["Token 缓存命中", formatTokens(usage.cached_tokens)],
       ["Token 缓存写入", formatTokens(usage.cache_write_tokens)],
       ["Token 总计", formatTokens(usage.total_tokens)],
-      ["请求次数", formatTokens(usage.requests)],
+      ["请求次数", formatCount(usage.requests)],
       ["Viewer 代理", t.viewer_proxy_url || "（运行后生成）"],
       ["错误", t.error || "—"],
     ];

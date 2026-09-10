@@ -420,13 +420,18 @@
       return;
     }
     hint.textContent = "同源反代 · 需已记住 Token（session cookie）";
-    if (viewerLoadedFor !== t.id) {
-      try {
-        await api.ensureSession();
-      } catch (e) {
-        hint.textContent = `会话失败: ${e.message}`;
+    try {
+      const ok = await api.ensureSession();
+      if (!ok && !api.getKey()) {
+        hint.textContent =
+          "请先填写并保存 API Token，再打开 Viewer（iframe 只能靠 session cookie 鉴权）";
         return;
       }
+    } catch (e) {
+      hint.textContent = `会话失败: ${e.message}`;
+      return;
+    }
+    if (viewerLoadedFor !== t.id) {
       frame.src = t.viewer_proxy_url;
       viewerLoadedFor = t.id;
     }

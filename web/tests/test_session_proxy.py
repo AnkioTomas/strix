@@ -59,6 +59,48 @@ def test_session_cookie_auth(auth_client: TestClient):
     assert again.status_code == 401
 
 
+def test_session_cookie_not_secure_when_bound_to_all_interfaces(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """LAN daemons bind 0.0.0.0 over HTTP — Secure cookies would break Viewer."""
+    monkeypatch.setenv("STRIX_API_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("STRIX_API_AUTH_DISABLED", "0")
+    monkeypatch.setenv("STRIX_API_KEY", "test-secret")
+    monkeypatch.setenv("STRIX_API_HOST", "0.0.0.0")
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        ok = client.post(
+            "/api/v1/session",
+            headers={"Authorization": "Bearer test-secret"},
+        )
+        assert ok.status_code == 204
+        cookie = ok.headers.get("set-cookie", "").lower()
+        assert "strix_web_session=" in cookie
+        assert "secure" not in cookie
+    get_settings.cache_clear()
+
+
+def test_session_cookie_secure_behind_https_proxy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("STRIX_API_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("STRIX_API_AUTH_DISABLED", "0")
+    monkeypatch.setenv("STRIX_API_KEY", "test-secret")
+    monkeypatch.setenv("STRIX_API_HOST", "0.0.0.0")
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        ok = client.post(
+            "/api/v1/session",
+            headers={
+                "Authorization": "Bearer test-secret",
+                "X-Forwarded-Proto": "https",
+            },
+        )
+        assert ok.status_code == 204
+        assert "secure" in ok.headers.get("set-cookie", "").lower()
+    get_settings.cache_clear()
+
+
 def test_parse_local_viewer_rejects_remote():
     with pytest.raises(TaskError) as exc:
         parse_local_viewer("http://evil.example:9/?token=x")

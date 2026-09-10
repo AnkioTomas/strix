@@ -2,17 +2,31 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Header, Response, status
+from fastapi import APIRouter, Header, Request, Response, status
 
-from app.config import get_settings
 from app.security.auth import SESSION_COOKIE_NAME, expected_api_key, token_matches, unauthorized
 
 
 router = APIRouter(prefix="/api/v1")
 
 
+def _cookie_secure(request: Request) -> bool:
+    """Whether Set-Cookie should include Secure.
+
+    Must follow the *browser* scheme (or reverse-proxy proto), not the bind
+    address. ``STRIX_API_HOST=0.0.0.0`` is common for LAN daemons over plain
+    HTTP; forcing Secure there makes the cookie invisible to the Viewer iframe
+    (which cannot send Authorization Bearer), yielding UNAUTHORIZED JSON.
+    """
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if forwarded:
+        return forwarded == "https"
+    return request.url.scheme == "https"
+
+
 @router.post("/session", status_code=status.HTTP_204_NO_CONTENT)
 async def create_session(
+    request: Request,
     response: Response,
     authorization: str | None = Header(default=None),
 ) -> Response:
@@ -27,14 +41,13 @@ async def create_session(
     if not token_matches(token, expected):
         raise unauthorized("Invalid API key")
 
-    secure = get_settings().host not in {"127.0.0.1", "localhost", "::1"}
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=token,
         httponly=True,
         samesite="lax",
         path="/",
-        secure=secure,
+        secure=_cookie_secure(request),
         max_age=60 * 60 * 24 * 30,
     )
     response.status_code = status.HTTP_204_NO_CONTENT

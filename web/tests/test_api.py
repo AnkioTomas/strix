@@ -496,6 +496,16 @@ def test_retest_embeds_mandatory_instruction(client: TestClient):
     assert RETEST_INSTRUCTION.strip() in child["instruction"]
     assert "原始指令" in child["instruction"]
 
+    with_creds = client.post(
+        f"/api/v1/tasks/{created['id']}/retest",
+        json={"instruction": "新密码是 Secret123!\nCookie: session=abc"},
+    )
+    assert with_creds.status_code == 202, with_creds.text
+    child2 = manager.get_task(with_creds.json()["id"])
+    assert "新密码是 Secret123!" in child2["instruction"]
+    assert "[附加说明]" in child2["instruction"]
+    assert RETEST_INSTRUCTION.strip() in child2["instruction"]
+
 
 def test_reap_skips_until_worker_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from app.services.scan_state import write_state

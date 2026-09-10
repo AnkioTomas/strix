@@ -773,13 +773,21 @@
     showCreate(true);
   };
 
-  function openResumeModal() {
+  function openInstructionModal(options) {
+    const opts = options || {};
     return new Promise((resolve) => {
-      const modal = $("resumeModal");
-      const input = $("resumeInstruction");
-      const confirmBtn = $("resumeModalConfirm");
-      const cancelBtn = $("resumeModalCancel");
-      const backdrop = $("resumeModalBackdrop");
+      const modal = $("instructionModal");
+      const input = $("instructionModalInput");
+      const confirmBtn = $("instructionModalConfirm");
+      const cancelBtn = $("instructionModalCancel");
+      const backdrop = $("instructionModalBackdrop");
+
+      $("instructionModalTitle").textContent = opts.title || "附加指令";
+      $("instructionModalSub").textContent = opts.sub || "";
+      $("instructionModalLabel").textContent = opts.label || "附加指令";
+      input.placeholder = opts.placeholder || "";
+      confirmBtn.textContent = opts.confirmLabel || "确认";
+      input.value = opts.initialValue || "";
 
       const close = (value) => {
         modal.classList.add("hidden");
@@ -800,7 +808,6 @@
         }
       };
 
-      input.value = "";
       modal.classList.remove("hidden");
       document.addEventListener("keydown", onKey);
       confirmBtn.onclick = () => close(input.value);
@@ -812,7 +819,13 @@
 
   $("resumeBtn").onclick = async () => {
     if (!selected) return;
-    const note = await openResumeModal();
+    const note = await openInstructionModal({
+      title: "继续扫描",
+      sub: "在同一 run 上续跑。附加指令可选，会作为本次 resume 的 nudge 交给 Agent。",
+      label: "附加指令",
+      placeholder: "例如：继续验证 SQL 注入；优先看认证绕过…",
+      confirmLabel: "开始 Resume",
+    });
     if (note === null) return;
     try {
       const body = note.trim() ? { instruction: note.trim() } : {};
@@ -829,11 +842,21 @@
 
   $("retestBtn").onclick = async () => {
     if (!selected) return;
-    if (!confirm("将创建复测子任务：逐条验证漏洞是否修复，并要求截图/佐证。继续？")) {
-      return;
-    }
+    const note = await openInstructionModal({
+      title: "复测",
+      sub: "将创建复测子任务，逐条验证漏洞是否修复并要求截图/佐证。凭证过期、新账号、环境变更等信息请写在下面，会一并交给 Agent。",
+      label: "复测说明（凭证 / 环境）",
+      placeholder:
+        "例如：\n登录账号 admin / 新密码 xxx\nCookie: session=...\n目标仍是 https://example.com，忽略证书错误",
+      confirmLabel: "开始复测",
+    });
+    if (note === null) return;
     try {
-      const t = await api.api(`/api/v1/tasks/${selected}/retest`, { method: "POST" });
+      const body = note.trim() ? { instruction: note.trim() } : {};
+      const t = await api.api(`/api/v1/tasks/${selected}/retest`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
       await refresh();
       selectTask(t.id);
     } catch (e) {

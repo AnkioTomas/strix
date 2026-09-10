@@ -256,11 +256,13 @@ async def retry_task(task_id: str, manager: TaskManager = Depends(get_manager)):
 @router.post("/tasks/{task_id}/retest", status_code=202, response_model=TaskSummary)
 async def retest_task(
     task_id: str,
+    payload: ResumeTaskRequest | None = None,
     instruction: str | None = Query(default=None),
     manager: TaskManager = Depends(get_manager),
 ):
+    note = (payload.instruction if payload else None) or instruction
     try:
-        task = await asyncio.to_thread(manager.retest_task, task_id, instruction)
+        task = await asyncio.to_thread(manager.retest_task, task_id, note)
     except TaskError as exc:
         return _error(exc)
     return _summary(task)

@@ -100,6 +100,7 @@ if [[ ${#missing[@]} -gt 0 ]]; then
   done
 fi
 
+# Prefer project .venv; prefer uv for installs (uv venvs often have no pip).
 if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
   PY=("$REPO_ROOT/.venv/bin/python")
 elif command -v uv >/dev/null 2>&1; then
@@ -109,21 +110,21 @@ else
 fi
 
 if ! "${PY[@]}" -c "import fastapi, uvicorn, dotenv" >/dev/null 2>&1; then
-  echo "installing web/requirements.txt into project environment ..."
-  if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
-    # Always target the project venv — never system python3 (PEP 668).
-    "$REPO_ROOT/.venv/bin/python" -m pip install -r "$WEB_ROOT/requirements.txt"
-  elif command -v uv >/dev/null 2>&1; then
-    uv sync --directory "$REPO_ROOT"
-    uv pip install --directory "$REPO_ROOT" -r "$WEB_ROOT/requirements.txt"
+  echo "installing web/requirements.txt ..."
+  if command -v uv >/dev/null 2>&1; then
+    # uv-managed envs frequently ship without pip — never call python -m pip.
+    if [[ ! -x "$REPO_ROOT/.venv/bin/python" ]]; then
+      uv sync --directory "$REPO_ROOT"
+    fi
+    uv pip install --python "$REPO_ROOT/.venv/bin/python" -r "$WEB_ROOT/requirements.txt"
+    PY=("$REPO_ROOT/.venv/bin/python")
   else
-    echo "error: web deps missing and no usable .venv/bin/python." >&2
-    echo "  Create one first:  python3 -m venv .venv && .venv/bin/pip install -r web/requirements.txt" >&2
-    echo "  Or with uv:        uv sync && uv pip install -r web/requirements.txt" >&2
+    echo "error: web deps missing. Install uv (https://docs.astral.sh/uv/) then:" >&2
+    echo "  cd $REPO_ROOT && uv sync && uv pip install -r web/requirements.txt" >&2
     exit 1
   fi
   if ! "${PY[@]}" -c "import fastapi, uvicorn, dotenv" >/dev/null 2>&1; then
-    echo "error: web deps still missing after install (python=${PY[*]})." >&2
+    echo "error: web deps still missing after uv pip install (python=${PY[*]})." >&2
     exit 1
   fi
 fi

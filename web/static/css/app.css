@@ -360,18 +360,22 @@ button, input, select, textarea {
 
 .form-grid input,
 .form-grid select,
-.form-grid textarea,
-.chat-compose textarea {
+.form-grid textarea {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.5rem 0.65rem;
   background: var(--surface);
 }
 
-.form-grid textarea,
-.chat-compose textarea {
+.form-grid textarea {
   min-height: 88px;
   resize: vertical;
+}
+
+.field-hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 0.2rem;
 }
 
 .actions {
@@ -472,7 +476,7 @@ button, input, select, textarea {
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; word-break: break-all; }
 
-.log, .chat-log {
+.log {
   font-family: var(--mono);
   font-size: 0.78rem;
   background: #f3f5f7;
@@ -484,16 +488,24 @@ button, input, select, textarea {
   white-space: pre-wrap;
 }
 
-.chat-log {
-  min-height: 180px;
-  margin-bottom: 0.75rem;
+.findings-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
 }
 
-.chat-compose {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.5rem;
-  align-items: end;
+.findings-table tbody tr {
+  cursor: pointer;
+}
+
+.findings-table tbody tr:hover {
+  background: var(--accent-soft);
+}
+
+.findings-table tbody tr.active {
+  background: var(--accent-soft);
 }
 
 .viewer-toolbar {
@@ -600,7 +612,6 @@ button, input, select, textarea {
   }
   .sidebar.open { transform: translateX(0); }
   .form-grid { grid-template-columns: 1fr; }
-  .chat-compose { grid-template-columns: 1fr; }
   .topbar-auth input { width: 7.5rem; }
   .brand-sub { display: none; }
   .loadboard { justify-content: flex-start; }

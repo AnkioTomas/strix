@@ -9,6 +9,8 @@
   let viewerLoadedFor = null;
   let findingsRenderer = null;
   let reportRenderer = null;
+  let findingsCache = [];
+  let selectedFindingId = null;
 
   function esc(s) {
     return String(s ?? "")
@@ -70,7 +72,6 @@
     if (name === "report") loadReport();
     if (name === "findings") loadFindings();
     if (name === "artifacts") loadArtifacts();
-    if (name === "chat") loadMessages();
   }
 
   function currentTask() {
@@ -104,6 +105,9 @@
   function selectTask(id) {
     selected = id;
     viewerLoadedFor = null;
+    selectedFindingId = null;
+    findingsCache = [];
+    showFindingsList();
     showCreate(false);
     $("emptyState").classList.add("hidden");
     $("detailPanel").classList.remove("hidden");
@@ -162,32 +166,64 @@
     }
   }
 
-  async function loadMessages() {
-    if (!selected) return;
-    try {
-      const data = await api.api(`/api/v1/tasks/${selected}/messages`);
-      const lines = (data.messages || []).map((m) => {
-        const flag = m.delivered ? "delivered" : "pending";
-        return `[${m.created_at || ""}] ${m.role} (${flag})\n${m.content}`;
-      });
-      $("chatLog").textContent = lines.join("\n\n") || "(暂无消息)";
-    } catch (e) {
-      $("chatLog").textContent = e.message;
+  function showFindingsList() {
+    $("findingsListPane").classList.remove("hidden");
+    $("findingsDetailPane").classList.add("hidden");
+    selectedFindingId = null;
+  }
+
+  function showFindingDetail(findingId) {
+    const finding = findingsCache.find((f) => f.id === findingId);
+    if (!finding) return;
+    selectedFindingId = findingId;
+    $("findingsListPane").classList.add("hidden");
+    $("findingsDetailPane").classList.remove("hidden");
+    renderWithPenna(ensureFindingsRenderer(), penna.findingToMarkdown(finding), selected);
+    renderFindingsTable();
+  }
+
+  function renderFindingsTable() {
+    const body = $("findingsBody");
+    const count = $("findingsCount");
+    if (!findingsCache.length) {
+      count.textContent = "暂无漏洞";
+      body.innerHTML = `<tr><td colspan="4" class="muted">该任务暂无漏洞</td></tr>`;
+      return;
     }
+    count.textContent = `共 ${findingsCache.length} 条 · 点击查看详情`;
+    body.innerHTML = findingsCache
+      .map((f) => {
+        const sev = String(f.severity || "unknown").toLowerCase();
+        const where = penna.locationLabel(f);
+        return `<tr data-id="${esc(f.id)}" class="${f.id === selectedFindingId ? "active" : ""}">
+          <td><span class="sev-${esc(sev)}">${esc((f.severity || "unknown").toUpperCase())}</span></td>
+          <td>${esc(f.title || "Untitled")}</td>
+          <td>${esc(where)}</td>
+          <td>${esc(f.confidence || "—")}</td>
+        </tr>`;
+      })
+      .join("");
+    body.querySelectorAll("tr[data-id]").forEach((tr) => {
+      tr.onclick = () => showFindingDetail(tr.dataset.id);
+    });
   }
 
   async function loadFindings() {
     if (!selected) return;
     try {
       const findings = await api.api(`/api/v1/tasks/${selected}/results`).catch(() => ({ findings: [] }));
-      const md = penna.findingsToMarkdown(findings.findings || []);
-      renderWithPenna(ensureFindingsRenderer(), md, selected);
+      findingsCache = findings.findings || [];
+      if (selectedFindingId && findingsCache.some((f) => f.id === selectedFindingId)) {
+        showFindingDetail(selectedFindingId);
+      } else {
+        showFindingsList();
+        renderFindingsTable();
+      }
     } catch (e) {
-      renderWithPenna(
-        ensureFindingsRenderer(),
-        `> [!CAUTION]\n> 加载失败：${e.message}\n`,
-        selected
-      );
+      findingsCache = [];
+      showFindingsList();
+      $("findingsCount").textContent = "加载失败";
+      $("findingsBody").innerHTML = `<tr><td colspan="4">${esc(e.message)}</td></tr>`;
     }
   }
 
@@ -245,7 +281,6 @@
     renderOverview();
     await Promise.all([loadEvents(), loadFindings()]);
     if (activeTab === "viewer") await loadViewer();
-    if (activeTab === "chat") await loadMessages();
     if (activeTab === "report") await loadReport();
     if (activeTab === "artifacts") await loadArtifacts();
   }
@@ -259,6 +294,8 @@
         if (!tasksCache.some((t) => t.id === selected)) {
           selected = null;
           viewerLoadedFor = null;
+          selectedFindingId = null;
+          findingsCache = [];
           showCreate(false);
           $("detailPanel").classList.add("hidden");
           $("emptyState").classList.remove("hidden");
@@ -350,6 +387,18 @@
     return r.replace(/^ok:?/, "").trim() || "";
   }
 
+  function updateAttachmentsHint() {
+    const input = $("attachments");
+    const hint = $("attachmentsHint");
+    if (!input || !hint) return;
+    const files = Array.from(input.files || []);
+    if (!files.length) {
+      hint.textContent = "可选。例如 PoC、wordlist、凭证说明。";
+      return;
+    }
+    hint.textContent = `已选 ${files.length} 个：${files.map((f) => f.name).join(", ")}`;
+  }
+
   $("apiKey").value = localStorage.getItem(api.KEY_STORAGE) || "";
 
   $("saveKey").onclick = async () => {
@@ -371,6 +420,11 @@
   $("sidebarToggle").onclick = () => $("sidebar").classList.toggle("open");
   $("newTaskBtn").onclick = () => showCreate(true);
   $("cancelCreate").onclick = () => showCreate(false);
+  $("attachments").onchange = updateAttachmentsHint;
+  $("findingsBack").onclick = () => {
+    showFindingsList();
+    renderFindingsTable();
+  };
 
   $("taskType").onchange = () => {
     const audit = $("taskType").value === "audit";
@@ -384,38 +438,29 @@
 
   $("createTask").onclick = async () => {
     const type = $("taskType").value;
-    const body = {
-      type,
-      scan_mode: $("scanMode").value,
-      instruction: $("instruction").value || null,
-    };
-    if (type === "pentest") body.target = $("target").value.trim();
-    else
-      body.source = {
-        type: "git",
-        url: $("gitUrl").value.trim(),
-        branch: $("gitBranch").value.trim() || null,
-      };
+    const files = Array.from($("attachments").files || []);
+    const form = new FormData();
+    form.append("type", type);
+    form.append("scan_mode", $("scanMode").value);
+    const instruction = $("instruction").value.trim();
+    if (instruction) form.append("instruction", instruction);
+    if (type === "pentest") {
+      form.append("target", $("target").value.trim());
+    } else {
+      form.append("source_type", "git");
+      form.append("source_url", $("gitUrl").value.trim());
+      const branch = $("gitBranch").value.trim();
+      if (branch) form.append("source_branch", branch);
+    }
+    files.forEach((file) => form.append("attachments", file));
     try {
       await api.ensureSession();
-      const task = await api.api("/api/v1/tasks", { method: "POST", body: JSON.stringify(body) });
+      const task = await api.apiForm("/api/v1/tasks", form);
+      $("attachments").value = "";
+      updateAttachmentsHint();
       showCreate(false);
       await refresh();
       selectTask(task.id);
-    } catch (e) {
-      alert(e.message);
-    }
-  };
-
-  $("sendMsg").onclick = async () => {
-    if (!selected) return alert("先选任务");
-    try {
-      await api.api(`/api/v1/tasks/${selected}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ content: $("message").value }),
-      });
-      $("message").value = "";
-      await loadMessages();
     } catch (e) {
       alert(e.message);
     }

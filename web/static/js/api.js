@@ -13,20 +13,18 @@
     if (input) input.value = value.trim();
   }
 
-  function headers(extra) {
-    const h = Object.assign({ "Content-Type": "application/json" }, extra || {});
+  function authHeaders(extra) {
+    const h = Object.assign({}, extra || {});
     const key = getKey();
     if (key) h.Authorization = `Bearer ${key}`;
     return h;
   }
 
-  async function api(path, opts) {
-    opts = opts || {};
-    const res = await fetch(path, {
-      ...opts,
-      credentials: "include",
-      headers: { ...headers(), ...(opts.headers || {}) },
-    });
+  function headers(extra) {
+    return authHeaders(Object.assign({ "Content-Type": "application/json" }, extra || {}));
+  }
+
+  async function parseResponse(res) {
     const text = await res.text();
     let data = null;
     try {
@@ -39,6 +37,27 @@
       throw new Error(msg);
     }
     return data;
+  }
+
+  async function api(path, opts) {
+    opts = opts || {};
+    const res = await fetch(path, {
+      ...opts,
+      credentials: "include",
+      headers: { ...headers(), ...(opts.headers || {}) },
+    });
+    return parseResponse(res);
+  }
+
+  async function apiForm(path, formData, opts) {
+    opts = opts || {};
+    const res = await fetch(path, {
+      method: opts.method || "POST",
+      credentials: "include",
+      headers: authHeaders(opts.headers || {}),
+      body: formData,
+    });
+    return parseResponse(res);
   }
 
   async function ensureSession() {
@@ -65,5 +84,15 @@
     if (input) input.value = "";
   }
 
-  global.StrixAPI = { getKey, setKey, headers, api, ensureSession, clearSession, KEY_STORAGE };
+  global.StrixAPI = {
+    getKey,
+    setKey,
+    headers,
+    authHeaders,
+    api,
+    apiForm,
+    ensureSession,
+    clearSession,
+    KEY_STORAGE,
+  };
 })(window);

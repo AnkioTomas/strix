@@ -166,9 +166,12 @@ class LiveStrixSession:
         from strix.core.paths import run_dir_for
         from strix.core.runner import run_strix_scan
         from strix.interface.scan_setup import build_targets_info, prepare_run
+        from strix.interface.utils import read_workspace_files
         from strix.interface.viewer.server import authorized_url, bundle_is_built, serve
         from strix.report.state import ReportState, set_global_report_state
         from strix.runtime import session_manager
+
+        from app.services.attachments import resolve_task_workspace_files
 
         args = _build_args(target=target, task=task, settings=settings)
         if task.get("action") == "resume" and task.get("run_name"):
@@ -183,6 +186,9 @@ class LiveStrixSession:
                 raise RuntimeError("resume requested but task has no run_name")
             build_targets_info(args)
             prepare_run(args)
+        # Attachments live under task workspace/attachments/; mount + tell the model.
+        if not getattr(args, "workspace_files", None):
+            args.workspace_files = resolve_task_workspace_files(Path(task["workspace"]))
         self.run_name = args.run_name
         assert self.run_name
         if task.get("action") == "resume" and self.run_name != task.get("run_name"):
@@ -245,6 +251,8 @@ class LiveStrixSession:
             with contextlib.suppress(Exception):
                 self._on_ready(self)
 
+        extra_files = read_workspace_files(getattr(args, "workspace_files", None))
+
         async def _main() -> int:
             self._scan_task = asyncio.current_task()
             try:
@@ -256,6 +264,7 @@ class LiveStrixSession:
                     coordinator=coordinator,
                     interactive=True,
                     max_budget_usd=task.get("max_budget") or settings.default_max_budget,
+                    extra_files=extra_files,
                 )
             except asyncio.CancelledError:
                 logger.info("scan cancelled task=%s", self.task_id)

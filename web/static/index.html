@@ -89,6 +89,10 @@
           <label class="span-2">Instruction
             <textarea id="instruction" placeholder="重点测试 IDOR / SQL Injection …"></textarea>
           </label>
+          <label class="span-2">附件（挂载到沙箱 /workspace，并告知模型）
+            <input id="attachments" type="file" multiple />
+            <span class="field-hint" id="attachmentsHint">可选。例如 PoC、wordlist、凭证说明。</span>
+          </label>
         </div>
         <div class="actions">
           <button type="button" class="btn" id="createTask">创建</button>
@@ -98,7 +102,7 @@
 
       <section class="panel empty-state" id="emptyState">
         <h2>选择或新建任务</h2>
-        <p>左侧列表选中任务后，可查看 Live Viewer、对话、漏洞、报告与工件。</p>
+        <p>左侧列表选中任务后，可查看 Live Viewer、漏洞、报告与工件。</p>
       </section>
 
       <section class="panel detail-panel hidden" id="detailPanel">
@@ -119,7 +123,6 @@
         <nav class="tabs" id="tabs">
           <button type="button" class="tab active" data-tab="overview">概览</button>
           <button type="button" class="tab" data-tab="viewer">Live Viewer</button>
-          <button type="button" class="tab" data-tab="chat">对话</button>
           <button type="button" class="tab" data-tab="findings">漏洞</button>
           <button type="button" class="tab" data-tab="report">报告</button>
           <button type="button" class="tab" data-tab="artifacts">工件</button>
@@ -139,16 +142,29 @@
           <iframe id="viewerFrame" class="viewer-frame" title="Strix Viewer" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" scrolling="no"></iframe>
         </div>
 
-        <div class="tab-pane" id="tab-chat">
-          <div class="chat-log" id="chatLog"></div>
-          <div class="chat-compose">
-            <textarea id="message" placeholder="给 Agent 的消息（运行中实时投递；结束后会开 follow-up）"></textarea>
-            <button type="button" class="btn" id="sendMsg">发送</button>
-          </div>
-        </div>
-
         <div class="tab-pane" id="tab-findings">
-          <div id="findingsView" class="penna-render penna-host"></div>
+          <div id="findingsListPane">
+            <div class="findings-toolbar">
+              <span class="muted" id="findingsCount">—</span>
+            </div>
+            <table class="data findings-table">
+              <thead>
+                <tr>
+                  <th>严重度</th>
+                  <th>标题</th>
+                  <th>资产 / 位置</th>
+                  <th>置信度</th>
+                </tr>
+              </thead>
+              <tbody id="findingsBody"></tbody>
+            </table>
+          </div>
+          <div id="findingsDetailPane" class="hidden">
+            <div class="findings-toolbar">
+              <button type="button" class="btn ghost" id="findingsBack">← 返回列表</button>
+            </div>
+            <div id="findingsView" class="penna-render penna-host"></div>
+          </div>
         </div>
 
         <div class="tab-pane" id="tab-report">

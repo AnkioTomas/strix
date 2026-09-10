@@ -13,6 +13,7 @@ from app.db import Database, utc_now
 from app.schemas import CreateTaskRequest, GitSource, LocalSource
 from app.security.source import SourceValidationError, validate_source
 from app.security.target import TargetValidationError, validate_pentest_target
+from app.services.attachments import copy_attachments, save_uploads
 from app.services.git_clone import GitError, clone_repository
 from app.services.results import (
     load_normalized_findings,
@@ -51,14 +52,22 @@ class TaskManager:
 
     # --- create / list ---
 
-    def create_task(self, req: CreateTaskRequest, *, parent_task_id: str | None = None,
-                    action: str | None = None) -> dict[str, Any]:
+    def create_task(
+        self,
+        req: CreateTaskRequest,
+        *,
+        parent_task_id: str | None = None,
+        action: str | None = None,
+        attachments: list[tuple[str, bytes]] | None = None,
+        copy_attachments_from: Path | str | None = None,
+    ) -> dict[str, Any]:
         task_id = f"task_{uuid.uuid4().hex[:16]}"
         workspace = self.settings.tasks_dir / task_id
         workspace.mkdir(parents=True, exist_ok=True)
         (workspace / "source").mkdir(exist_ok=True)
         (workspace / "logs").mkdir(exist_ok=True)
         (workspace / "results").mkdir(exist_ok=True)
+        (workspace / "attachments").mkdir(exist_ok=True)
 
         target: str | None = None
         source_fields: dict[str, Any] = {
@@ -95,9 +104,16 @@ class TaskManager:
                         }
                     )
                     target = source.path
+            if attachments:
+                save_uploads(workspace, attachments)
+            if copy_attachments_from is not None:
+                copy_attachments(Path(copy_attachments_from), workspace)
         except (TargetValidationError, SourceValidationError) as exc:
             shutil.rmtree(workspace, ignore_errors=True)
             raise TaskError(exc.code, exc.message) from exc
+        except ValueError as exc:
+            shutil.rmtree(workspace, ignore_errors=True)
+            raise TaskError("INVALID_ATTACHMENT", str(exc)) from exc
 
         now = utc_now()
         row = {
@@ -188,7 +204,12 @@ class TaskManager:
         if parent["status"] not in TERMINAL:
             raise TaskError("TASK_ALREADY_RUNNING", "Only finished tasks can be retried")
         req = self._request_from_task(parent)
-        return self.create_task(req, parent_task_id=task_id, action="retry")
+        return self.create_task(
+            req,
+            parent_task_id=task_id,
+            action="retry",
+            copy_attachments_from=parent["workspace"],
+        )
 
     def retest_task(self, task_id: str, instruction: str | None = None) -> dict[str, Any]:
         parent = self.get_task(task_id)
@@ -203,7 +224,12 @@ class TaskManager:
             base.instruction = f"{base.instruction}\n\n[Retest]\n{note}"
         else:
             base.instruction = note
-        return self.create_task(base, parent_task_id=task_id, action="retest")
+        return self.create_task(
+            base,
+            parent_task_id=task_id,
+            action="retest",
+            copy_attachments_from=parent["workspace"],
+        )
 
     def resume_task(self, task_id: str, instruction: str | None = None) -> dict[str, Any]:
         """Continue a finished scan in-place via Strix ``--resume`` (same task id)."""

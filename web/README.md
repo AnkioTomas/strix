@@ -73,6 +73,7 @@ PYTHONPATH=. python -m app
 | `LLM_API_KEY` | — | LLM 密钥（扫描必需） |
 | `OPENAI_API_BASE` / `LLM_API_BASE` | — | 本地/兼容 OpenAI 的 base URL |
 | `LLM_TIMEOUT` | 300 | 所有 AI/LLM 请求超时（秒） |
+| `STRIX_REPORT_LANGUAGE` | `zh` | 报告叙事/交付包语言（`zh`/`en`/`ja`/`Français`/…；空=不强制） |
 | `STRIX_MAX_CONCURRENT` | 1 | 同时跑的扫描数 |
 | `STRIX_MIN_FREE_MEMORY_GB` | 2.0 | 可用内存低于此值则继续排队 |
 | `STRIX_MAX_LOAD_PER_CPU` | 1.5 | load1 / cpu_count 上限 |

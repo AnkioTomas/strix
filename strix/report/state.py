@@ -674,7 +674,8 @@ class ReportState:
             if self.vulnerability_reports:
                 write_vulnerabilities(run_dir, self.vulnerability_reports, self._saved_vuln_ids)
 
-            # Customer-facing Chinese report + zip (md + relative-path images).
+            # Customer-facing delivery report + zip (md + relative-path images).
+            # Chrome language follows STRIX_REPORT_LANGUAGE.
             try:
                 overview = None
                 if isinstance(self.scan_results, dict):
@@ -687,7 +688,7 @@ class ReportState:
                     file_bytes=self._pull_screenshot_bytes(),
                 )
             except Exception:
-                logger.exception("Chinese delivery bundle failed (non-fatal)")
+                logger.exception("Delivery bundle failed (non-fatal)")
                 if self.final_scan_result:
                     write_executive_report(run_dir, self.final_scan_result)
 

@@ -260,9 +260,11 @@ ignore = [
 # Chinese customer report: fullwidth punctuation is intentional; section
 # renderer is a straight data→markdown dump (many optional fields).
 "strix/report/zh_report.py" = ["RUF001", "PLR0912", "PLR0915"]
+"strix/report/locale.py" = ["RUF001"]
 "strix/report/writer.py" = ["PLC0415"]
 "tests/test_zh_report.py" = ["RUF001"]
 "tests/test_report_writer.py" = ["RUF001"]
+"tests/test_report_language_prompt.py" = ["RUF001"]
 # Lazy imports of strix.tools.mcp.client avoid a circular import (client imports
 # the session module at module load).
 "strix/tools/mcp/session.py" = ["PLC0415"]

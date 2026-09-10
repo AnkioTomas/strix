@@ -22,6 +22,7 @@ from strix.config.settings import (
     DedupeSettings,
     IntegrationSettings,
     LlmSettings,
+    ReportSettings,
     RuntimeSettings,
     Settings,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "DedupeSettings",
     "IntegrationSettings",
     "LlmSettings",
+    "ReportSettings",
     "RuntimeSettings",
     "Settings",
     "apply_config_override",

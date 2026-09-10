@@ -70,7 +70,7 @@ def test_hydrate_from_run_dir_strips_control_chars_from_title(
 
     assert report_state.vulnerability_reports[0]["title"] == "XSS in search form"
     # The markdown on disk holds the raw heading, so resume must rewrite it.
-    assert md_path.read_text(encoding="utf-8").startswith("# XSS in search form\n")
+    assert md_path.read_text(encoding="utf-8").startswith("# [ 中危 ] XSS in search form\n")
 
 
 def test_hydrate_names_the_class_a_legacy_record_always_had(

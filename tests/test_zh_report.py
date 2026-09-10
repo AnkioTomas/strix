@@ -5,6 +5,9 @@ from __future__ import annotations
 import zipfile
 from typing import TYPE_CHECKING
 
+import pytest
+
+from strix.config import loader
 from strix.report.zh_report import (
     extract_screenshot_paths,
     render_zh_penetration_report,
@@ -14,6 +17,12 @@ from strix.report.zh_report import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+@pytest.fixture(autouse=True)
+def _chinese_chrome(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STRIX_REPORT_LANGUAGE", "zh")
+    monkeypatch.setattr(loader, "_cached", None)
 
 
 def test_extract_screenshot_paths_from_evidence_and_markdown() -> None:

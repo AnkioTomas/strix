@@ -1,4 +1,8 @@
-"""Chinese customer-facing penetration test report + zip delivery."""
+"""Customer-facing penetration test report + zip delivery.
+
+Structural labels follow ``STRIX_REPORT_LANGUAGE`` (Chinese or English chrome).
+Finding narrative text is whatever the agents wrote.
+"""
 
 from __future__ import annotations
 
@@ -8,19 +12,11 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from strix.report.locale import chrome_locale, report_labels, severity_label
 from strix.report.writer import atomic_write_text, parse_fenced_code, safe_fence
 
 
 logger = logging.getLogger(__name__)
-
-_SEVERITY_ZH: dict[str, str] = {
-    "critical": "严重",
-    "high": "高危",
-    "medium": "中危",
-    "low": "低危",
-    "info": "信息",
-    "none": "信息",
-}
 
 _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4, "none": 5}
 
@@ -39,7 +35,8 @@ _MD_IMAGE_RE = re.compile(
 
 
 def severity_zh(severity: str | None) -> str:
-    return _SEVERITY_ZH.get(str(severity or "info").lower(), str(severity or "信息"))
+    """Backward-compatible severity label (follows ``STRIX_REPORT_LANGUAGE``)."""
+    return severity_label(severity)
 
 
 def extract_screenshot_paths(*texts: str | None) -> list[str]:
@@ -77,12 +74,10 @@ def _host_candidates(sandbox_path: str, run_dir: Path) -> list[Path]:
     candidates: list[Path] = []
     if raw.is_absolute() and raw.exists():
         candidates.append(raw)
-    # When /workspace is bind-mounted from run_dir/workspace.
     if sandbox_path.startswith("/workspace/"):
         rel = sandbox_path[len("/workspace/") :]
         candidates.append(run_dir / "workspace" / rel)
         candidates.append(run_dir / rel)
-    # Already a relative deliverable path.
     candidates.append(run_dir / sandbox_path)
     return candidates
 
@@ -93,12 +88,7 @@ def materialize_screenshots(
     *,
     file_bytes: dict[str, bytes] | None = None,
 ) -> dict[str, list[str]]:
-    """Copy screenshots into ``run_dir/images/`` and return relative paths per report.
-
-    ``file_bytes`` maps sandbox absolute paths to content already pulled from
-    the live sandbox session. Host-side copies under ``run_dir/workspace`` are
-    preferred when present.
-    """
+    """Copy screenshots into ``run_dir/images/`` and return relative paths per report."""
     images_dir = run_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
     pulled = file_bytes or {}
@@ -108,9 +98,7 @@ def materialize_screenshots(
         report_id = str(report.get("id") or "vuln")
         declared = report.get("screenshots")
         declared_paths = (
-            [str(p) for p in declared if p]
-            if isinstance(declared, list)
-            else []
+            [str(p) for p in declared if p] if isinstance(declared, list) else []
         )
         paths = extract_screenshot_paths(
             report.get("evidence"),
@@ -118,7 +106,6 @@ def materialize_screenshots(
             report.get("poc_script_code"),
             *declared_paths,
         )
-        # Explicit screenshots list first, then anything cited in prose.
         ordered: list[str] = []
         for path in [*declared_paths, *paths]:
             if path not in ordered:
@@ -138,41 +125,40 @@ def materialize_screenshots(
                 dest.write_bytes(pulled[sandbox_path])
                 written = True
             if written:
-                rel = f"images/{source_name}"
-                rels.append(rel)
+                rels.append(f"images/{source_name}")
             else:
-                logger.warning(
-                    "screenshot missing for %s: %s",
-                    report_id,
-                    sandbox_path,
-                )
+                logger.warning("screenshot missing for %s: %s", report_id, sandbox_path)
         if rels:
             mapping[report_id] = rels
             report["screenshot_rels"] = rels
     return mapping
 
 
-def _md_table(rows: list[tuple[str, object]]) -> str:
-    lines = ["| 项目 | 内容 |", "| --- | --- |"]
-    for key, value in rows:
-        cell = str(value or "—").replace("|", "\\|").replace("\n", "<br>")
+def _md_table(rows: list[tuple[str, object]], *, field: str, value: str) -> str:
+    lines = [f"| {field} | {value} |", "| --- | --- |"]
+    for key, cell_value in rows:
+        cell = str(cell_value or "—").replace("|", "\\|").replace("\n", "<br>")
         lines.append(f"| {key} | {cell} |")
     return "\n".join(lines)
 
 
 def _vuln_meta_table(report: dict[str, Any]) -> str:
+    labels = report_labels()
     return _md_table(
         [
-            ("CVSS", report.get("cvss")),
-            ("CWE", report.get("cwe")),
-            ("目标", report.get("target")),
-            ("端点", report.get("endpoint")),
-            ("方法", report.get("method")),
-        ]
+            (labels["cvss"], report.get("cvss")),
+            (labels["cwe"], report.get("cwe")),
+            (labels["target"], report.get("target")),
+            (labels["endpoint"], report.get("endpoint")),
+            (labels["method"], report.get("method")),
+        ],
+        field=labels["field"],
+        value=labels["value"],
     )
 
 
 def _engagement_type(run_record: dict[str, Any]) -> str:
+    labels = report_labels()
     targets = run_record.get("targets_info") or []
     has_code = any(
         isinstance(t, dict) and t.get("type") in {"local_code", "repository", "git_repo"}
@@ -183,10 +169,10 @@ def _engagement_type(run_record: dict[str, Any]) -> str:
         for t in targets
     )
     if has_code and has_url:
-        return "灰盒（源码 + 线上目标）"
+        return labels["engagement_gray"]
     if has_code:
-        return "白盒"
-    return "黑盒"
+        return labels["engagement_white"]
+    return labels["engagement_black"]
 
 
 def _scope_text(run_record: dict[str, Any]) -> str:
@@ -204,34 +190,40 @@ def _scope_text(run_record: dict[str, Any]) -> str:
 
 
 def _system_name(run_record: dict[str, Any]) -> str:
+    labels = report_labels()
     targets = run_record.get("targets_info") or []
     for target in targets:
         if isinstance(target, dict) and target.get("original"):
             return str(target["original"])
-    return str(run_record.get("run_name") or "目标系统")
+    return str(run_record.get("run_name") or labels["default_system"])
 
 
 def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
-    """Render one finding block for the consolidated Chinese report."""
-    sev = severity_zh(report.get("severity"))
-    title = report.get("title") or "未命名漏洞"
+    """Render one finding block for the consolidated delivery report."""
+    labels = report_labels()
+    sev = severity_label(report.get("severity"), labels)
+    title = report.get("title") or labels["untitled"]
     lines: list[str] = [
         f"{index}. [ {sev} ] {title}",
         "",
         _vuln_meta_table(report),
         "",
-        "## 描述",
+        f"## {labels['description']}",
         "",
-        str(report.get("description") or report.get("technical_analysis") or "无描述。"),
+        str(
+            report.get("description")
+            or report.get("technical_analysis")
+            or labels["no_description"]
+        ),
         "",
-        "## 复现步骤",
+        f"## {labels['reproduction']}",
         "",
     ]
     if report.get("poc_description"):
         lines.append(str(report["poc_description"]))
         lines.append("")
     if report.get("poc_script_code"):
-        lines.append("**POC：**")
+        lines.append(f"**{labels['poc']}**")
         lines.append("")
         language, code = parse_fenced_code(str(report["poc_script_code"]))
         fence_lang = language or ""
@@ -243,27 +235,27 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
 
     rels = report.get("screenshot_rels") or []
     if isinstance(rels, list) and rels:
-        lines.append("**漏洞截图：**")
+        lines.append(f"**{labels['screenshots']}**")
         lines.append("")
         for i, rel in enumerate(rels, start=1):
-            lines.append(f"![漏洞截图 {i}]({rel})")
+            alt = labels["screenshot_n"].format(n=i)
+            lines.append(f"![{alt}]({rel})")
             lines.append("")
     elif report.get("evidence"):
-        # Keep textual evidence when no image could be materialised.
-        lines.append("**证据摘录：**")
+        lines.append(f"**{labels['evidence_excerpt']}**")
         lines.append("")
         lines.append(str(report["evidence"]))
         lines.append("")
 
     lines.extend(
         [
-            "## 影响",
+            f"## {labels['impact']}",
             "",
-            str(report.get("impact") or "未说明。"),
+            str(report.get("impact") or labels["impact_missing"]),
             "",
-            "## 修复建议",
+            f"## {labels['remediation']}",
             "",
-            str(report.get("remediation_steps") or "未提供。"),
+            str(report.get("remediation_steps") or labels["remediation_missing"]),
             "",
         ]
     )
@@ -273,33 +265,40 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
         appendix_bits.append(str(report["technical_analysis"]))
         appendix_bits.append("")
     if report.get("assumptions"):
-        appendix_bits.append(f"**前提假设：** {report['assumptions']}")
+        appendix_bits.append(f"**{labels['assumptions']}** {report['assumptions']}")
         appendix_bits.append("")
     if report.get("counterevidence"):
-        appendix_bits.append(f"**反证：** {report['counterevidence']}")
+        appendix_bits.append(f"**{labels['counterevidence']}** {report['counterevidence']}")
         appendix_bits.append("")
     if report.get("confidence"):
-        appendix_bits.append(f"**置信度：** {report['confidence']}")
+        appendix_bits.append(f"**{labels['confidence']}** {report['confidence']}")
         appendix_bits.append("")
     if report.get("confidence_rationale"):
-        appendix_bits.append(f"**置信度说明：** {report['confidence_rationale']}")
+        appendix_bits.append(
+            f"**{labels['confidence_rationale']}** {report['confidence_rationale']}"
+        )
         appendix_bits.append("")
     if report.get("severity_change_conditions"):
-        appendix_bits.append(f"**严重性可变条件：** {report['severity_change_conditions']}")
+        appendix_bits.append(
+            f"**{labels['severity_change']}** {report['severity_change_conditions']}"
+        )
         appendix_bits.append("")
     if report.get("fix_verification"):
-        appendix_bits.append(f"**修复验证：** {report['fix_verification']}")
+        appendix_bits.append(f"**{labels['fix_verification']}** {report['fix_verification']}")
         appendix_bits.append("")
     dep = report.get("dependency_metadata")
     if isinstance(dep, dict) and dep:
-        for key, label in (
-            ("package_name", "包名"),
-            ("package_ecosystem", "生态"),
-            ("installed_version", "已安装版本"),
-            ("fixed_version", "修复版本"),
+        for key, label_key in (
+            ("package_name", "package_name"),
+            ("package_ecosystem", "package_ecosystem"),
+            ("installed_version", "installed_version"),
+            ("fixed_version", "fixed_version"),
         ):
             if dep.get(key):
-                appendix_bits.append(f"**{label}：** {dep[key]}")
+                if chrome_locale() == "zh":
+                    appendix_bits.append(f"**{labels[label_key]}：** {dep[key]}")
+                else:
+                    appendix_bits.append(f"**{labels[label_key]}:** {dep[key]}")
         appendix_bits.append("")
     locations = report.get("code_locations")
     if isinstance(locations, list):
@@ -307,7 +306,7 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
             if not isinstance(loc, dict):
                 continue
             file_path = loc.get("file") or "unknown"
-            appendix_bits.append(f"**代码位置：** `{file_path}`")
+            appendix_bits.append(f"**{labels['code_location']}** `{file_path}`")
             snippet = loc.get("snippet")
             if snippet:
                 fence = safe_fence(str(snippet))
@@ -315,7 +314,7 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
             else:
                 appendix_bits.append("")
     if appendix_bits:
-        lines.extend(["## 附录", "", *appendix_bits])
+        lines.extend([f"## {labels['appendix']}", "", *appendix_bits])
     return "\n".join(lines).rstrip()
 
 
@@ -325,7 +324,8 @@ def render_zh_penetration_report(
     vulnerability_reports: list[dict[str, Any]],
     overview: str | None = None,
 ) -> str:
-    """Build the Chinese consolidated penetration test report markdown."""
+    """Build the consolidated penetration test report markdown."""
+    labels = report_labels()
     system = _system_name(run_record)
     sorted_reports = sorted(
         vulnerability_reports,
@@ -339,39 +339,49 @@ def render_zh_penetration_report(
         overview_body = overview.strip()
     elif sorted_reports:
         top = ", ".join(
-            f"{severity_zh(r.get('severity'))}·{r.get('title')}" for r in sorted_reports[:5]
+            f"{severity_label(r.get('severity'), labels)}·{r.get('title')}"
+            for r in sorted_reports[:5]
         )
-        overview_body = (
-            f"本次测试共确认 **{len(sorted_reports)}** 个漏洞。"
-            f"危害较大的问题包括：{top}。"
+        overview_body = labels["overview_with_findings"].format(
+            count=len(sorted_reports),
+            top=top,
         )
     else:
-        overview_body = "本次测试未确认可复现的高价值漏洞；建议持续关注权限边界与输入校验硬化。"
+        overview_body = labels["overview_clean"]
 
     meta = _md_table(
         [
-            ("系统名称", system),
-            ("技术架构", run_record.get("tech_stack") or "见测试范围与目标技术识别结果"),
-            ("测试标准", "OWASP WSTG / PTES"),
-            ("评估类型", _engagement_type(run_record)),
-            ("测试范围", _scope_text(run_record)),
-        ]
+            (labels["system_name"], system),
+            (labels["tech_stack"], run_record.get("tech_stack") or labels["tech_stack_fallback"]),
+            (labels["test_standard"], labels["test_standard_value"]),
+            (labels["assessment_type"], _engagement_type(run_record)),
+            (labels["test_scope"], _scope_text(run_record)),
+        ],
+        field=labels["field"],
+        value=labels["value"],
+    )
+
+    # Chinese title is "{system}{suffix}" with no separator; English uses an em dash.
+    title = (
+        f"# {system}{labels['report_title_suffix']}"
+        if chrome_locale() == "zh"
+        else f"# {system} — {labels['report_title_suffix']}"
     )
 
     lines: list[str] = [
-        f"# {system}安全渗透测试报告",
+        title,
         "",
         meta,
         "",
-        "# 测试概述",
+        f"# {labels['overview_heading']}",
         "",
         overview_body,
         "",
-        "# 漏洞清单",
+        f"# {labels['findings_heading']}",
         "",
     ]
     if not sorted_reports:
-        lines.append("本次测试未发现可复现漏洞。")
+        lines.append(labels["no_findings"])
         lines.append("")
     else:
         for index, report in enumerate(sorted_reports, start=1):
@@ -391,7 +401,7 @@ def write_zh_delivery_bundle(
     overview: str | None = None,
     file_bytes: dict[str, bytes] | None = None,
 ) -> Path:
-    """Write Chinese markdown, materialise images, and zip them for delivery.
+    """Write delivery markdown, materialise images, and zip them.
 
     Returns the path of ``penetration_test_report.zip``.
     """
@@ -412,5 +422,5 @@ def write_zh_delivery_bundle(
             for image in sorted(images_dir.iterdir()):
                 if image.is_file():
                     zf.write(image, arcname=f"images/{image.name}")
-    logger.info("Wrote Chinese delivery bundle: %s", zip_path)
+    logger.info("Wrote delivery bundle: %s", zip_path)
     return zip_path

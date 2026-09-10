@@ -221,13 +221,13 @@ def atomic_write_text(path: Path, payload: str) -> None:
 
 
 def render_vulnerability_md(report: dict[str, Any]) -> str:
-    """Render one finding as Chinese markdown matching the delivery report."""
-    from strix.report.zh_report import render_zh_vulnerability_section, severity_zh
+    """Render one finding as markdown matching the delivery report chrome."""
+    from strix.report.locale import report_labels, severity_label
+    from strix.report.zh_report import render_zh_vulnerability_section
 
-    # Standalone per-vuln files keep the same section body as the consolidated
-    # report, prefixed with a top-level title for navigation.
-    sev = severity_zh(report.get("severity"))
-    title = report.get("title") or "未命名漏洞"
+    labels = report_labels()
+    sev = severity_label(report.get("severity"), labels)
+    title = report.get("title") or labels["untitled"]
     body = render_zh_vulnerability_section(report, index=1)
     # Drop the leading "1. [ sev ] title" line from the section renderer.
     lines = body.splitlines()
@@ -239,7 +239,7 @@ def render_vulnerability_md(report: dict[str, Any]) -> str:
         f"# [ {sev} ] {title}",
         "",
         f"**ID:** {report.get('id', 'unknown')}",
-        f"**发现时间:** {report.get('timestamp', 'unknown')}",
+        f"**{labels['found_at']}:** {report.get('timestamp', 'unknown')}",
         "",
     ]
     history_lines = render_update_history(report.get("update_history"))
@@ -256,7 +256,10 @@ def render_update_history(history: Any) -> list[str]:
     if not entries:
         return []
 
-    lines = ["## Update History\n"]
+    from strix.report.locale import report_labels
+
+    labels = report_labels()
+    lines = [f"## {labels['update_history']}\n"]
     for entry in entries:
         author = str(entry.get("agent_name") or entry.get("agent_id") or "an agent")
         raw_fields = entry.get("fields")

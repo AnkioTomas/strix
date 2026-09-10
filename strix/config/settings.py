@@ -160,6 +160,16 @@ class ViewerSettings(BaseSettings):
     app_url: str = Field(default="https://app.strix.ai", alias="STRIX_APP_URL")
 
 
+class ReportSettings(BaseSettings):
+    """Customer-facing report language (injected into every agent system prompt)."""
+
+    model_config = _BASE_CONFIG
+
+    # Any language label or common code: ``zh``, ``en``, ``ja``, ``Français``, …
+    # Empty disables the language block. Default ``zh`` for this deployment.
+    language: str = Field(default="zh", alias="STRIX_REPORT_LANGUAGE")
+
+
 class Settings(BaseSettings):
     model_config = _BASE_CONFIG
 
@@ -169,3 +179,4 @@ class Settings(BaseSettings):
     context: ContextSettings = Field(default_factory=ContextSettings)
     integrations: IntegrationSettings = Field(default_factory=IntegrationSettings)
     viewer: ViewerSettings = Field(default_factory=ViewerSettings)
+    report: ReportSettings = Field(default_factory=ReportSettings)

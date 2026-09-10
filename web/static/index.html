@@ -58,6 +58,21 @@
           <button type="button" class="btn" id="newTaskBtn">新建</button>
         </div>
       </div>
+      <div class="sidebar-filters">
+        <label class="filter-field">状态
+          <select id="taskStatusFilter" aria-label="按状态筛选任务">
+            <option value="">全部</option>
+            <option value="held">held</option>
+            <option value="queued">queued</option>
+            <option value="starting">starting</option>
+            <option value="running">running</option>
+            <option value="cancelling">cancelling</option>
+            <option value="completed">completed</option>
+            <option value="failed">failed</option>
+            <option value="cancelled">cancelled</option>
+          </select>
+        </label>
+      </div>
       <ul class="task-list" id="taskList"></ul>
     </aside>
 

@@ -249,7 +249,10 @@
   function renderTaskList() {
     const list = $("taskList");
     if (!tasksCache.length) {
-      list.innerHTML = `<li class="muted" style="cursor:default">暂无任务</li>`;
+      const filtered = ($("taskStatusFilter")?.value || "").trim();
+      list.innerHTML = filtered
+        ? `<li class="muted" style="cursor:default">该状态下暂无任务</li>`
+        : `<li class="muted" style="cursor:default">暂无任务</li>`;
       return;
     }
     list.innerHTML = tasksCache
@@ -546,7 +549,9 @@
 
   async function refresh() {
     try {
-      const data = await api.api("/api/v1/tasks");
+      const status = ($("taskStatusFilter")?.value || "").trim();
+      const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+      const data = await api.api(`/api/v1/tasks${qs}`);
       tasksCache = data.tasks || [];
       renderTaskList();
       if (selected) {
@@ -689,6 +694,9 @@
     showImport(false);
     resetCreateForm();
     showCreate(true);
+  };
+  $("taskStatusFilter").onchange = () => {
+    void refresh();
   };
   $("cancelCreate").onclick = () => {
     resetCreateForm();

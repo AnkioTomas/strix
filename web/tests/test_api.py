@@ -466,6 +466,7 @@ def test_refresh_report_writes_resume_instruction(client: TestClient):
     assert note.is_file()
     assert "更新报告" in note.read_text(encoding="utf-8")
     assert "finish_scan" in note.read_text(encoding="utf-8")
+    assert "screenshots" in note.read_text(encoding="utf-8")
     assert REFRESH_REPORT_INSTRUCTION.strip() in note.read_text(encoding="utf-8")
 
 

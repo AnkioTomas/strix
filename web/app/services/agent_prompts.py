@@ -8,12 +8,17 @@ REFRESH_REPORT_INSTRUCTION = """\
 不要扩大测试范围。按当前交付规范重写报告并结束：
 
 1. 禁止编造元数据表（系统名称 / 技术架构 / 测试标准 / 评估类型等）。
-   范围、方法、标准写进 finish_scan 的 methodology 与 executive_summary。
+   范围、方法、标准写进 finish_scan 的 methodology / technical_analysis /
+   recommendations（交付时会进「附录」）；executive_summary 写客户可读概述。
 2. finish_scan 四段都必须是客户可读正文：
    executive_summary / methodology / technical_analysis / recommendations。
 3. 漏洞正文用 list_reports → get_report → update_vulnerability_report 逐条润色
-  （一次一个 id）；交付清单中每条漏洞是二级标题结构。
-4. 完成后调用 finish_scan 恰好一次。
+   （一次一个 id）；交付清单中每条漏洞是二级标题结构。
+4. 截图佐证（强制）：对 list_reports 里的每一条，检查 screenshots / evidence 是否
+   已有可展示的 PNG/JPEG 沙箱路径。缺失则先复现并截图，再用
+   update_vulnerability_report 写入 screenshots（或把路径写进 evidence），
+   禁止无截图的空洞描述。
+5. 完成后调用 finish_scan 恰好一次。
 
 优先把已有发现组织成合格交付件，而不是继续扫新面。
 """

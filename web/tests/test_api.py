@@ -386,7 +386,43 @@ def test_resume_requires_agent_snapshot(client: TestClient):
     assert note.read_text(encoding="utf-8") == "继续找 SQLi"
 
 
-def test_delete_rejects_active_and_removes_terminal(client: TestClient):
+def test_task_name_notes_hold_release(client: TestClient):
+    created = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com",
+            "scan_mode": "quick",
+            "name": "客户A",
+            "notes": "周末再跑",
+            "held": True,
+        },
+    )
+    assert created.status_code == 202, created.text
+    task = created.json()
+    assert task["status"] == "held"
+    assert task["name"] == "客户A"
+    assert task["notes"] == "周末再跑"
+
+    renamed = client.patch(
+        f"/api/v1/tasks/{task['id']}",
+        json={"name": "客户A-复测", "notes": "改备注"},
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "客户A-复测"
+    assert renamed.json()["notes"] == "改备注"
+
+    released = client.post(f"/api/v1/tasks/{task['id']}/release")
+    assert released.status_code == 202
+    assert released.json()["status"] == "queued"
+
+    held = client.post(f"/api/v1/tasks/{task['id']}/hold")
+    assert held.status_code == 200
+    assert held.json()["status"] == "held"
+
+    deleted = client.delete(f"/api/v1/tasks/{task['id']}")
+    assert deleted.status_code == 204
+
     created = client.post(
         "/api/v1/tasks",
         json={"type": "pentest", "target": "https://example.com", "scan_mode": "quick"},

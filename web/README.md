@@ -91,7 +91,10 @@ PYTHONPATH=. python -m app
 | POST | `/api/v1/tasks/import` | 导入旧版 CLI `strix_runs/`（可 `dry_run`） |
 | GET | `/api/v1/tasks` | 列表 |
 | GET | `/api/v1/tasks/{id}` | 详情（含 `viewer_proxy_url`） |
-| DELETE | `/api/v1/tasks/{id}` | 删除已结束任务（DB + workspace） |
+| PATCH | `/api/v1/tasks/{id}` | 重命名 / 更新备注 |
+| POST | `/api/v1/tasks/{id}/hold` | 挂起（queued → held，不进执行队列） |
+| POST | `/api/v1/tasks/{id}/release` | 放行（held → queued） |
+| DELETE | `/api/v1/tasks/{id}` | 删除已结束或挂起任务（DB + workspace） |
 | POST | `/api/v1/tasks/{id}/cancel` | SIGTERM→SIGKILL |
 | POST | `/api/v1/tasks/{id}/retry` | 同配置重跑（新 run） |
 | POST | `/api/v1/tasks/{id}/resume` | 原地续跑同一任务（同 `run_name`，需 `agents.json`） |

@@ -226,12 +226,14 @@
     const usage = t.llm_usage || {};
     $("selectedMeta").textContent = `${t.status} · ${t.scan_mode || "—"} · ${formatUtc8(t.created_at)}`;
     const rows = [
+      ["名称", t.name || "（未命名）"],
       ["状态", t.status],
       ["类型", t.type],
       ["目标", t.target || t.source_url || "—"],
       ["动作", t.action || "—"],
       ["Scan mode", t.scan_mode || "—"],
       ["Run", t.run_name || "—"],
+      ["任务 ID", t.id],
       ["启动时间", formatUtc8(started)],
       ["结束时间", finished ? formatUtc8(finished) : "（进行中）"],
       ["运行耗时", formatDuration(duration)],
@@ -247,6 +249,10 @@
     $("overviewKv").innerHTML = rows
       .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`)
       .join("");
+    const notesEl = $("overviewNotes");
+    if (notesEl && document.activeElement !== notesEl) {
+      notesEl.value = t.notes || "";
+    }
     updateActionButtons();
   }
 
@@ -551,6 +557,11 @@
     const form = new FormData();
     form.append("type", type);
     form.append("scan_mode", $("scanMode").value);
+    const taskName = $("taskName").value.trim();
+    if (taskName) form.append("name", taskName);
+    const notes = $("taskNotes").value.trim();
+    if (notes) form.append("notes", notes);
+    if ($("taskHeld").checked) form.append("held", "true");
     const instruction = $("instruction").value.trim();
     if (instruction) form.append("instruction", instruction);
     if (type === "pentest") {
@@ -566,10 +577,65 @@
       await api.ensureSession();
       const task = await api.apiForm("/api/v1/tasks", form);
       $("attachments").value = "";
+      $("taskName").value = "";
+      $("taskNotes").value = "";
+      $("taskHeld").checked = false;
       updateAttachmentsHint();
       showCreate(false);
       await refresh();
       selectTask(task.id);
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
+  $("renameBtn").onclick = async () => {
+    if (!selected) return;
+    const t = currentTask();
+    const next = prompt("任务名称（留空清除自定义名）:", t?.name || "") ?? null;
+    if (next === null) return;
+    try {
+      await api.api(`/api/v1/tasks/${selected}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: next }),
+      });
+      await refresh();
+      selectTask(selected);
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
+  $("saveNotesBtn").onclick = async () => {
+    if (!selected) return;
+    try {
+      await api.api(`/api/v1/tasks/${selected}`, {
+        method: "PATCH",
+        body: JSON.stringify({ notes: $("overviewNotes").value }),
+      });
+      await refresh();
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
+  $("holdBtn").onclick = async () => {
+    if (!selected) return;
+    try {
+      await api.api(`/api/v1/tasks/${selected}/hold`, { method: "POST" });
+      await refresh();
+      selectTask(selected);
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
+  $("releaseBtn").onclick = async () => {
+    if (!selected) return;
+    try {
+      await api.api(`/api/v1/tasks/${selected}/release`, { method: "POST" });
+      await refresh();
+      selectTask(selected);
     } catch (e) {
       alert(e.message);
     }
@@ -664,8 +730,8 @@
   $("deleteBtn").onclick = async () => {
     if (!selected) return;
     const t = currentTask();
-    if (!t || !TERMINAL.has(t.status)) {
-      return alert("只能删除已结束的任务（completed / failed / cancelled）");
+    if (!t || !DELETABLE.has(t.status)) {
+      return alert("只能删除已结束或挂起的任务");
     }
     if (!confirm(`确认删除任务 ${selected}？将同时删除磁盘上的 workspace。`)) return;
     try {

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,14 +20,11 @@ from strix.runtime.docker_client import (
 )
 from strix.runtime.session_manager import (
     build_bind_mounts,
+    build_entrypoint_override_mount,
     build_run_workspace_mount,
     read_sandbox_record,
     write_sandbox_record,
 )
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def test_workspace_dir_is_under_run_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -43,6 +41,15 @@ def test_run_workspace_mount_is_writable_root(tmp_path: Path) -> None:
         "target": "/workspace",
         "read_only": False,
     }
+
+
+def test_entrypoint_override_mount_points_at_packaged_script() -> None:
+    mount = build_entrypoint_override_mount()
+    assert mount is not None
+    assert mount["target"] == "/usr/local/bin/docker-entrypoint.sh"
+    assert mount["read_only"] is True
+    assert "certutil" in Path(mount["source"]).read_text(encoding="utf-8")
+    assert "timeout 20s certutil -N" in Path(mount["source"]).read_text(encoding="utf-8")
 
 
 def test_run_workspace_mount_sorts_shallower_than_local_sources(tmp_path: Path) -> None:

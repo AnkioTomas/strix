@@ -525,9 +525,46 @@
     }
   };
 
+  function openResumeModal() {
+    return new Promise((resolve) => {
+      const modal = $("resumeModal");
+      const input = $("resumeInstruction");
+      const confirmBtn = $("resumeModalConfirm");
+      const cancelBtn = $("resumeModalCancel");
+      const backdrop = $("resumeModalBackdrop");
+
+      const close = (value) => {
+        modal.classList.add("hidden");
+        document.removeEventListener("keydown", onKey);
+        confirmBtn.onclick = null;
+        cancelBtn.onclick = null;
+        backdrop.onclick = null;
+        resolve(value);
+      };
+
+      const onKey = (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          close(null);
+        } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          close(input.value);
+        }
+      };
+
+      input.value = "";
+      modal.classList.remove("hidden");
+      document.addEventListener("keydown", onKey);
+      confirmBtn.onclick = () => close(input.value);
+      cancelBtn.onclick = () => close(null);
+      backdrop.onclick = () => close(null);
+      setTimeout(() => input.focus(), 0);
+    });
+  }
+
   $("resumeBtn").onclick = async () => {
     if (!selected) return;
-    const note = prompt("继续扫描的附加指令（可留空）:", "") ?? null;
+    const note = await openResumeModal();
     if (note === null) return;
     try {
       const body = note.trim() ? { instruction: note.trim() } : {};

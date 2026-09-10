@@ -273,3 +273,104 @@ def test_resume_requires_agent_snapshot(client: TestClient):
     note = workspace / ".web_resume_instruction"
     assert note.is_file()
     assert note.read_text(encoding="utf-8") == "继续找 SQLi"
+
+
+def test_delete_rejects_active_and_removes_terminal(client: TestClient):
+    created = client.post(
+        "/api/v1/tasks",
+        json={"type": "pentest", "target": "https://example.com", "scan_mode": "quick"},
+    ).json()
+    manager = client.app.state.manager
+    workspace = Path(manager.get_task(created["id"])["workspace"])
+    assert workspace.is_dir()
+
+    blocked = client.delete(f"/api/v1/tasks/{created['id']}")
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "TASK_NOT_DELETABLE"
+
+    manager.db.update_task(
+        created["id"],
+        status="failed",
+        finished_at="2026-01-01T00:00:00Z",
+    )
+    manager._processes.pop(created["id"], None)
+    deleted = client.delete(f"/api/v1/tasks/{created['id']}")
+    assert deleted.status_code == 204
+    assert client.get(f"/api/v1/tasks/{created['id']}").status_code == 404
+    assert not workspace.exists()
+
+
+def test_import_cli_runs(client: TestClient, tmp_path: Path):
+    legacy = tmp_path / "legacy_project"
+    run_dir = legacy / "strix_runs" / "legacy_web_1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "run_name": "legacy_web_1",
+                "status": "completed",
+                "scan_mode": "standard",
+                "instruction": "from CLI",
+                "start_time": "2026-01-02T00:00:00Z",
+                "end_time": "2026-01-02T02:00:00Z",
+                "targets_info": [
+                    {
+                        "type": "web_application",
+                        "details": {"target_url": "https://legacy.example"},
+                        "original": "https://legacy.example",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "vulnerabilities.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "legacy-v1",
+                    "title": "XSS",
+                    "severity": "medium",
+                    "description": "reflected",
+                    "target": "https://legacy.example",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    preview = client.post(
+        "/api/v1/tasks/import",
+        json={"path": str(legacy), "dry_run": True},
+    )
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert body["imported_count"] == 1
+    assert body["imported"][0]["run_name"] == "legacy_web_1"
+    assert body["imported"][0]["task_id"] is None
+
+    imported = client.post(
+        "/api/v1/tasks/import",
+        json={"path": str(legacy), "dry_run": False},
+    )
+    assert imported.status_code == 200, imported.text
+    result = imported.json()
+    assert result["imported_count"] == 1
+    task_id = result["imported"][0]["task_id"]
+    assert task_id
+
+    detail = client.get(f"/api/v1/tasks/{task_id}").json()
+    assert detail["action"] == "import"
+    assert detail["status"] == "completed"
+    assert detail["target"] == "https://legacy.example"
+    assert detail["run_name"] == "legacy_web_1"
+
+    findings = client.get(f"/api/v1/tasks/{task_id}/results").json()
+    assert any(f["id"] == "legacy-v1" for f in findings["findings"])
+
+    again = client.post(
+        "/api/v1/tasks/import",
+        json={"path": str(legacy), "dry_run": False},
+    ).json()
+    assert again["imported_count"] == 0
+    assert again["skipped_count"] == 1

@@ -212,6 +212,25 @@
       </section>
     </main>
   </div>
+
+  <div class="modal-root hidden" id="resumeModal" role="dialog" aria-modal="true" aria-labelledby="resumeModalTitle">
+    <div class="modal-backdrop" id="resumeModalBackdrop"></div>
+    <div class="modal-card">
+      <header class="modal-head">
+        <h2 id="resumeModalTitle">继续扫描</h2>
+        <p class="modal-sub">在同一 run 上续跑。附加指令可选，会作为本次 resume 的 nudge 交给 Agent。</p>
+      </header>
+      <label class="modal-field">
+        <span>附加指令</span>
+        <textarea id="resumeInstruction" rows="4" placeholder="例如：继续验证 SQL 注入；优先看认证绕过…"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="resumeModalCancel">取消</button>
+        <button type="button" class="btn" id="resumeModalConfirm">开始 Resume</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/penna-markdown@0.2.5/dist/penna-render.min.js"></script>
   <script src="/static/js/api.js"></script>
   <script src="/static/js/penna.js"></script>

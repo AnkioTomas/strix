@@ -591,6 +591,87 @@ button, input, select, textarea {
 .muted[href] { text-decoration: none; }
 .muted[href]:hover { text-decoration: underline; }
 
+.modal-root {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+}
+
+.modal-root.hidden { display: none !important; }
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(27, 34, 44, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+.modal-card {
+  position: relative;
+  width: min(100%, 28rem);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow:
+    0 1px 0 rgba(27, 34, 44, 0.04),
+    0 18px 40px rgba(27, 34, 44, 0.16);
+  padding: 1.15rem 1.2rem 1.05rem;
+  animation: modal-in 0.16s ease-out;
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.modal-head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+}
+
+.modal-sub {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.modal-field textarea {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.7rem;
+  background: var(--surface);
+  resize: vertical;
+  min-height: 6rem;
+  line-height: 1.45;
+}
+
+.modal-field textarea:focus {
+  outline: 2px solid var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  margin-top: 1rem;
+}
+
 .data {
   width: 100%;
   border-collapse: collapse;

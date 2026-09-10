@@ -126,7 +126,10 @@ def test_normalize_finding():
         "endpoint": "/api?id=1",
         "method": "GET",
         "confidence": "high",
-        "poc_description": "poc",
+        "poc_description": "poc steps",
+        "poc_script_code": "curl 'https://example.com/?id=1'",
+        "technical_analysis": "union based",
+        "screenshot_rels": ["images/abc-1.png"],
         "remediation_steps": "fix it",
         "cvss": 9.8,
         "cwe": ["CWE-89"],
@@ -135,6 +138,68 @@ def test_normalize_finding():
     assert finding["id"] == "abc"
     assert finding["location"]["endpoint"] == "/api?id=1"
     assert finding["cwe"] == "CWE-89"
+    assert "poc steps" in finding["poc"]
+    assert "curl" in finding["poc"]
+    assert finding["technical_analysis"] == "union based"
+    assert finding["screenshots"] == ["images/abc-1.png"]
+
+
+def test_get_results_refreshes_stale_cache(client: TestClient):
+    manager = client.app.state.manager
+    task = manager.create_task(
+        CreateTaskRequest(type="pentest", target="https://example.com", scan_mode="quick")
+    )
+    run_name = "vuln-refresh"
+    run_dir = Path(task["workspace"]) / "strix_runs" / run_name
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text(json.dumps({"run_name": run_name, "status": "running"}))
+    (run_dir / "vulnerabilities.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "v1",
+                    "title": "First",
+                    "severity": "low",
+                    "description": "one",
+                    "target": "https://example.com",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    manager.db.update_task(task["id"], run_name=run_name, status="running")
+    first = client.get(f"/api/v1/tasks/{task['id']}/results").json()["findings"]
+    assert [f["id"] for f in first] == ["v1"]
+
+    (run_dir / "vulnerabilities.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "v1",
+                    "title": "First",
+                    "severity": "low",
+                    "description": "one",
+                    "target": "https://example.com",
+                },
+                {
+                    "id": "v2",
+                    "title": "Second",
+                    "severity": "critical",
+                    "description": "two",
+                    "target": "https://example.com",
+                    "poc_description": "click",
+                    "poc_script_code": "id",
+                    "screenshot_rels": ["images/v2-1.png"],
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    second = client.get(f"/api/v1/tasks/{task['id']}/results").json()["findings"]
+    assert [f["id"] for f in second] == ["v2", "v1"]  # severity order
+    assert "click" in (second[0].get("poc") or "")
+    assert "id" in (second[0].get("poc") or "")
+    assert second[0].get("screenshots") == ["images/v2-1.png"]
 
 
 def test_ingest_results(client: TestClient):
@@ -168,6 +233,19 @@ def test_ingest_results(client: TestClient):
     assert len(findings) == 1
     assert findings[0]["title"] == "XSS"
     assert "Report" in manager.get_report(task["id"])
+    package = manager.get_report_package(task["id"])
+    assert package.name == "penetration_test_report.zip"
+    assert package.is_file()
+
+    (run_dir / "workspace").mkdir()
+    (run_dir / "workspace" / "note.txt").write_text("hi", encoding="utf-8")
+    arts = client.get(f"/api/v1/tasks/{task['id']}/artifacts").json()["artifacts"]
+    assert any(a["path"] == "workspace/note.txt" for a in arts)
+
+    zipped = client.get(f"/api/v1/tasks/{task['id']}/report?download=1")
+    assert zipped.status_code == 200
+    assert "zip" in zipped.headers.get("content-type", "")
+    assert zipped.content[:2] == b"PK"
 
 
 def test_start_strix_job_preserves_resume_fields(

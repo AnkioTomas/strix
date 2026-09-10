@@ -275,11 +275,25 @@ class Database:
         results: list[dict[str, Any]] = []
         for row in rows:
             item = dict(row)
+            raw: dict[str, Any] = {}
             try:
                 item["location"] = json.loads(item.pop("location_json") or "{}")
             except json.JSONDecodeError:
                 item["location"] = {}
-            item.pop("raw_json", None)
+            try:
+                raw = json.loads(item.pop("raw_json") or "{}")
+            except json.JSONDecodeError:
+                item.pop("raw_json", None)
+                raw = {}
+            else:
+                item.pop("raw_json", None)
+            # Reconstruct fields that live only in the original report payload.
+            if not item.get("technical_analysis"):
+                item["technical_analysis"] = raw.get("technical_analysis")
+            if not item.get("screenshots"):
+                rels = raw.get("screenshot_rels")
+                if isinstance(rels, list) and rels:
+                    item["screenshots"] = [str(x) for x in rels if str(x).strip()]
             results.append(item)
         return results
 

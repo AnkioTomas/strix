@@ -81,13 +81,27 @@
       parts.push(String(f.description).trim());
       parts.push("");
     }
+    if (f.technical_analysis) {
+      parts.push("## 技术分析\n");
+      parts.push(String(f.technical_analysis).trim());
+      parts.push("");
+    }
     if (f.evidence) {
       parts.push("## 证据\n");
       parts.push("```\n" + String(f.evidence).trim() + "\n```\n");
     }
     if (f.poc) {
       parts.push("## PoC\n");
-      parts.push("```\n" + String(f.poc).trim() + "\n```\n");
+      parts.push(String(f.poc).trim());
+      parts.push("");
+    }
+    const shots = Array.isArray(f.screenshots) ? f.screenshots : [];
+    if (shots.length) {
+      parts.push("## 截图\n");
+      shots.forEach((src, i) => {
+        parts.push(`![screenshot ${i + 1}](${String(src).trim()})`);
+        parts.push("");
+      });
     }
     if (f.impact) {
       parts.push("## 影响\n");

@@ -292,15 +292,14 @@
           .map((a) => {
             const href = artifactUrl(selected, a.path);
             return `<tr>
-              <td>${esc(a.name)}</td>
-              <td><code>${esc(a.path)}</code></td>
+              <td><code>${esc(a.path.replace(/^workspace\//, ""))}</code></td>
               <td>${esc(a.size)}</td>
               <td><a class="muted" href="${esc(href)}" download>下载</a></td>
             </tr>`;
           })
-          .join("") || `<tr><td colspan="4" class="muted">暂无工件</td></tr>`;
+          .join("") || `<tr><td colspan="3" class="muted">workspace 为空或尚未生成</td></tr>`;
     } catch (e) {
-      $("artifactsBody").innerHTML = `<tr><td colspan="4">${esc(e.message)}</td></tr>`;
+      $("artifactsBody").innerHTML = `<tr><td colspan="3">${esc(e.message)}</td></tr>`;
     }
   }
 
@@ -669,12 +668,31 @@
   $("downloadReport").onclick = async () => {
     if (!selected) return;
     try {
-      const data = await api.api(`/api/v1/tasks/${selected}/report`);
-      const blob = new Blob([data.content || ""], { type: "text/markdown" });
+      await api.ensureSession();
+      const key = api.getKey();
+      const res = await fetch(
+        `/api/v1/tasks/${encodeURIComponent(selected)}/report?download=1`,
+        {
+          credentials: "include",
+          headers: key ? { Authorization: `Bearer ${key}` } : {},
+        }
+      );
+      if (!res.ok) {
+        let msg = res.statusText;
+        try {
+          const data = await res.json();
+          msg = (data && data.error && data.error.message) || msg;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(msg);
+      }
+      const blob = await res.blob();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `${selected}-report.md`;
+      a.download = `${selected}-report.zip`;
       a.click();
+      URL.revokeObjectURL(a.href);
     } catch (e) {
       alert(e.message);
     }

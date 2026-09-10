@@ -137,6 +137,8 @@ class Finding(BaseModel):
     location: FindingLocation | dict[str, Any] | None = None
     evidence: str | None = None
     poc: str | None = None
+    technical_analysis: str | None = None
+    screenshots: list[str] | None = None
     impact: str | None = None
     recommendation: str | None = None
     cwe: str | None = None

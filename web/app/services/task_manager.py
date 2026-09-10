@@ -572,6 +572,10 @@ class TaskManager:
                     )
                     continue
                 if not pid_alive(pid):
+                    # Worker gone — prefer run.json status over blanket failure.
+                    finalized = self._finalize_orphaned_task(task)
+                    if finalized:
+                        continue
                     logger.warning(
                         "orphaned task %s (pid=%s dead); marking failed", task_id, pid
                     )
@@ -603,6 +607,56 @@ class TaskManager:
                     bool(handle.viewer_url),
                 )
         return attached
+
+    def _finalize_orphaned_task(self, task: dict[str, Any]) -> bool:
+        """If a dead worker left a terminal run.json, close the task correctly."""
+        from app.services.results import (
+            discover_run_name,
+            read_run_record,
+            read_vulnerabilities,
+            workspace_run_dir,
+        )
+
+        workspace = Path(task["workspace"])
+        run_name = task.get("run_name") or discover_run_name(workspace)
+        run_dir = workspace_run_dir(workspace, run_name)
+        if not run_dir:
+            return False
+        status = str(read_run_record(run_dir).get("status") or "")
+        if status not in {"completed", "failed", "interrupted", "stopped"}:
+            return False
+        if status == "completed":
+            web_status = "completed"
+            exit_code = 2 if read_vulnerabilities(run_dir) else 0
+            error = None
+        elif status == "stopped":
+            web_status = "cancelled"
+            exit_code = 130
+            error = None
+        else:
+            web_status = "failed"
+            exit_code = 1
+            error = f"run ended with status={status}"
+        updated = self.db.update_task(
+            task["id"],
+            status=web_status,
+            exit_code=exit_code,
+            run_name=run_name,
+            finished_at=utc_now(),
+            pid=None,
+            viewer_url=None,
+            viewer_token=None,
+            error=error,
+        )
+        if updated:
+            self.ingest_results(updated)
+        logger.info(
+            "finalized orphaned task %s from run.json status=%s → %s",
+            task["id"],
+            status,
+            web_status,
+        )
+        return True
 
     def finish_process(self, task_id: str, *, cancelled: bool = False) -> dict[str, Any]:
         process = self._processes.pop(task_id, None)
@@ -667,17 +721,25 @@ class TaskManager:
 
     def get_results(self, task_id: str) -> list[dict[str, Any]]:
         task = self.get_task(task_id)
+        run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
+        if run_dir is None:
+            from app.services.results import discover_run_name
+
+            name = discover_run_name(Path(task["workspace"]))
+            if name:
+                self.db.update_task(task_id, run_name=name)
+                run_dir = workspace_run_dir(Path(task["workspace"]), name)
+        if run_dir is not None:
+            # Always re-read disk: early polls must not freeze a partial cache.
+            findings = load_normalized_findings(run_dir, task_id=task_id)
+            self.db.replace_findings(task_id, findings)
+            return findings
         cached = self.db.list_findings(task_id=task_id, limit=1000)
         if cached:
             return cached
-        run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
-        if not run_dir:
-            if task["status"] in ACTIVE:
-                raise TaskError("RESULT_NOT_READY", "Results not ready", status_code=409)
-            return []
-        findings = load_normalized_findings(run_dir, task_id=task_id)
-        self.db.replace_findings(task_id, findings)
-        return self.db.list_findings(task_id=task_id, limit=1000)
+        if task["status"] in ACTIVE:
+            raise TaskError("RESULT_NOT_READY", "Results not ready", status_code=409)
+        return []
 
     def get_report(self, task_id: str) -> str:
         task = self.get_task(task_id)
@@ -688,6 +750,21 @@ class TaskManager:
         if not content and task["status"] in ACTIVE:
             raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
         return content
+
+    def get_report_package(self, task_id: str) -> Path:
+        """Path to penetration_test_report.zip (markdown + images)."""
+        from app.services.results import resolve_report_package
+
+        task = self.get_task(task_id)
+        run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
+        if not run_dir:
+            raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
+        package = resolve_report_package(run_dir)
+        if package is None:
+            if task["status"] in ACTIVE:
+                raise TaskError("RESULT_NOT_READY", "Report package not ready", status_code=409)
+            raise TaskError("RESULT_NOT_READY", "Report package not found", status_code=404)
+        return package
 
     def get_events(self, task_id: str, *, limit: int = 500) -> list[dict[str, Any]]:
         task = self.get_task(task_id)

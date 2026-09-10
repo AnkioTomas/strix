@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,30 @@ def read_report_markdown(run_dir: Path) -> str:
     return ""
 
 
+def resolve_report_package(run_dir: Path) -> Path | None:
+    """Return the report zip (md + images). Build it if only markdown exists."""
+    zip_path = run_dir / "penetration_test_report.zip"
+    if zip_path.is_file():
+        return zip_path
+    md_path = run_dir / "penetration_test_report.md"
+    if not md_path.is_file():
+        alt = run_dir / "report.md"
+        if not alt.is_file():
+            return None
+        md_path = alt
+    try:
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.write(md_path, arcname="penetration_test_report.md")
+            images_dir = run_dir / "images"
+            if images_dir.is_dir():
+                for image in sorted(images_dir.iterdir()):
+                    if image.is_file():
+                        zf.write(image, arcname=f"images/{image.name}")
+    except OSError:
+        return None
+    return zip_path if zip_path.is_file() else None
+
+
 def read_run_record(run_dir: Path) -> dict[str, Any]:
     path = run_dir / "run.json"
     if not path.is_file():
@@ -75,31 +100,20 @@ def read_events(run_dir: Path, *, limit: int = 500) -> list[dict[str, Any]]:
 
 
 def list_artifacts(run_dir: Path) -> list[dict[str, Any]]:
+    """List files under the run sandbox ``workspace/`` directory."""
     artifacts: list[dict[str, Any]] = []
-    if not run_dir.is_dir():
+    sandbox = run_dir / "workspace"
+    if not sandbox.is_dir():
         return artifacts
-    interesting = {
-        "penetration_test_report.md",
-        "vulnerabilities.json",
-        "vulnerabilities.csv",
-        "findings.sarif",
-        "run.json",
-        "events.jsonl",
-    }
-    for path in sorted(run_dir.rglob("*")):
+    for path in sorted(sandbox.rglob("*")):
         if not path.is_file():
             continue
-        rel = path.relative_to(run_dir).as_posix()
-        if path.name in interesting or rel.startswith(
-            ("vulnerabilities/", "screenshots/", "images/")
-        ):
-            artifacts.append(
-                {
-                    "name": rel,
-                    "path": rel,
-                    "size": path.stat().st_size,
-                }
-            )
+        try:
+            rel = path.relative_to(sandbox).as_posix()
+            size = path.stat().st_size
+        except (OSError, ValueError):
+            continue
+        artifacts.append({"name": rel, "path": f"workspace/{rel}", "size": size})
     return artifacts
 
 

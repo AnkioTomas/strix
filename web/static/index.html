@@ -196,15 +196,18 @@
 
         <div class="tab-pane" id="tab-report">
           <div class="actions">
-            <button type="button" class="btn ghost" id="downloadReport">下载 Markdown</button>
+            <button type="button" class="btn ghost" id="downloadReport">下载报告包 (ZIP)</button>
           </div>
           <div id="reportView" class="penna-render penna-host"></div>
         </div>
 
         <div class="tab-pane" id="tab-artifacts">
+          <div class="findings-toolbar">
+            <span class="muted">运行沙箱 workspace/ 文件列表</span>
+          </div>
           <table class="data">
             <thead>
-              <tr><th>名称</th><th>路径</th><th>大小</th><th></th></tr>
+              <tr><th>路径</th><th>大小</th><th></th></tr>
             </thead>
             <tbody id="artifactsBody"></tbody>
           </table>

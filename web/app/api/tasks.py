@@ -241,18 +241,20 @@ async def task_report(
     download: bool = False,
     manager: TaskManager = Depends(get_manager),
 ):
+    if download:
+        try:
+            package = await asyncio.to_thread(manager.get_report_package, task_id)
+        except TaskError as exc:
+            return _error(exc)
+        return FileResponse(
+            package,
+            media_type="application/zip",
+            filename=f"{task_id}-report.zip",
+        )
     try:
         content = await asyncio.to_thread(manager.get_report, task_id)
     except TaskError as exc:
         return _error(exc)
-    if download:
-        return StreamingResponse(
-            iter([content.encode("utf-8")]),
-            media_type="text/markdown; charset=utf-8",
-            headers={
-                "Content-Disposition": f'attachment; filename="{task_id}-report.md"'
-            },
-        )
     return ReportResponse(task_id=task_id, format="markdown", content=content)
 
 

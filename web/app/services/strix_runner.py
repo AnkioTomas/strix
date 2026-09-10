@@ -255,9 +255,12 @@ class LiveStrixSession:
         extra_files = read_workspace_files(getattr(args, "workspace_files", None))
 
         async def _main() -> int:
+            # Keep a handle to the scan task so terminate() / finish-reap can cancel it.
+            # Interactive mode parks forever after finish_scan; web must exit when the
+            # report reaches a terminal status, otherwise the task stays "running".
             self._scan_task = asyncio.current_task()
-            try:
-                await run_strix_scan(
+            scan = asyncio.create_task(
+                run_strix_scan(
                     scan_config=scan_config,
                     scan_id=self.run_name,
                     image=image,
@@ -266,18 +269,48 @@ class LiveStrixSession:
                     interactive=True,
                     max_budget_usd=task.get("max_budget") or settings.default_max_budget,
                     extra_files=extra_files,
-                )
+                ),
+                name=f"strix-scan-{self.task_id}",
+            )
+            try:
+                while not scan.done():
+                    status = str(report_state.run_record.get("status") or "")
+                    if status in {"completed", "failed", "interrupted", "stopped"}:
+                        scan.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await scan
+                        return _exit_code_from_report(report_state)
+                    try:
+                        await asyncio.wait_for(asyncio.shield(scan), timeout=1.0)
+                    except TimeoutError:
+                        continue
+                if scan.cancelled():
+                    return _exit_code_from_report(report_state)
+                exc = scan.exception()
+                if exc is not None:
+                    raise exc
+                return _exit_code_from_report(report_state)
             except asyncio.CancelledError:
+                if not scan.done():
+                    scan.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await scan
+                status = str(report_state.run_record.get("status") or "")
+                if status == "completed":
+                    return _exit_code_from_report(report_state)
                 logger.info("scan cancelled task=%s", self.task_id)
                 return 130
             finally:
                 with contextlib.suppress(Exception):
-                    report_state.cleanup(status="stopped")
+                    # Do not demote an already-completed report to "stopped".
+                    if str(report_state.run_record.get("status") or "") not in {
+                        "completed",
+                        "failed",
+                        "interrupted",
+                    }:
+                        report_state.cleanup(status="stopped")
                 with contextlib.suppress(Exception):
                     await session_manager.cleanup(self.run_name)
-            # Match headless semantics loosely: vulns present → 2, else 0.
-            vulns = report_state.vulnerability_reports or []
-            return 2 if vulns else 0
 
         try:
             return int(loop.run_until_complete(_main()))
@@ -310,6 +343,17 @@ class LiveStrixSession:
         with contextlib.suppress(Exception):
             httpd.shutdown()
             httpd.server_close()
+
+
+def _exit_code_from_report(report_state: Any) -> int:
+    """Map ReportState terminal status to headless-like exit codes."""
+    status = str(report_state.run_record.get("status") or "")
+    if status == "completed":
+        vulns = report_state.vulnerability_reports or []
+        return 2 if vulns else 0
+    if status == "stopped":
+        return 130
+    return 1
 
 
 def _build_args(*, target: str, task: dict[str, Any], settings: Settings) -> argparse.Namespace:
@@ -461,7 +505,7 @@ class DetachedScanHandle:
         return self.run_name
 
     def poll(self) -> int | None:
-        from app.services.scan_state import pid_alive
+        from app.services.scan_state import pid_alive, write_state
 
         st = self._state()
         if st.get("exit_code") is not None:
@@ -476,9 +520,64 @@ class DetachedScanHandle:
                 return int(code)
         pid = self.pid
         if pid_alive(pid):
+            # Interactive scans park after finish_scan; reap when run.json is terminal.
+            reaped = self._reap_finished_interactive()
+            if reaped is not None:
+                return reaped
             return None
         # Process gone but no exit recorded → treat as crash.
         return int(st["exit_code"]) if st.get("exit_code") is not None else 1
+
+    def _reap_finished_interactive(self) -> int | None:
+        """If run.json is already terminal, record exit_code and stop the worker."""
+        import signal
+
+        from app.services.results import read_run_record, read_vulnerabilities
+        from app.services.scan_state import pid_alive, write_state
+
+        run_name = self.run_name
+        if not run_name:
+            return None
+        run_dir = self.workspace / "strix_runs" / run_name
+        record = read_run_record(run_dir)
+        status = str(record.get("status") or "")
+        if status not in {"completed", "failed", "interrupted", "stopped"}:
+            return None
+        if status == "completed":
+            code = 2 if read_vulnerabilities(run_dir) else 0
+        elif status == "stopped":
+            code = 130
+        else:
+            code = 1
+        write_state(
+            self.workspace,
+            exit_code=code,
+            run_name=run_name,
+            ready=True,
+            error=None if status == "completed" else f"run ended with status={status}",
+        )
+        logger.info(
+            "reaping parked interactive worker task=%s run=%s status=%s exit=%s",
+            self.task_id,
+            run_name,
+            status,
+            code,
+        )
+        pid = self.pid
+        if pid and pid_alive(pid):
+            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                os.killpg(pid, signal.SIGTERM)
+            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                os.kill(pid, signal.SIGTERM)
+            deadline = time.time() + 5
+            while time.time() < deadline and pid_alive(pid):
+                time.sleep(0.2)
+            if pid_alive(pid):
+                with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                    os.killpg(pid, signal.SIGKILL)
+                with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                    os.kill(pid, signal.SIGKILL)
+        return code
 
     def wait_ready(self, timeout: float = 180.0) -> bool:
         deadline = time.time() + timeout

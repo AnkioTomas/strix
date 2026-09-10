@@ -65,6 +65,34 @@ def test_system_prompt_injects_resolved_language(monkeypatch: pytest.MonkeyPatch
     assert "update_vulnerability_report" in prompt
 
 
+def test_system_prompt_embeds_port_scope_and_authorized_ports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STRIX_REPORT_LANGUAGE", "")
+    monkeypatch.setattr(loader, "_cached", None)
+    prompt = render_system_prompt(
+        scan_mode="quick",
+        is_root=True,
+        system_prompt_context={
+            "scope_source": "system_scan_config",
+            "authorization_source": "strix_platform_verified_targets",
+            "authorized_targets": [
+                {
+                    "type": "web_application",
+                    "value": "https://app.example.com",
+                    "workspace_path": "",
+                    "authorized_ports": [443],
+                },
+            ],
+        },
+    )
+    assert "PORT SCOPE (HARD CONSTRAINT" in prompt
+    assert "authorized_ports" in prompt
+    assert "ports: 443" in prompt
+    assert "full port scan" in prompt
+    assert "测试全端口" in prompt
+
+
 def test_system_prompt_injects_freeform_language(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("STRIX_REPORT_LANGUAGE", "Français")
     monkeypatch.setattr(loader, "_cached", None)

@@ -13,6 +13,7 @@ from strix.core.inputs import (
     build_scan_targets,
     build_scope_context,
     child_initial_input,
+    derive_authorized_ports,
     make_model_settings,
 )
 
@@ -245,6 +246,49 @@ def test_build_scope_context_authorizes_nothing_without_targets() -> None:
     )
 
     assert scope["authorized_targets"] == []
+
+
+@pytest.mark.parametrize(
+    ("target_type", "value", "expected"),
+    [
+        ("web_application", "https://app.example.com", [443]),
+        ("web_application", "http://app.example.com", [80]),
+        ("web_application", "https://app.example.com:8443/login", [8443]),
+        ("web_application", "app.example.com", [443]),
+        ("ip_address", "192.168.1.10", []),
+        ("ip_address", "192.168.1.10:8080", [8080]),
+        ("ip_address", "[2001:db8::1]:8443", [8443]),
+        ("ip_address", "2001:db8::1", []),
+        ("local_code", "/workspace/app", []),
+        ("repository", "https://github.com/org/repo", []),
+    ],
+)
+def test_derive_authorized_ports(
+    target_type: str,
+    value: str,
+    expected: list[int],
+) -> None:
+    assert derive_authorized_ports(target_type, value) == expected
+
+
+def test_build_scope_context_embeds_authorized_ports() -> None:
+    scope = build_scope_context(
+        {
+            "targets": [
+                {
+                    "type": "web_application",
+                    "details": {"target_url": "https://shop.test/v1"},
+                },
+                {
+                    "type": "ip_address",
+                    "details": {"target_ip": "10.0.0.5"},
+                },
+            ],
+        }
+    )
+    by_value = {t["value"]: t for t in scope["authorized_targets"]}
+    assert by_value["https://shop.test/v1"]["authorized_ports"] == [443]
+    assert by_value["10.0.0.5"]["authorized_ports"] == []
 
 
 def test_build_root_task_diff_scope() -> None:

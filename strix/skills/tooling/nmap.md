@@ -29,32 +29,35 @@ High-signal flags:
 - `--script-timeout <time>` bound NSE script runtime
 - `-oA <prefix>` output in normal/XML/grepable formats
 
-Agent-safe baseline for automation:
-`nmap -n -Pn --open --top-ports 100 -T4 --max-retries 1 --host-timeout 90s -oA nmap_quick <host>`
+Authorization first (HARD):
+- Only scan ports listed in the system prompt ``authorized_ports`` for that host.
+- Default: `-p <authorized_ports>` only. Never use `--top-ports`, `-p-`, or guessed common ports unless Special instructions explicitly authorize full/extra ports.
+- If ``authorized_ports`` is empty, do not run nmap against that host for discovery.
+
+Agent-safe baseline for automation (authorized ports only):
+`nmap -n -Pn --open -p <authorized_ports> -T4 --max-retries 1 --host-timeout 90s -oA nmap_quick <host>`
 
 Common patterns:
-- Fast first pass:
-  `nmap -n -Pn --top-ports 100 --open -T4 --max-retries 1 --host-timeout 90s <host>`
-- Very small important-port pass:
-  `nmap -n -Pn -p 22,80,443,8080,8443 --open -T4 --max-retries 1 --host-timeout 90s <host>`
-- Service/script enrichment on discovered ports:
-  `nmap -n -Pn -sV -sC -p <comma_ports> --script-timeout 30s --host-timeout 3m -oA nmap_services <host>`
+- Authorized-port pass:
+  `nmap -n -Pn -p <authorized_ports> --open -T4 --max-retries 1 --host-timeout 90s <host>`
+- Service/script enrichment on already-authorized open ports:
+  `nmap -n -Pn -sV -sC -p <authorized_ports> --script-timeout 30s --host-timeout 3m -oA nmap_services <host>`
 - No-root fallback:
-  `nmap -n -Pn -sT --top-ports 100 --open --host-timeout 90s <host>`
+  `nmap -n -Pn -sT -p <authorized_ports> --open --host-timeout 90s <host>`
+- Full/common-port sweeps (`--top-ports`, `-p-`) ONLY when Special instructions explicitly authorize them.
 
 Critical correctness rules:
 - Always set target scope explicitly.
-- Prefer two-pass scanning: discovery pass, then enrichment pass.
+- Prefer two-pass scanning only when broader ports were explicitly authorized: discovery pass, then enrichment pass.
 - Always set a timeout boundary with `--host-timeout`; add `--script-timeout` whenever NSE scripts are involved.
-- Keep discovery scans tight: use explicit important ports or a small `--top-ports` profile unless broader coverage is explicitly required.
-- In sandboxed runs, avoid exhaustive sweeps (`-p-`, very high `--top-ports`, or wide host ranges) unless explicitly required.
-- Do not spam traffic; start with the smallest port set that can answer the question.
-- Prefer `naabu` for broad port discovery; use `nmap` for scoped verification/enrichment.
+- Keep discovery scans on authorized ports only; do not invent "important" ports outside authorization.
+- In sandboxed runs, avoid exhaustive sweeps (`-p-`, high `--top-ports`, or wide host ranges) unless explicitly required by Special instructions.
+- Do not spam traffic; start with the smallest authorized port set that can answer the question.
 
 Usage rules:
 - Add `-n` by default in automation to avoid DNS delays.
 - Use `-oA` for reusable artifacts.
-- Prefer `-p 22,80,443,8080,8443` or `--top-ports 100` before considering larger sweeps.
+- Prefer `-p <authorized_ports>` only; never default to common-port lists or `--top-ports`.
 - Do not use `-h`/`--help` for routine usage unless absolutely necessary.
 
 Failure recovery:

@@ -35,7 +35,7 @@ Thorough understanding before exploitation. Test every parameter, every endpoint
 
 **Blackbox (no source)**
 - Exhaustive subdomain enumeration with multiple sources and tools
-- Full port scanning across all services
+- Port probing only on system-authorized ports for each target (scheme defaults or explicit ports). Full-port / common-port sweeps only if Special instructions explicitly authorize them
 - Complete content discovery with multiple wordlists
 - Technology fingerprinting on all assets
 - API discovery via docs, JavaScript analysis, fuzzing

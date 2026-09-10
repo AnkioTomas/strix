@@ -31,32 +31,36 @@ High-signal flags:
 - `-silent` compact output
 - `-o <file>` output file
 
-Agent-safe baseline for automation:
-`naabu -list hosts.txt -top-ports 100 -scan-type c -Pn -rate 300 -c 25 -timeout 1000 -retries 1 -verify -silent -j -o naabu.jsonl`
+Authorization first (HARD):
+- Only scan ports listed in the system prompt ``authorized_ports`` for that host.
+- Default: `-p <authorized_ports>` only. Never use `-top-ports` or guessed common ports unless Special instructions explicitly authorize full/extra ports.
+- If ``authorized_ports`` is empty, do not run naabu against that host for discovery.
+
+Agent-safe baseline for automation (authorized ports only):
+`naabu -list hosts.txt -p <authorized_ports> -scan-type c -Pn -rate 300 -c 25 -timeout 1000 -retries 1 -verify -silent -j -o naabu.jsonl`
 
 Common patterns:
-- Top ports with controlled rate:
-  `naabu -list hosts.txt -top-ports 100 -scan-type c -rate 300 -c 25 -timeout 1000 -retries 1 -verify -silent -o naabu.txt`
-- Focused web-ports sweep:
-  `naabu -list hosts.txt -p 80,443,8080,8443 -scan-type c -rate 300 -c 25 -timeout 1000 -retries 1 -verify -silent`
-- Single-host quick check:
-  `naabu -host target.tld -p 22,80,443 -scan-type c -rate 300 -c 25 -timeout 1000 -retries 1 -verify`
-- Root SYN mode (if available):
-  `sudo naabu -list hosts.txt -top-ports 100 -scan-type syn -rate 500 -c 25 -timeout 1000 -retries 1 -verify -silent`
+- Authorized ports with controlled rate:
+  `naabu -list hosts.txt -p <authorized_ports> -scan-type c -rate 300 -c 25 -timeout 1000 -retries 1 -verify -silent -o naabu.txt`
+- Single-host authorized-port check:
+  `naabu -host target.tld -p <authorized_ports> -scan-type c -rate 300 -c 25 -timeout 1000 -retries 1 -verify`
+- Root SYN mode (if available) on authorized ports:
+  `sudo naabu -list hosts.txt -p <authorized_ports> -scan-type syn -rate 500 -c 25 -timeout 1000 -retries 1 -verify -silent`
+- `-top-ports` / full sweeps ONLY when Special instructions explicitly authorize them.
 
 Critical correctness rules:
 - Use `-scan-type connect` when running without root/privileged raw socket access.
 - Always set `-timeout` explicitly; it is in milliseconds.
 - Set `-rate` explicitly to avoid unstable or noisy scans.
 - `-timeout` is in milliseconds, not seconds.
-- Keep port scope tight: prefer explicit important ports or a small `-top-ports` value unless broader coverage is explicitly required.
-- Do not spam traffic; start with the smallest useful port set and conservative rate/worker settings.
+- Keep port scope on authorized ports only; do not invent "important" ports outside authorization.
+- Do not spam traffic; start with the smallest authorized port set and conservative rate/worker settings.
 - Prefer `-verify` before handing ports to follow-up scanners.
 
 Usage rules:
 - Keep host discovery behavior explicit (`-Pn` or default discovery).
 - Use `-j -o <file>` for automation pipelines.
-- Prefer `-p 22,80,443,8080,8443` or `-top-ports 100` before considering larger sweeps.
+- Prefer `-p <authorized_ports>` only; never default to common-port lists or `-top-ports`.
 - Do not use `-h`/`--help` for normal flow unless absolutely necessary.
 
 Failure recovery:

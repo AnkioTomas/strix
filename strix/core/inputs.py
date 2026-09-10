@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
+import re
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from agents.model_settings import ModelSettings
 from openai.types.shared import Reasoning
@@ -25,6 +28,80 @@ from strix.core.sessions import scrub_images_from_items
 
 if TYPE_CHECKING:
     from strix.config.settings import ReasoningEffort
+
+
+_SCHEME_DEFAULT_PORTS = {
+    "http": 80,
+    "https": 443,
+    "ws": 80,
+    "wss": 443,
+    "ftp": 21,
+    "ssh": 22,
+}
+
+
+def derive_authorized_ports(target_type: str, value: str) -> list[int]:
+    """Ports the agent may probe for this authorized target.
+
+    Empty means no port scanning of that host unless the user explicitly
+    authorizes broader ports in Special instructions.
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return []
+
+    if target_type in {"web_application", "api_spec"}:
+        return _ports_from_url(raw)
+
+    if target_type == "ip_address":
+        return _ports_from_ip_target(raw)
+
+    # repository / local_code: no network ports from the asset itself
+    return []
+
+
+def _ports_from_url(value: str) -> list[int]:
+    candidate = value if "://" in value else f"https://{value}"
+    parsed = urlparse(candidate)
+    if parsed.port is not None:
+        return [parsed.port]
+    scheme = (parsed.scheme or "").lower()
+    default = _SCHEME_DEFAULT_PORTS.get(scheme)
+    return [default] if default is not None else []
+
+
+def _ports_from_ip_target(value: str) -> list[int]:
+    # Bare IP → no ports. host:port or [ipv6]:port → that port only.
+    if value.startswith("["):
+        match = re.fullmatch(r"\[([^\]]+)\]:(\d{1,5})", value)
+        if match is None:
+            try:
+                ipaddress.ip_address(value.strip("[]"))
+            except ValueError:
+                return []
+            return []
+        host, port_s = match.group(1), match.group(2)
+        try:
+            ipaddress.ip_address(host)
+            port = int(port_s)
+        except ValueError:
+            return []
+        return [port] if 1 <= port <= 65535 else []
+
+    if value.count(":") == 1:
+        host, _, port_s = value.partition(":")
+        try:
+            ipaddress.ip_address(host)
+            port = int(port_s)
+        except ValueError:
+            return []
+        return [port] if 1 <= port <= 65535 else []
+
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return []
+    return []
 
 
 def _accepts_required_tool_choice(model_name: str | None) -> bool:
@@ -191,7 +268,7 @@ def build_root_task(scan_config: dict[str, Any]) -> str:
 
 
 def build_scope_context(scan_config: dict[str, Any]) -> dict[str, Any]:
-    authorized: list[dict[str, str]] = []
+    authorized: list[dict[str, Any]] = []
     value_keys = {
         "repository": "target_repo",
         "local_code": "target_path",
@@ -208,16 +285,29 @@ def build_scope_context(scan_config: dict[str, Any]) -> dict[str, Any]:
         workspace_subdir = details.get("workspace_subdir")
         workspace_path = f"/workspace/{workspace_subdir}" if workspace_subdir else ""
         authorized.append(
-            {"type": ttype, "value": value, "workspace_path": workspace_path},
+            {
+                "type": ttype,
+                "value": value,
+                "workspace_path": workspace_path,
+                "authorized_ports": derive_authorized_ports(ttype, value),
+            },
         )
 
         # An API spec authorizes the hosts it declares as in-scope web targets
         # so the agent can exercise every endpoint without expanding scope.
         if ttype == "api_spec":
-            authorized.extend(
-                {"type": "web_application", "value": base_url, "workspace_path": ""}
-                for base_url in details.get("base_urls") or []
-            )
+            for base_url in details.get("base_urls") or []:
+                authorized.append(
+                    {
+                        "type": "web_application",
+                        "value": base_url,
+                        "workspace_path": "",
+                        "authorized_ports": derive_authorized_ports(
+                            "web_application",
+                            base_url,
+                        ),
+                    },
+                )
 
     return {
         "scope_source": "system_scan_config",

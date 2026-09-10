@@ -58,7 +58,7 @@ These tools are available in the sandbox and are pipeline-friendly with JSON out
 
 - **`subfinder`** — passive subdomain aggregation across many sources incl. CT: `subfinder -d example.com -all -recursive -silent -oJ -o subs.jsonl`
 - **`httpx`** — live probing plus cert/SAN grab in one pass: `httpx -l hosts.txt -tls-grab -json` (see methodology).
-- **`naabu`** — port sweep for non-HTTP services: `naabu -list hosts.txt -top-ports 100 -verify -silent`
+- **`naabu`** — port check only on system-authorized ports: `naabu -list hosts.txt -p <authorized_ports> -verify -silent`
 - **`curl` + `jq`** — direct **crt.sh** JSON queries for CT (no key needed) and other index APIs.
 - **`openssl s_client`** — active read of a live host's cert to extract SANs/CN.
 - **`dig`** / **`nslookup`** — forward/reverse (PTR) resolution and CNAME chains.
@@ -82,7 +82,7 @@ Wildcard SANs and observed hostnames expose the org's naming scheme; generate ta
 
 ### IP-First Discovery
 
-For ASN-owned ranges, sweep IPs directly with `naabu`/`httpx` and read served certs (`httpx -tls-grab`, or `openssl s_client`) to find services that have no DNS name at all.
+For ASN-owned ranges, probe only authorized hosts/ports with `httpx` (and `naabu` only if Special instructions authorize those ports) and read served certs (`httpx -tls-grab`, or `openssl s_client`) to find services that have no DNS name at all. Never expand into unauthorized ports.
 
 ## Advanced Techniques
 
@@ -97,7 +97,7 @@ For ASN-owned ranges, sweep IPs directly with `naabu`/`httpx` and read served ce
 2. **Live probe** with `httpx`, capturing status/title/tech/server and cert SANs in one pass — each grabbed SAN feeds back as a new seed:
    `httpx -l hosts.txt -sc -title -server -td -tls-grab -json -o assets.jsonl`
 3. **Classify** assets by function from title/tech/path signals: app, API, marketing, auth, CI/CD, observability, storage, admin, VCS, mail. Cluster by role, not by a specific product.
-4. **Port sweep** interesting hosts with `naabu` for non-HTTP services (DBs, caches, brokers, mgmt ports).
+4. **Port check** interesting hosts with `naabu` only on system-authorized ports (never `-top-ports` / full sweeps unless Special instructions explicitly authorize).
 5. **Prioritize** by exposure and value, then hand each finding to the right specialist skill:
    - Exposed dashboards / debug / observability / metadata leaks → `information_disclosure`
    - Login/admin panels with default or weak creds → `weak_password_detection`

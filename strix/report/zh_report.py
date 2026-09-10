@@ -25,6 +25,31 @@ _RETEST_STATUS_LABEL_KEYS = {
     "partial": "retest_partial",
     "regressed": "retest_regressed",
 }
+_RETEST_TAG_KEYS = {
+    "fixed": "retest_tag_fixed",
+    "not_fixed": "retest_tag_not_fixed",
+    "partial": "retest_tag_partial",
+    "regressed": "retest_tag_regressed",
+}
+_ATX_HEADING_RE = re.compile(r"^(#{1,6})(\s+.*)$", re.MULTILINE)
+
+
+def demote_markdown_headings(text: str, *, min_level: int = 3) -> str:
+    """Raise ATX heading levels so nested prose cannot outrank section chrome.
+
+    Agent-written fields often contain ``# 根因`` style headings. Without this,
+    they become top-level TOC entries beside「测试概述」.
+    """
+    if not text or min_level < 1:
+        return text
+
+    def _raise(match: re.Match[str]) -> str:
+        level = len(match.group(1))
+        if level >= min_level:
+            return match.group(0)
+        return "#" * min_level + match.group(2)
+
+    return _ATX_HEADING_RE.sub(_raise, text)
 
 # Absolute sandbox paths and markdown image refs that point at screenshots.
 _SCREENSHOT_PATH_RE = re.compile(
@@ -182,7 +207,7 @@ def _narrative_sections(
     lines: list[str] = []
 
     def _append(heading: str, body: object | None) -> None:
-        text = str(body or "").strip()
+        text = demote_markdown_headings(str(body or "").strip(), min_level=3)
         if not text:
             return
         lines.extend([f"# {heading}", "", text, ""])
@@ -199,7 +224,8 @@ def _narrative_sections(
             return lines
 
     if overview and overview.strip():
-        lines.extend([f"# {labels['overview_heading']}", "", overview.strip(), ""])
+        body = demote_markdown_headings(overview.strip(), min_level=3)
+        lines.extend([f"# {labels['overview_heading']}", "", body, ""])
     return lines
 
 
@@ -207,6 +233,14 @@ def _retest_status_label(status: object | None) -> str:
     labels = report_labels()
     key = _RETEST_STATUS_LABEL_KEYS.get(str(status or "").strip().lower())
     return labels[key] if key else labels["retest_unknown"]
+
+
+def _retest_tag(status: object | None) -> str | None:
+    """Short tag for vulnerability headings, or None when not retested."""
+    key = _RETEST_TAG_KEYS.get(str(status or "").strip().lower())
+    if not key:
+        return None
+    return report_labels()[key]
 
 
 def _retest_evidence_cell(report: dict[str, Any]) -> str:
@@ -243,11 +277,8 @@ def _retest_evidence_cell(report: dict[str, Any]) -> str:
 
 
 def _has_retest_data(vulnerability_reports: list[dict[str, Any]]) -> bool:
-    return any(
-        str(r.get("retest_status") or "").strip()
-        or str(r.get("fix_verification") or "").strip()
-        for r in vulnerability_reports
-    )
+    """Only show「复测情况」when agents explicitly set retest_status."""
+    return any(str(r.get("retest_status") or "").strip() for r in vulnerability_reports)
 
 
 def _render_retest_section(vulnerability_reports: list[dict[str, Any]]) -> list[str]:
@@ -282,24 +313,34 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
     labels = report_labels()
     sev = severity_label(report.get("severity"), labels)
     title = report.get("title") or labels["untitled"]
-    lines: list[str] = [
-        f"## {index}. [ {sev} ] {title}",
-        "",
-        _vuln_meta_table(report),
-        "",
-        f"### {labels['description']}",
-        "",
+    retest = _retest_tag(report.get("retest_status"))
+    heading = (
+        f"## {index}. [ {sev} ] [ {retest} ] {title}"
+        if retest
+        else f"## {index}. [ {sev} ] {title}"
+    )
+    description = demote_markdown_headings(
         str(
             report.get("description")
             or report.get("technical_analysis")
             or labels["no_description"]
         ),
+        min_level=4,
+    )
+    lines: list[str] = [
+        heading,
+        "",
+        _vuln_meta_table(report),
+        "",
+        f"### {labels['description']}",
+        "",
+        description,
         "",
         f"### {labels['reproduction']}",
         "",
     ]
     if report.get("poc_description"):
-        lines.append(str(report["poc_description"]))
+        lines.append(demote_markdown_headings(str(report["poc_description"]), min_level=4))
         lines.append("")
     if report.get("poc_script_code"):
         lines.append(f"**{labels['poc']}**")
@@ -323,25 +364,33 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
     elif report.get("evidence"):
         lines.append(f"**{labels['evidence_excerpt']}**")
         lines.append("")
-        lines.append(str(report["evidence"]))
+        lines.append(demote_markdown_headings(str(report["evidence"]), min_level=4))
         lines.append("")
 
     lines.extend(
         [
             f"### {labels['impact']}",
             "",
-            str(report.get("impact") or labels["impact_missing"]),
+            demote_markdown_headings(
+                str(report.get("impact") or labels["impact_missing"]),
+                min_level=4,
+            ),
             "",
             f"### {labels['remediation']}",
             "",
-            str(report.get("remediation_steps") or labels["remediation_missing"]),
+            demote_markdown_headings(
+                str(report.get("remediation_steps") or labels["remediation_missing"]),
+                min_level=4,
+            ),
             "",
         ]
     )
 
     appendix_bits: list[str] = []
     if report.get("technical_analysis"):
-        appendix_bits.append(str(report["technical_analysis"]))
+        appendix_bits.append(
+            demote_markdown_headings(str(report["technical_analysis"]), min_level=4)
+        )
         appendix_bits.append("")
     if report.get("assumptions"):
         appendix_bits.append(f"**{labels['assumptions']}** {report['assumptions']}")

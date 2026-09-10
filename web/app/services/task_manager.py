@@ -838,10 +838,13 @@ class TaskManager:
         run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
         if not run_dir:
             raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
-        content = read_report_markdown(run_dir)
+        from app.services.results import rebuild_delivery_report
+
+        rebuilt = rebuild_delivery_report(run_dir)
+        content = rebuilt if rebuilt is not None else read_report_markdown(run_dir)
         if not content and task["status"] in ACTIVE:
             raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
-        return content
+        return content or ""
 
     def get_report_package(self, task_id: str) -> Path:
         """Path to penetration_test_report.zip (markdown + images)."""

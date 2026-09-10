@@ -101,6 +101,10 @@ class ReportLabels(TypedDict):
     retest_regressed: str
     retest_unknown: str
     retest_no_evidence: str
+    retest_tag_fixed: str
+    retest_tag_not_fixed: str
+    retest_tag_partial: str
+    retest_tag_regressed: str
     findings_heading: str
     overview_with_findings: str
     overview_clean: str
@@ -162,6 +166,10 @@ _LABELS_ZH: ReportLabels = {
     "retest_regressed": "回归恶化",
     "retest_unknown": "未标记",
     "retest_no_evidence": "未提供截图或其他硬证据",
+    "retest_tag_fixed": "已修",
+    "retest_tag_not_fixed": "未修",
+    "retest_tag_partial": "部分",
+    "retest_tag_regressed": "回归",
     "findings_heading": "漏洞清单",
     "overview_with_findings": (
         "本次测试共确认 **{count}** 个漏洞。危害较大的问题包括：{top}。"
@@ -225,6 +233,10 @@ _LABELS_EN: ReportLabels = {
     "retest_regressed": "Regressed",
     "retest_unknown": "Unmarked",
     "retest_no_evidence": "No screenshot or hard evidence provided",
+    "retest_tag_fixed": "Fixed",
+    "retest_tag_not_fixed": "Open",
+    "retest_tag_partial": "Partial",
+    "retest_tag_regressed": "Regressed",
     "findings_heading": "Findings",
     "overview_with_findings": (
         "This assessment confirmed **{count}** finding(s). Notable issues: {top}."

@@ -54,6 +54,34 @@ def read_report_markdown(run_dir: Path) -> str:
     return ""
 
 
+def rebuild_delivery_report(run_dir: Path) -> str | None:
+    """Re-assemble the customer markdown from run.json + vulnerabilities.json.
+
+    Lets chrome/layout fixes (retest gate, heading demotion, title tags) show up
+    on refresh without waiting for another agent finish_scan.
+    """
+    from strix.report.writer import read_run_record
+    from strix.report.zh_report import write_zh_delivery_bundle
+
+    record = read_run_record(run_dir)
+    vulns = read_vulnerabilities(run_dir)
+    if not record and not vulns:
+        return None
+    scan_results = record.get("scan_results") if isinstance(record, dict) else None
+    if not isinstance(scan_results, dict):
+        scan_results = None
+    try:
+        write_zh_delivery_bundle(
+            run_dir,
+            run_record=record if isinstance(record, dict) else {},
+            vulnerability_reports=vulns,
+            scan_results=scan_results,
+        )
+    except Exception:
+        return None
+    return read_report_markdown(run_dir)
+
+
 def resolve_report_package(run_dir: Path) -> Path | None:
     """Return the report zip (md + images). Build it if only markdown exists."""
     zip_path = run_dir / "penetration_test_report.zip"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import zipfile
 from typing import TYPE_CHECKING
 
@@ -9,6 +10,7 @@ import pytest
 
 from strix.config import loader
 from strix.report.zh_report import (
+    demote_markdown_headings,
     extract_screenshot_paths,
     render_zh_penetration_report,
     write_zh_delivery_bundle,
@@ -170,4 +172,50 @@ def test_render_zh_report_retest_section() -> None:
     assert "已修复" in md
     assert "IDOR 读取他人订单" in md
     assert "images/vuln-0001-1.png" in md
-    assert "## 1. [ 高危 ] IDOR 读取他人订单" in md
+    assert "## 1. [ 高危 ] [ 已修 ] IDOR 读取他人订单" in md
+
+
+def test_retest_section_requires_retest_status() -> None:
+    md = render_zh_penetration_report(
+        run_record={"run_name": "fresh", "targets_info": []},
+        vulnerability_reports=[
+            {
+                "id": "vuln-0001",
+                "title": "命令注入",
+                "severity": "high",
+                "timestamp": "2026-09-09 01:00:00 UTC",
+                "description": "desc",
+                "impact": "impact",
+                "fix_verification": "代码位置带 fix_after 时的说明，不是复测。",
+                "screenshot_rels": ["images/vuln-0001-1.png"],
+            }
+        ],
+        overview="初测完成。",
+    )
+    assert "# 复测情况" not in md
+    assert "## 1. [ 高危 ] 命令注入" in md
+    assert "[ 已修 ]" not in md
+
+
+def test_demote_headings_keeps_appendix_out_of_top_toc() -> None:
+    from strix.report.zh_report import render_zh_vulnerability_section
+
+    demoted = demote_markdown_headings("# 根因\n\n说明\n\n## 细节", min_level=4)
+    assert demoted.startswith("#### 根因")
+    assert "#### 细节" in demoted
+
+    section = render_zh_vulnerability_section(
+        {
+            "id": "vuln-0001",
+            "title": "SQLi",
+            "severity": "medium",
+            "description": "desc",
+            "impact": "impact",
+            "technical_analysis": "# 根因\n\n查询结构逆向",
+        },
+        index=1,
+    )
+    assert "### 附录" in section
+    assert "#### 根因" in section
+    assert re.search(r"^# 根因", section, re.MULTILINE) is None
+    assert re.search(r"^## 根因", section, re.MULTILINE) is None

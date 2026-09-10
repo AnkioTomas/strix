@@ -53,7 +53,10 @@
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-head">
         <h2>任务</h2>
-        <button type="button" class="btn" id="newTaskBtn">新建</button>
+        <div class="sidebar-actions">
+          <button type="button" class="btn ghost" id="importTaskBtn">导入</button>
+          <button type="button" class="btn" id="newTaskBtn">新建</button>
+        </div>
       </div>
       <ul class="task-list" id="taskList"></ul>
     </aside>
@@ -100,6 +103,29 @@
         </div>
       </section>
 
+      <section class="panel create-panel hidden" id="importPanel">
+        <h2>导入 CLI 任务</h2>
+        <p class="field-hint">扫描旧版 <code>strix</code> 命令行产生的 <code>strix_runs/</code>，复制进本系统。可填项目目录、strix_runs 目录，或单个 run 目录。</p>
+        <div class="form-grid">
+          <label class="span-2">路径
+            <input id="importPath" placeholder="/path/to/project 或 .../strix_runs" />
+          </label>
+          <label class="check">
+            <input id="importDryRun" type="checkbox" />
+            仅预览（不写入）
+          </label>
+          <label class="check">
+            <input id="importSkipExisting" type="checkbox" checked />
+            跳过已导入的 run_name
+          </label>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn" id="runImport">导入</button>
+          <button type="button" class="btn ghost" id="cancelImport">取消</button>
+        </div>
+        <pre class="log hidden" id="importResult"></pre>
+      </section>
+
       <section class="panel empty-state" id="emptyState">
         <h2>选择或新建任务</h2>
         <p>左侧列表选中任务后，可查看 Live Viewer、漏洞、报告与工件。</p>
@@ -116,6 +142,7 @@
             <button type="button" class="btn ghost" id="resumeBtn">继续 (Resume)</button>
             <button type="button" class="btn ghost" id="retestBtn">复测</button>
             <button type="button" class="btn danger" id="cancelBtn">取消</button>
+            <button type="button" class="btn danger" id="deleteBtn">删除</button>
             <button type="button" class="btn ghost" id="refreshAll">刷新</button>
           </div>
         </div>

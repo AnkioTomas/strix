@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
@@ -17,6 +17,8 @@ from app.schemas import (
     EventsResponse,
     FindingsResponse,
     GitSource,
+    ImportRunsRequest,
+    ImportRunsResponse,
     LocalSource,
     MessageCreate,
     MessagesResponse,
@@ -130,6 +132,23 @@ async def create_task(
     return _summary(task)
 
 
+@router.post("/tasks/import", response_model=ImportRunsResponse)
+async def import_tasks(
+    payload: ImportRunsRequest,
+    manager: TaskManager = Depends(get_manager),
+):
+    try:
+        result = await asyncio.to_thread(
+            manager.import_runs,
+            payload.path,
+            dry_run=payload.dry_run,
+            skip_existing=payload.skip_existing,
+        )
+    except TaskError as exc:
+        return _error(exc)
+    return ImportRunsResponse.model_validate(result)
+
+
 @router.get("/tasks", response_model=TaskListResponse)
 async def list_tasks(
     status: str | None = None,
@@ -160,6 +179,15 @@ async def cancel_task(task_id: str, manager: TaskManager = Depends(get_manager))
     except TaskError as exc:
         return _error(exc)
     return _summary(task)
+
+
+@router.delete("/tasks/{task_id}", status_code=204)
+async def delete_task(task_id: str, manager: TaskManager = Depends(get_manager)):
+    try:
+        await asyncio.to_thread(manager.delete_task, task_id)
+    except TaskError as exc:
+        return _error(exc)
+    return Response(status_code=204)
 
 
 @router.post("/tasks/{task_id}/retry", status_code=202, response_model=TaskSummary)

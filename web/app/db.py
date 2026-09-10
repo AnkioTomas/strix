@@ -282,3 +282,24 @@ class Database:
             item.pop("raw_json", None)
             results.append(item)
         return results
+
+    def find_task_by_run_name(self, run_name: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM tasks WHERE run_name = ? ORDER BY created_at DESC LIMIT 1",
+                (run_name,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def delete_task(self, task_id: str) -> bool:
+        """Remove task row and related findings/messages. Returns False if missing."""
+        with self.connect() as conn:
+            existing = conn.execute(
+                "SELECT id FROM tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+            if not existing:
+                return False
+            conn.execute("DELETE FROM findings WHERE task_id = ?", (task_id,))
+            conn.execute("DELETE FROM messages WHERE task_id = ?", (task_id,))
+            conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        return True

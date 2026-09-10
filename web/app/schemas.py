@@ -59,6 +59,36 @@ class ResumeTaskRequest(BaseModel):
     instruction: str | None = None
 
 
+class ImportRunsRequest(BaseModel):
+    """Import legacy CLI runs from a host path into new web tasks."""
+
+    path: str = Field(min_length=1)
+    dry_run: bool = False
+    skip_existing: bool = True
+
+
+class ImportRunItem(BaseModel):
+    source_path: str
+    run_name: str
+    type: str | None = None
+    status: str | None = None
+    target: str | None = None
+    scan_mode: str | None = None
+    cli_status: str | None = None
+    task_id: str | None = None
+    reason: str | None = None
+    existing_task_id: str | None = None
+
+
+class ImportRunsResponse(BaseModel):
+    path: str
+    dry_run: bool
+    imported: list[ImportRunItem]
+    skipped: list[ImportRunItem]
+    imported_count: int
+    skipped_count: int
+
+
 class TaskSummary(BaseModel):
     id: str
     type: TaskType

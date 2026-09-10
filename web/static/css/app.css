@@ -249,6 +249,12 @@ button, input, select, textarea {
   font-weight: 600;
 }
 
+.sidebar-actions {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
 .task-list {
   list-style: none;
   margin: 0;
@@ -398,6 +404,11 @@ button, input, select, textarea {
 }
 
 .btn:hover { filter: brightness(0.96); }
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+}
 .btn.ghost {
   background: transparent;
   color: var(--text);
@@ -406,6 +417,13 @@ button, input, select, textarea {
 .btn.danger {
   background: var(--danger);
   color: #fff;
+}
+
+.form-grid label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text);
 }
 
 .icon-btn {

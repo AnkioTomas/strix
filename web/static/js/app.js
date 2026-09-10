@@ -45,17 +45,55 @@
   }
 
   function showCreate(show) {
+    if (show) $("importPanel").classList.add("hidden");
     $("createPanel").classList.toggle("hidden", !show);
     if (show) {
       $("emptyState").classList.add("hidden");
       $("detailPanel").classList.add("hidden");
-    } else if (!selected) {
+      return;
+    }
+    if (!$("importPanel").classList.contains("hidden")) return;
+    if (!selected) {
       $("emptyState").classList.remove("hidden");
       $("detailPanel").classList.add("hidden");
     } else {
       $("emptyState").classList.add("hidden");
       $("detailPanel").classList.remove("hidden");
     }
+  }
+
+  function showImport(show) {
+    if (show) $("createPanel").classList.add("hidden");
+    $("importPanel").classList.toggle("hidden", !show);
+    if (show) {
+      $("emptyState").classList.add("hidden");
+      $("detailPanel").classList.add("hidden");
+      $("importResult").classList.add("hidden");
+      $("importResult").textContent = "";
+      return;
+    }
+    if (!$("createPanel").classList.contains("hidden")) return;
+    if (!selected) {
+      $("emptyState").classList.remove("hidden");
+      $("detailPanel").classList.add("hidden");
+    } else {
+      $("emptyState").classList.add("hidden");
+      $("detailPanel").classList.remove("hidden");
+    }
+  }
+
+  const TERMINAL = new Set(["completed", "failed", "cancelled"]);
+  const ACTIVE = new Set(["queued", "starting", "running", "cancelling"]);
+
+  function updateActionButtons() {
+    const t = currentTask();
+    const terminal = !!(t && TERMINAL.has(t.status));
+    const active = !!(t && ACTIVE.has(t.status));
+    $("deleteBtn").disabled = !terminal;
+    $("retryBtn").disabled = !terminal;
+    $("retestBtn").disabled = !terminal;
+    $("resumeBtn").disabled = !terminal;
+    $("cancelBtn").disabled = !active;
   }
 
   function setTab(name) {
@@ -126,6 +164,7 @@
       ["状态", t.status],
       ["类型", t.type],
       ["目标", t.target || t.source_url || "—"],
+      ["动作", t.action || "—"],
       ["Run", t.run_name || "—"],
       ["Viewer 代理", t.viewer_proxy_url || "（运行后生成）"],
       ["错误", t.error || "—"],
@@ -133,6 +172,7 @@
     $("overviewKv").innerHTML = rows
       .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`)
       .join("");
+    updateActionButtons();
   }
 
   async function loadViewer() {
@@ -418,8 +458,16 @@
   };
 
   $("sidebarToggle").onclick = () => $("sidebar").classList.toggle("open");
-  $("newTaskBtn").onclick = () => showCreate(true);
+  $("newTaskBtn").onclick = () => {
+    showImport(false);
+    showCreate(true);
+  };
   $("cancelCreate").onclick = () => showCreate(false);
+  $("importTaskBtn").onclick = () => {
+    showCreate(false);
+    showImport(true);
+  };
+  $("cancelImport").onclick = () => showImport(false);
   $("attachments").onchange = updateAttachmentsHint;
   $("findingsBack").onclick = () => {
     showFindingsList();
@@ -512,6 +560,72 @@
       await refresh();
     } catch (e) {
       alert(e.message);
+    }
+  };
+
+  $("deleteBtn").onclick = async () => {
+    if (!selected) return;
+    const t = currentTask();
+    if (!t || !TERMINAL.has(t.status)) {
+      return alert("只能删除已结束的任务（completed / failed / cancelled）");
+    }
+    if (!confirm(`确认删除任务 ${selected}？将同时删除磁盘上的 workspace。`)) return;
+    try {
+      await api.api(`/api/v1/tasks/${selected}`, { method: "DELETE" });
+      selected = null;
+      viewerLoadedFor = null;
+      selectedFindingId = null;
+      findingsCache = [];
+      $("detailPanel").classList.add("hidden");
+      $("emptyState").classList.remove("hidden");
+      await refresh();
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
+  $("runImport").onclick = async () => {
+    const path = $("importPath").value.trim();
+    if (!path) return alert("请填写路径");
+    const body = {
+      path,
+      dry_run: $("importDryRun").checked,
+      skip_existing: $("importSkipExisting").checked,
+    };
+    try {
+      await api.ensureSession();
+      const result = await api.api("/api/v1/tasks/import", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      const lines = [
+        `path: ${result.path}`,
+        `dry_run: ${result.dry_run}`,
+        `imported: ${result.imported_count}`,
+        `skipped: ${result.skipped_count}`,
+        "",
+      ];
+      (result.imported || []).forEach((item) => {
+        lines.push(
+          `+ ${item.run_name} → ${item.task_id || "(preview)"} [${item.status}] ${item.target || ""}`
+        );
+      });
+      (result.skipped || []).forEach((item) => {
+        lines.push(`- ${item.run_name}: ${item.reason || "skipped"}`);
+      });
+      $("importResult").textContent = lines.join("\n");
+      $("importResult").classList.remove("hidden");
+      if (!result.dry_run && result.imported_count > 0) {
+        await refresh();
+        const first = (result.imported || []).find((i) => i.task_id);
+        if (first) {
+          showImport(false);
+          selectTask(first.task_id);
+        }
+      }
+    } catch (e) {
+      $("importResult").textContent = e.message;
+      $("importResult").classList.remove("hidden");
     }
   };
 

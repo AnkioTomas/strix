@@ -1,4 +1,4 @@
-"""Task lifecycle: create, queue, cancel, retry, retest, ingest results."""
+"""Task lifecycle: create, queue, cancel, retry, retest, delete, import, ingest."""
 
 from __future__ import annotations
 
@@ -19,7 +19,13 @@ from app.services.results import (
     load_normalized_findings,
     read_events,
     read_report_markdown,
+    read_run_record,
     workspace_run_dir,
+)
+from app.services.run_import import (
+    discover_run_dirs,
+    fields_from_run_record,
+    preview_run,
 )
 from app.services.strix_runner import (
     DetachedScanHandle,
@@ -198,6 +204,153 @@ class TaskManager:
             )
             or task
         )
+
+    def delete_task(self, task_id: str) -> None:
+        """Permanently remove a finished task (DB + workspace on disk)."""
+        task = self.get_task(task_id)
+        if task["status"] not in TERMINAL:
+            raise TaskError(
+                "TASK_NOT_DELETABLE",
+                f"Only finished tasks can be deleted (status={task['status']})",
+                status_code=409,
+            )
+        self._processes.pop(task_id, None)
+        workspace = Path(task["workspace"])
+        tasks_root = self.settings.tasks_dir.resolve()
+        try:
+            workspace.resolve().relative_to(tasks_root)
+        except ValueError as exc:
+            raise TaskError(
+                "INVALID_WORKSPACE",
+                "Task workspace is outside the managed tasks directory",
+                status_code=500,
+            ) from exc
+        if not self.db.delete_task(task_id):
+            raise TaskError("TASK_NOT_FOUND", "Task not found", status_code=404)
+        if workspace.exists():
+            shutil.rmtree(workspace, ignore_errors=True)
+
+    def import_runs(
+        self,
+        path: str | Path,
+        *,
+        dry_run: bool = False,
+        skip_existing: bool = True,
+    ) -> dict[str, Any]:
+        """Import CLI ``strix_runs`` into new web tasks (copy, never mount in-place)."""
+        root = Path(path).expanduser()
+        try:
+            run_dirs = discover_run_dirs(root)
+        except FileNotFoundError as exc:
+            raise TaskError("IMPORT_PATH_NOT_FOUND", str(exc), status_code=404) from exc
+        except NotADirectoryError as exc:
+            raise TaskError("IMPORT_PATH_INVALID", str(exc)) from exc
+
+        if not run_dirs:
+            raise TaskError(
+                "IMPORT_NO_RUNS",
+                f"No strix runs with run.json found under {root}",
+                status_code=404,
+            )
+
+        imported: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for run_dir in run_dirs:
+            preview = preview_run(run_dir)
+            existing = self.db.find_task_by_run_name(str(preview["run_name"]))
+            if skip_existing and existing:
+                skipped.append(
+                    {
+                        **preview,
+                        "reason": "run_name already imported",
+                        "existing_task_id": existing["id"],
+                    }
+                )
+                continue
+            # Do not re-import a run that already lives inside our tasks_dir.
+            try:
+                run_dir.resolve().relative_to(self.settings.tasks_dir.resolve())
+                skipped.append(
+                    {
+                        **preview,
+                        "reason": "run already under managed tasks directory",
+                    }
+                )
+                continue
+            except ValueError:
+                pass
+
+            if dry_run:
+                imported.append({**preview, "task_id": None})
+                continue
+
+            task = self._import_one_run(run_dir)
+            imported.append(
+                {
+                    **preview,
+                    "task_id": task["id"],
+                    "status": task["status"],
+                }
+            )
+
+        return {
+            "path": str(root.expanduser().resolve()),
+            "dry_run": dry_run,
+            "imported": imported,
+            "skipped": skipped,
+            "imported_count": len(imported),
+            "skipped_count": len(skipped),
+        }
+
+    def _import_one_run(self, run_dir: Path) -> dict[str, Any]:
+        record = read_run_record(run_dir)
+        fields = fields_from_run_record(record, run_dir=run_dir)
+        run_name = str(fields["run_name"])
+        task_id = f"task_{uuid.uuid4().hex[:16]}"
+        workspace = self.settings.tasks_dir / task_id
+        workspace.mkdir(parents=True, exist_ok=True)
+        (workspace / "source").mkdir(exist_ok=True)
+        (workspace / "logs").mkdir(exist_ok=True)
+        (workspace / "results").mkdir(exist_ok=True)
+        (workspace / "attachments").mkdir(exist_ok=True)
+        dest_run = workspace / "strix_runs" / run_name
+        try:
+            shutil.copytree(run_dir, dest_run)
+        except OSError as exc:
+            shutil.rmtree(workspace, ignore_errors=True)
+            raise TaskError("IMPORT_COPY_FAILED", str(exc), status_code=500) from exc
+
+        now = utc_now()
+        row = {
+            "id": task_id,
+            "type": fields["type"],
+            "status": fields["status"],
+            "target": fields["target"],
+            "source_type": fields["source_type"],
+            "source_url": fields["source_url"],
+            "source_branch": fields["source_branch"],
+            "source_commit": fields["source_commit"],
+            "source_path": fields["source_path"],
+            "instruction": fields["instruction"],
+            "scan_mode": fields["scan_mode"],
+            "max_budget": None,
+            "workspace": str(workspace),
+            "run_name": run_name,
+            "viewer_url": None,
+            "viewer_token": None,
+            "pid": None,
+            "exit_code": None,
+            "parent_task_id": None,
+            "action": "import",
+            "error": fields["error"],
+            "created_at": fields["started_at"] or now,
+            "started_at": fields["started_at"] or now,
+            "finished_at": fields["finished_at"] or now,
+            "updated_at": now,
+        }
+        task = self.db.insert_task(row)
+        self.ingest_results(task)
+        return self.get_task(task_id)
 
     def retry_task(self, task_id: str) -> dict[str, Any]:
         parent = self.get_task(task_id)

@@ -342,6 +342,43 @@ def test_retry_creates_child(client: TestClient):
     assert body["action"] == "retry"
 
 
+def test_create_as_retry_copies_attachments(client: TestClient):
+    created = client.post(
+        "/api/v1/tasks",
+        files={
+            "type": (None, "pentest"),
+            "target": (None, "https://example.com"),
+            "scan_mode": (None, "quick"),
+            "name": (None, "parent"),
+            "attachments": ("note.txt", b"hello", "text/plain"),
+        },
+    ).json()
+    manager = client.app.state.manager
+    parent = manager.get_task(created["id"])
+    assert (Path(parent["workspace"]) / "attachments" / "note.txt").is_file()
+
+    child = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com/v2",
+            "scan_mode": "deep",
+            "name": "parent (retry)",
+            "instruction": "focus on auth",
+            "parent_task_id": created["id"],
+            "action": "retry",
+        },
+    )
+    assert child.status_code == 202, child.text
+    body = child.json()
+    assert body["parent_task_id"] == created["id"]
+    assert body["action"] == "retry"
+    assert body["target"] == "https://example.com/v2"
+    assert body["name"] == "parent (retry)"
+    child_task = manager.get_task(body["id"])
+    assert (Path(child_task["workspace"]) / "attachments" / "note.txt").read_bytes() == b"hello"
+
+
 def test_resume_requires_agent_snapshot(client: TestClient):
     created = client.post(
         "/api/v1/tasks",

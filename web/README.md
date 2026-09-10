@@ -96,7 +96,8 @@ PYTHONPATH=. python -m app
 | POST | `/api/v1/tasks/{id}/release` | 放行（held → queued） |
 | DELETE | `/api/v1/tasks/{id}` | 删除已结束或挂起任务（DB + workspace） |
 | POST | `/api/v1/tasks/{id}/cancel` | SIGTERM→SIGKILL |
-| POST | `/api/v1/tasks/{id}/retry` | 同配置重跑（新 run） |
+| POST | `/api/v1/tasks` + `parent_task_id`/`action` | UI 重试：可改配置后建子任务（复制父附件） |
+| POST | `/api/v1/tasks/{id}/retry` | 同配置立刻重跑（新 run，API 兼容） |
 | POST | `/api/v1/tasks/{id}/resume` | 原地续跑同一任务（同 `run_name`，需 `agents.json`） |
 | POST | `/api/v1/tasks/{id}/retest` | 带复测指令重跑 |
 | GET | `/api/v1/tasks/{id}/results` | 该任务 Finding |

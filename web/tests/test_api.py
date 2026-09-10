@@ -428,6 +428,75 @@ def test_resume_requires_agent_snapshot(client: TestClient):
     assert run_record.get("end_time") is None
 
 
+def test_refresh_report_writes_resume_instruction(client: TestClient):
+    from app.services.agent_prompts import REFRESH_REPORT_INSTRUCTION
+
+    created = client.post(
+        "/api/v1/tasks",
+        json={"type": "pentest", "target": "https://example.com", "scan_mode": "quick"},
+    ).json()
+    manager = client.app.state.manager
+    task = manager.get_task(created["id"])
+    workspace = Path(task["workspace"])
+    run_name = "example_refresh_1"
+    state_dir = workspace / "strix_runs" / run_name / ".state"
+    state_dir.mkdir(parents=True)
+    (state_dir / "agents.json").write_text("{}", encoding="utf-8")
+    (workspace / "strix_runs" / run_name / "run.json").write_text(
+        '{"run_name":"example_refresh_1","status":"completed","targets_info":[{"type":"web","details":{}}]}',
+        encoding="utf-8",
+    )
+    manager.db.update_task(
+        created["id"],
+        status="completed",
+        finished_at="2026-01-01T00:00:00Z",
+        run_name=run_name,
+    )
+    manager._processes.pop(created["id"], None)
+
+    refreshed = client.post(f"/api/v1/tasks/{created['id']}/refresh-report")
+    assert refreshed.status_code == 202, refreshed.text
+    body = refreshed.json()
+    assert body["action"] == "resume"
+    assert body["status"] == "queued"
+    note = workspace / ".web_resume_instruction"
+    assert note.is_file()
+    assert "更新报告" in note.read_text(encoding="utf-8")
+    assert "finish_scan" in note.read_text(encoding="utf-8")
+    assert REFRESH_REPORT_INSTRUCTION.strip() in note.read_text(encoding="utf-8")
+
+
+def test_retest_embeds_mandatory_instruction(client: TestClient):
+    from app.services.agent_prompts import RETEST_INSTRUCTION
+
+    created = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com",
+            "scan_mode": "quick",
+            "instruction": "原始指令",
+        },
+    ).json()
+    manager = client.app.state.manager
+    manager.db.update_task(
+        created["id"],
+        status="completed",
+        finished_at="2026-01-01T00:00:00Z",
+    )
+    manager._processes.pop(created["id"], None)
+
+    retried = client.post(f"/api/v1/tasks/{created['id']}/retest")
+    assert retried.status_code == 202, retried.text
+    child = manager.get_task(retried.json()["id"])
+    assert child["action"] == "retest"
+    assert child["parent_task_id"] == created["id"]
+    assert "retest_status" in child["instruction"]
+    assert "screenshots" in child["instruction"]
+    assert RETEST_INSTRUCTION.strip() in child["instruction"]
+    assert "原始指令" in child["instruction"]
+
+
 def test_reap_skips_until_worker_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from app.services.scan_state import write_state
     from app.services.strix_runner import DetachedScanHandle

@@ -99,7 +99,8 @@ PYTHONPATH=. python -m app
 | POST | `/api/v1/tasks` + `parent_task_id`/`action` | UI 重试：可改配置后建子任务（复制父附件） |
 | POST | `/api/v1/tasks/{id}/retry` | 同配置立刻重跑（新 run，API 兼容） |
 | POST | `/api/v1/tasks/{id}/resume` | 原地续跑同一任务（同 `run_name`，需 `agents.json`） |
-| POST | `/api/v1/tasks/{id}/retest` | 带复测指令重跑 |
+| POST | `/api/v1/tasks/{id}/refresh-report` | 要求 Agent 按交付规范重写报告（resume 或 live 投递） |
+| POST | `/api/v1/tasks/{id}/retest` | 复测子任务（强制标记修复状态 + 佐证） |
 | GET | `/api/v1/tasks/{id}/results` | 该任务 Finding |
 | GET | `/api/v1/tasks/{id}/report` | Markdown 报告 |
 | GET | `/api/v1/tasks/{id}/events` | Agent 事件 |

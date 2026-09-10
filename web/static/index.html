@@ -215,8 +215,12 @@
         <div class="tab-pane" id="tab-report">
           <div class="actions">
             <button type="button" class="btn ghost" id="downloadReport">下载报告包 (ZIP)</button>
+            <button type="button" class="btn" id="refreshReportBtn" disabled>更新报告</button>
           </div>
-          <div id="reportView" class="penna-render penna-host"></div>
+          <div class="report-layout">
+            <nav class="report-toc hidden" id="reportToc" aria-label="报告目录"></nav>
+            <div id="reportView" class="penna-render penna-host"></div>
+          </div>
         </div>
 
         <div class="tab-pane" id="tab-artifacts">

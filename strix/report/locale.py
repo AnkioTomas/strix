@@ -91,6 +91,16 @@ class ReportLabels(TypedDict):
     methodology_heading: str
     technical_analysis_heading: str
     recommendations_heading: str
+    retest_heading: str
+    retest_col_title: str
+    retest_col_status: str
+    retest_col_evidence: str
+    retest_fixed: str
+    retest_not_fixed: str
+    retest_partial: str
+    retest_regressed: str
+    retest_unknown: str
+    retest_no_evidence: str
     findings_heading: str
     overview_with_findings: str
     overview_clean: str
@@ -142,6 +152,16 @@ _LABELS_ZH: ReportLabels = {
     "methodology_heading": "测试方法",
     "technical_analysis_heading": "技术分析",
     "recommendations_heading": "修复建议",
+    "retest_heading": "复测情况",
+    "retest_col_title": "漏洞",
+    "retest_col_status": "状态",
+    "retest_col_evidence": "佐证",
+    "retest_fixed": "已修复",
+    "retest_not_fixed": "未修复",
+    "retest_partial": "部分修复",
+    "retest_regressed": "回归恶化",
+    "retest_unknown": "未标记",
+    "retest_no_evidence": "未提供截图或其他硬证据",
     "findings_heading": "漏洞清单",
     "overview_with_findings": (
         "本次测试共确认 **{count}** 个漏洞。危害较大的问题包括：{top}。"
@@ -195,6 +215,16 @@ _LABELS_EN: ReportLabels = {
     "methodology_heading": "Methodology",
     "technical_analysis_heading": "Technical Analysis",
     "recommendations_heading": "Recommendations",
+    "retest_heading": "Retest Results",
+    "retest_col_title": "Finding",
+    "retest_col_status": "Status",
+    "retest_col_evidence": "Evidence",
+    "retest_fixed": "Fixed",
+    "retest_not_fixed": "Not fixed",
+    "retest_partial": "Partially fixed",
+    "retest_regressed": "Regressed",
+    "retest_unknown": "Unmarked",
+    "retest_no_evidence": "No screenshot or hard evidence provided",
     "findings_heading": "Findings",
     "overview_with_findings": (
         "This assessment confirmed **{count}** finding(s). Notable issues: {top}."

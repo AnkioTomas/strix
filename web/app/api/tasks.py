@@ -266,6 +266,15 @@ async def retest_task(
     return _summary(task)
 
 
+@router.post("/tasks/{task_id}/refresh-report", status_code=202, response_model=TaskSummary)
+async def refresh_report(task_id: str, manager: TaskManager = Depends(get_manager)):
+    try:
+        task = await asyncio.to_thread(manager.refresh_report, task_id)
+    except TaskError as exc:
+        return _error(exc)
+    return _summary(task)
+
+
 @router.post("/tasks/{task_id}/resume", status_code=202, response_model=TaskSummary)
 async def resume_task(
     task_id: str,

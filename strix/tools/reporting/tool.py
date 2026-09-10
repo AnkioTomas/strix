@@ -175,6 +175,7 @@ _REQUIRED_FIELDS = {
 
 _VALID_FIX_EFFORT = frozenset({"trivial", "low", "medium", "high"})
 _VALID_CONFIDENCE = frozenset({"high", "medium", "low"})
+_VALID_RETEST_STATUS = frozenset({"fixed", "not_fixed", "partial", "regressed"})
 
 
 def _validate_required_text(fields: dict[str, str]) -> list[str]:
@@ -337,6 +338,48 @@ def _collect_update_changes(  # noqa: PLR0912
             )
         else:
             changes["fix_effort"] = fix_effort
+
+    retest_status = clean_optional(fields.get("retest_status"))
+    if retest_status is not None:
+        retest_status = retest_status.lower()
+        if retest_status not in _VALID_RETEST_STATUS:
+            errors.append(
+                "Invalid retest_status: "
+                f"{retest_status!r}. Must be one of: {sorted(_VALID_RETEST_STATUS)}"
+            )
+        else:
+            changes["retest_status"] = retest_status
+
+    raw_shots = fields.get("screenshots")
+    if raw_shots is not None:
+        cleaned_shots = [str(p).strip() for p in (raw_shots or []) if str(p).strip()]
+        changes["screenshots"] = cleaned_shots
+
+    if changes.get("retest_status"):
+        evidence_blob = "\n".join(
+            str(x)
+            for x in (
+                changes.get("evidence"),
+                changes.get("fix_verification"),
+                "\n".join(changes.get("screenshots") or []),
+            )
+            if x
+        )
+        cited = extract_screenshot_paths(evidence_blob)
+        has_shots = bool(changes.get("screenshots")) or bool(cited)
+        has_text_proof = bool(str(changes.get("fix_verification") or "").strip()) or bool(
+            str(changes.get("evidence") or "").strip()
+        )
+        if changes["retest_status"] == "fixed" and not has_shots:
+            errors.append(
+                "retest_status=fixed requires screenshots (sandbox PNG/JPEG paths) "
+                "or screenshot paths cited in evidence/fix_verification"
+            )
+        elif not has_shots and not has_text_proof:
+            errors.append(
+                "retest_status updates require screenshots and/or "
+                "evidence/fix_verification with hard proof"
+            )
 
     breakdown = fields.get("cvss_breakdown")
     if breakdown is not None:
@@ -1304,6 +1347,8 @@ async def update_vulnerability_report(
     fix_verification: str | None = None,
     fix_pr_body: str | None = None,
     contextual_cvss_reasoning: str | None = None,
+    retest_status: str | None = None,
+    screenshots: list[str] | None = None,
 ) -> str:
     """Revise a vulnerability report that is already filed, keeping its id.
 
@@ -1379,6 +1424,11 @@ async def update_vulnerability_report(
         contextual_cvss_reasoning: Dependency findings only. What you
             observed in this codebase that justifies the contextual
             ``cvss_breakdown``.
+        retest_status: Retest outcome for this finding title:
+            ``fixed`` / ``not_fixed`` / ``partial`` / ``regressed``.
+            Required during retest engagements. ``fixed`` needs screenshots.
+        screenshots: Sandbox absolute PNG/JPEG paths proving the retest
+            claim (especially when marking ``fixed``).
     """
     agent_id, agent_name = _caller_identity(ctx)
     result = await asyncio.to_thread(
@@ -1410,6 +1460,8 @@ async def update_vulnerability_report(
             "fix_verification": fix_verification,
             "fix_pr_body": fix_pr_body,
             "contextual_cvss_reasoning": contextual_cvss_reasoning,
+            "retest_status": retest_status,
+            "screenshots": screenshots,
         },
         agent_id=agent_id,
         agent_name=agent_name,

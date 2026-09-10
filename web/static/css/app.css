@@ -616,6 +616,83 @@ button, input, select, textarea {
   line-height: 1.55;
 }
 
+.report-layout {
+  display: grid;
+  grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
+  gap: 1.25rem 1.5rem;
+  align-items: start;
+}
+
+.report-toc {
+  position: sticky;
+  top: 0.75rem;
+  max-height: calc(100vh - var(--topbar-h) - 7rem);
+  overflow: auto;
+  padding: 0.65rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.report-toc.hidden {
+  display: none;
+}
+
+.report-toc-title {
+  display: block;
+  margin: 0 0 0.45rem;
+  padding: 0 0.35rem 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.report-toc-link {
+  display: block;
+  padding: 0.28rem 0.35rem;
+  margin: 0.05rem 0;
+  border-radius: 5px;
+  color: var(--muted);
+  text-decoration: none;
+  word-break: break-word;
+}
+
+.report-toc-link:hover {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.report-toc-link.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.report-toc-link.level-2 {
+  padding-left: 0.85rem;
+  font-size: 0.78rem;
+}
+
+.report-layout .penna-host {
+  max-width: none;
+}
+
+@media (max-width: 960px) {
+  .report-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .report-toc {
+    position: static;
+    max-height: 11rem;
+  }
+}
+
 .muted { color: var(--muted); }
 .muted[href] { text-decoration: none; }
 .muted[href]:hover { text-decoration: underline; }

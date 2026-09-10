@@ -19,6 +19,12 @@ from strix.report.writer import atomic_write_text, parse_fenced_code, safe_fence
 logger = logging.getLogger(__name__)
 
 _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4, "none": 5}
+_RETEST_STATUS_LABEL_KEYS = {
+    "fixed": "retest_fixed",
+    "not_fixed": "retest_not_fixed",
+    "partial": "retest_partial",
+    "regressed": "retest_regressed",
+}
 
 # Absolute sandbox paths and markdown image refs that point at screenshots.
 _SCREENSHOT_PATH_RE = re.compile(
@@ -197,6 +203,80 @@ def _narrative_sections(
     return lines
 
 
+def _retest_status_label(status: object | None) -> str:
+    labels = report_labels()
+    key = _RETEST_STATUS_LABEL_KEYS.get(str(status or "").strip().lower())
+    return labels[key] if key else labels["retest_unknown"]
+
+
+def _retest_evidence_cell(report: dict[str, Any]) -> str:
+    labels = report_labels()
+    bits: list[str] = []
+    rels = report.get("screenshot_rels") or []
+    if isinstance(rels, list):
+        for i, rel in enumerate(rels, start=1):
+            alt = labels["screenshot_n"].format(n=i)
+            bits.append(f"![{alt}]({rel})")
+    shots = report.get("screenshots") or []
+    if isinstance(shots, list) and not bits:
+        for shot in shots:
+            if shot:
+                bits.append(f"`{shot}`")
+    verification = str(report.get("fix_verification") or "").strip()
+    if verification:
+        bits.append(verification.replace("|", "\\|").replace("\n", "<br>"))
+    evidence = str(report.get("evidence") or "").strip()
+    cited = extract_screenshot_paths(evidence, verification)
+    if cited and not rels:
+        for path in cited[:3]:
+            bits.append(f"`{path}`")
+    if not bits:
+        return labels["retest_no_evidence"]
+    # Deduplicate while preserving order.
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for bit in bits:
+        if bit not in seen:
+            seen.add(bit)
+            ordered.append(bit)
+    return "<br>".join(ordered)
+
+
+def _has_retest_data(vulnerability_reports: list[dict[str, Any]]) -> bool:
+    return any(
+        str(r.get("retest_status") or "").strip()
+        or str(r.get("fix_verification") or "").strip()
+        for r in vulnerability_reports
+    )
+
+
+def _render_retest_section(vulnerability_reports: list[dict[str, Any]]) -> list[str]:
+    """Build the customer-facing retest summary table."""
+    if not _has_retest_data(vulnerability_reports):
+        return []
+    labels = report_labels()
+    rows = [
+        (
+            labels["retest_col_title"],
+            labels["retest_col_status"],
+            labels["retest_col_evidence"],
+        )
+    ]
+    for report in vulnerability_reports:
+        title = str(report.get("title") or labels["untitled"]).replace("|", "\\|")
+        status = _retest_status_label(report.get("retest_status"))
+        evidence = _retest_evidence_cell(report)
+        rows.append((title, status, evidence))
+
+    lines = [
+        f"| {rows[0][0]} | {rows[0][1]} | {rows[0][2]} |",
+        "| --- | --- | --- |",
+    ]
+    for title, status, evidence in rows[1:]:
+        lines.append(f"| {title} | {status} | {evidence} |")
+    return [f"# {labels['retest_heading']}", "", *lines, ""]
+
+
 def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
     """Render one finding block for the consolidated delivery report."""
     labels = report_labels()
@@ -284,6 +364,13 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
         appendix_bits.append("")
     if report.get("fix_verification"):
         appendix_bits.append(f"**{labels['fix_verification']}** {report['fix_verification']}")
+        appendix_bits.append("")
+    if report.get("retest_status"):
+        status_text = _retest_status_label(report.get("retest_status"))
+        if chrome_locale() == "zh":
+            appendix_bits.append(f"**{labels['retest_col_status']}：** {status_text}")
+        else:
+            appendix_bits.append(f"**{labels['retest_col_status']}:** {status_text}")
         appendix_bits.append("")
     dep = report.get("dependency_metadata")
     if isinstance(dep, dict) and dep:
@@ -374,6 +461,8 @@ def render_zh_penetration_report(
                 "",
             ]
         )
+
+    lines.extend(_render_retest_section(sorted_reports))
 
     lines.extend([f"# {labels['findings_heading']}", ""])
     if not sorted_reports:

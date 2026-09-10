@@ -15,6 +15,7 @@ from app.schemas import CreateTaskRequest, GitSource, LocalSource
 from app.security.source import SourceValidationError, validate_source
 from app.security.target import TargetValidationError, validate_pentest_target
 from app.services.attachments import copy_attachments, save_uploads
+from app.services.agent_prompts import REFRESH_REPORT_INSTRUCTION, RETEST_INSTRUCTION
 from app.services.git_clone import GitError, clone_repository
 from app.services.results import (
     load_normalized_findings,
@@ -425,12 +426,14 @@ class TaskManager:
         if parent["status"] not in TERMINAL:
             raise TaskError("TASK_ALREADY_RUNNING", "Only finished tasks can be retested")
         base = self._request_from_task(parent)
+        extra = (instruction or "").strip()
         note = (
-            instruction
-            or "Retest previously reported findings and verify whether fixes hold."
+            f"{RETEST_INSTRUCTION}\n\n[附加说明]\n{extra}"
+            if extra
+            else RETEST_INSTRUCTION
         )
         if base.instruction:
-            base.instruction = f"{base.instruction}\n\n[Retest]\n{note}"
+            base.instruction = f"{base.instruction}\n\n{note}"
         else:
             base.instruction = note
         return self.create_task(
@@ -438,6 +441,18 @@ class TaskManager:
             parent_task_id=task_id,
             action="retest",
             copy_attachments_from=parent["workspace"],
+        )
+
+    def refresh_report(self, task_id: str) -> dict[str, Any]:
+        """Ask Strix to rewrite the delivery report in-place (resume or live steer)."""
+        task = self.get_task(task_id)
+        if task["status"] in {"starting", "running"}:
+            return self.resume_with_message(task_id, REFRESH_REPORT_INSTRUCTION)
+        if task["status"] in TERMINAL:
+            return self.resume_task(task_id, REFRESH_REPORT_INSTRUCTION)
+        raise TaskError(
+            "REFRESH_UNAVAILABLE",
+            f"Cannot refresh report for task in status {task['status']}",
         )
 
     def resume_task(self, task_id: str, instruction: str | None = None) -> dict[str, Any]:

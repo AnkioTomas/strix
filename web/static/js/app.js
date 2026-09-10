@@ -46,6 +46,78 @@
     renderer.render(md || "> [!NOTE]\n> （空内容）\n");
   }
 
+  function slugifyHeading(text) {
+    const base = String(text || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 64);
+    return base || "section";
+  }
+
+  function clearReportToc() {
+    const toc = $("reportToc");
+    if (!toc) return;
+    toc.innerHTML = "";
+    toc.classList.add("hidden");
+  }
+
+  function buildReportToc() {
+    const view = $("reportView");
+    const toc = $("reportToc");
+    if (!view || !toc) return;
+    const headings = Array.from(view.querySelectorAll("h1, h2")).filter(
+      (h) => h.textContent && h.textContent.trim()
+    );
+    if (!headings.length) {
+      clearReportToc();
+      return;
+    }
+
+    const used = new Set();
+    const links = headings.map((heading, index) => {
+      let id = heading.id;
+      if (!id) {
+        const base = slugifyHeading(heading.textContent);
+        id = base;
+        let n = 2;
+        while (used.has(id) || document.getElementById(id)) {
+          id = `${base}-${n++}`;
+        }
+        heading.id = id;
+      }
+      used.add(id);
+      const level = heading.tagName === "H1" ? 1 : 2;
+      return `<a class="report-toc-link level-${level}" href="#${esc(id)}" data-toc-id="${esc(id)}">${esc(
+        heading.textContent.trim()
+      )}</a>`;
+    });
+
+    toc.innerHTML = `<span class="report-toc-title">目录</span>${links.join("")}`;
+    toc.classList.remove("hidden");
+
+    toc.querySelectorAll(".report-toc-link").forEach((anchor) => {
+      anchor.onclick = (event) => {
+        event.preventDefault();
+        const id = anchor.getAttribute("data-toc-id");
+        const target = id ? document.getElementById(id) : null;
+        if (!target) return;
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+        toc.querySelectorAll(".report-toc-link").forEach((el) => {
+          el.classList.toggle("active", el === anchor);
+        });
+        history.replaceState(null, "", `#${id}`);
+      };
+    });
+  }
+
+  function scheduleReportToc() {
+    // Penna may paint headings after render() returns.
+    queueMicrotask(buildReportToc);
+    setTimeout(buildReportToc, 60);
+  }
+
   function showCreate(show) {
     if (show) $("importPanel").classList.add("hidden");
     $("createPanel").classList.toggle("hidden", !show);
@@ -142,6 +214,7 @@
     $("retryBtn").disabled = !terminal;
     $("retestBtn").disabled = !terminal;
     $("resumeBtn").disabled = !terminal;
+    $("refreshReportBtn").disabled = !(terminal || active);
     $("cancelBtn").disabled = !active;
     $("holdBtn").disabled = !queued;
     $("releaseBtn").disabled = !held;
@@ -400,7 +473,9 @@
       const data = await api.api(`/api/v1/tasks/${selected}/report`);
       const content = data.content || "> [!NOTE]\n> 无报告\n";
       renderWithPenna(ensureReportRenderer(), content, selected);
+      scheduleReportToc();
     } catch (e) {
+      clearReportToc();
       renderWithPenna(
         ensureReportRenderer(),
         `> [!CAUTION]\n> ${e.message}\n`,
@@ -754,10 +829,33 @@
 
   $("retestBtn").onclick = async () => {
     if (!selected) return;
+    if (!confirm("将创建复测子任务：逐条验证漏洞是否修复，并要求截图/佐证。继续？")) {
+      return;
+    }
     try {
       const t = await api.api(`/api/v1/tasks/${selected}/retest`, { method: "POST" });
       await refresh();
       selectTask(t.id);
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
+  $("refreshReportBtn").onclick = async () => {
+    if (!selected) return;
+    const t = currentTask();
+    const hint =
+      t && TERMINAL.has(t.status)
+        ? "将 resume 当前任务，按交付规范重写 finish_scan 报告（不扩测）。继续？"
+        : "将向运行中的 Agent 发送「更新报告」指令。继续？";
+    if (!confirm(hint)) return;
+    try {
+      const updated = await api.api(`/api/v1/tasks/${selected}/refresh-report`, {
+        method: "POST",
+      });
+      await refresh();
+      selectTask(updated.id);
+      setTab("viewer");
     } catch (e) {
       alert(e.message);
     }

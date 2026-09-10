@@ -141,3 +141,33 @@ def test_render_zh_report_includes_finish_scan_sections() -> None:
     assert "# 修复建议" in md
     assert "| 技术架构 |" not in md
     assert "见测试范围" not in md
+
+
+def test_render_zh_report_retest_section() -> None:
+    md = render_zh_penetration_report(
+        run_record={
+            "run_name": "retest",
+            "targets_info": [{"type": "web", "original": "https://shop.example.com"}],
+        },
+        vulnerability_reports=[
+            {
+                "id": "vuln-0001",
+                "title": "IDOR 读取他人订单",
+                "severity": "high",
+                "timestamp": "2026-09-09 01:00:00 UTC",
+                "description": "低权限用户可读取他人订单。",
+                "impact": "泄露 PII。",
+                "retest_status": "fixed",
+                "fix_verification": "复测：原 PoC 返回 403。",
+                "screenshots": ["/workspace/.agent-browser-screenshots/fixed.png"],
+                "screenshot_rels": ["images/vuln-0001-1.png"],
+            }
+        ],
+        overview="复测完成。",
+    )
+    assert "# 复测情况" in md
+    assert "| 漏洞 | 状态 | 佐证 |" in md
+    assert "已修复" in md
+    assert "IDOR 读取他人订单" in md
+    assert "images/vuln-0001-1.png" in md
+    assert "## 1. [ 高危 ] IDOR 读取他人订单" in md

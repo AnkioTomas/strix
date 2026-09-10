@@ -75,10 +75,14 @@ UPDATABLE_REPORT_FIELDS = frozenset(
         "code_locations",
         "fix_verification",
         "fix_pr_body",
+        "retest_status",
+        "screenshots",
     }
 )
 
-_LOWERCASE_REPORT_FIELDS = frozenset({"severity", "confidence", "fix_effort"})
+_LOWERCASE_REPORT_FIELDS = frozenset(
+    {"severity", "confidence", "fix_effort", "retest_status"}
+)
 
 # Fields that only describe another field. A revision may raise the rating or
 # replace the locations without restating the reasoning behind the old one, and

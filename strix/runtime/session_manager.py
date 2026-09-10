@@ -19,6 +19,7 @@ from strix.core.paths import run_dir_for, workspace_dir
 from strix.report.writer import read_run_record, write_run_record
 from strix.runtime.backends import backend_supports_bind_mounts, get_backend
 from strix.runtime.caido_bootstrap import bootstrap_caido
+from strix.runtime.cjk_fonts import ensure_cjk_fonts
 from strix.runtime.caido_handle import CaidoBootstrapHandle
 
 
@@ -417,6 +418,13 @@ async def create_or_reuse(  # noqa: PLR0915
             bind_mounts=bind_mounts,
             reuse_container_id=reuse_container_id,
         )
+
+        # Stock sandbox images lack CJK fonts; install into the live container
+        # (bind-mounted script + root exec). No image rebuild. Skip when there
+        # is no host workspace mount to stage the script into.
+        if backend_supports_bind_mounts(backend_name):
+            report("Ensuring Chinese font support")
+            await ensure_cjk_fonts(session, host_workspace)
 
         report("Setting up the proxy")
         caido_endpoint = await session.resolve_exposed_port(_CONTAINER_CAIDO_PORT)

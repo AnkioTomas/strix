@@ -273,6 +273,8 @@ RUN echo 'export PATH="/home/pentester/go/bin:/home/pentester/.local/bin:/home/p
 
 USER root
 COPY containers/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+# Packaged copy used as a bind-mount override on stock remote images.
+COPY strix/runtime/docker_entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 USER pentester

@@ -79,6 +79,24 @@ def build_bind_mounts(local_sources: list[dict[str, Any]]) -> list[dict[str, Any
     return bind_mounts
 
 
+def build_entrypoint_override_mount() -> dict[str, Any] | None:
+    """Bind-mount the packaged entrypoint over the stock image script.
+
+    Remote images (ghcr.io/.../strix-sandbox) ship an entrypoint whose
+    ``certutil -N`` can spin at 100% CPU forever. Overlaying our fixed script
+    needs no image rebuild.
+    """
+    packaged = Path(__file__).resolve().with_name("docker_entrypoint.sh")
+    if not packaged.is_file():
+        logger.warning("sandbox entrypoint override missing at %s", packaged)
+        return None
+    return {
+        "source": str(packaged),
+        "target": "/usr/local/bin/docker-entrypoint.sh",
+        "read_only": True,
+    }
+
+
 def build_run_workspace_mount(host_workspace: Path) -> dict[str, Any]:
     """Bind the per-run host workspace at container ``/workspace`` (writable)."""
     source = Path(host_workspace).expanduser().resolve()
@@ -383,6 +401,9 @@ async def create_or_reuse(  # noqa: PLR0915
             build_run_workspace_mount(host_workspace),
             *build_bind_mounts(local_sources),
         ]
+        entrypoint_mount = build_entrypoint_override_mount()
+        if entrypoint_mount is not None:
+            bind_mounts.append(entrypoint_mount)
         entries: dict[str | Path, BaseEntry] = {}
         if extra_files:
             staging_dir = extra_file_staging_dir(scan_id)
@@ -648,7 +669,18 @@ def stop_sandbox_from_run_dir(run_dir: Path | None) -> bool:
                 container.status,
             )
             return True
-        container.stop(timeout=10)
+        # Entrypoint can be wedged on ``certutil -N`` (100% CPU). ``stop`` sends
+        # SIGTERM then SIGKILL after timeout — enough to reap stuck certutil.
+        try:
+            container.stop(timeout=10)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "stop_sandbox_from_run_dir: stop failed for %s; killing",
+                container_id[:12],
+                exc_info=True,
+            )
+            with contextlib.suppress(Exception):
+                container.kill()
         logger.info(
             "Stopped sandbox container %s from run record (retained for resume)",
             container_id[:12],

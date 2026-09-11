@@ -256,6 +256,9 @@ async def test_create_or_reuse_attaches_when_sandbox_record_present(
     kwargs = backend.await_args.kwargs
     assert kwargs["container_id"] == "existing-cid"
     assert kwargs["bind_mounts"][0]["target"] == "/workspace"
+    cjk_mounts = [m for m in kwargs["bind_mounts"] if m["target"] == "/usr/local/share/fonts/strix-cjk"]
+    assert len(cjk_mounts) == 1
+    assert cjk_mounts[0]["read_only"] is True
     assert (workspace_dir(run_dir)).is_dir()
 
 

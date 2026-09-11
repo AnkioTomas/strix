@@ -20,8 +20,8 @@ from strix.core.paths import run_dir_for, workspace_dir
 from strix.report.writer import read_run_record, write_run_record
 from strix.runtime.backends import backend_supports_bind_mounts, get_backend
 from strix.runtime.caido_bootstrap import bootstrap_caido
-from strix.runtime.cjk_fonts import ensure_cjk_fonts
 from strix.runtime.caido_handle import CaidoBootstrapHandle
+from strix.runtime.cjk_fonts import build_cjk_fonts_mount, ensure_cjk_fonts
 from strix.runtime.workspace_perms import ensure_workspace_writable
 
 
@@ -404,6 +404,9 @@ async def create_or_reuse(  # noqa: PLR0915
         entrypoint_mount = build_entrypoint_override_mount()
         if entrypoint_mount is not None:
             bind_mounts.append(entrypoint_mount)
+        cjk_fonts_mount = build_cjk_fonts_mount()
+        if cjk_fonts_mount is not None:
+            bind_mounts.append(cjk_fonts_mount)
         entries: dict[str | Path, BaseEntry] = {}
         if extra_files:
             staging_dir = extra_file_staging_dir(scan_id)

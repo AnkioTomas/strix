@@ -1,9 +1,11 @@
-"""Install CJK fonts into a live sandbox without rebuilding the image.
+"""CJK fonts for Chromium screenshots inside the sandbox.
 
-The published sandbox image only ships Latin fonts (``fonts-liberation``), so
-Chinese UI in agent-browser screenshots becomes tofu boxes. This module copies
-``ensure_cjk_fonts.sh`` into the bind-mounted workspace and runs it as root
-inside the already-started container.
+Stock images may only ship Latin fonts. This module:
+
+1. Exposes a **read-only bind mount** of the OFL-bundled
+   ``strix/runtime/fonts/`` directory (no per-run copy into the workspace).
+2. Stages ``ensure_cjk_fonts.sh`` and runs it as root so fontconfig / apt can
+   finish the job when needed.
 """
 
 from __future__ import annotations
@@ -21,10 +23,13 @@ logger = logging.getLogger(__name__)
 
 _SCRIPT_NAME = "ensure_cjk_fonts.sh"
 _SCRIPT_SRC = Path(__file__).resolve().with_name(_SCRIPT_NAME)
-# Under the container workspace mount so stock images can see the host script.
+_BUNDLED_FONTS_DIR = Path(__file__).resolve().parent / "fonts"
+# Inside the container — fontconfig already scans /usr/local/share/fonts.
+_CONTAINER_FONTS_DIR = "/usr/local/share/fonts/strix-cjk"
 _CONTAINER_SCRIPT = f"/workspace/.strix/{_SCRIPT_NAME}"
-# Noto CJK download + apt can be slow on first run.
 _EXEC_TIMEOUT_S = 600.0
+
+_FONT_SUFFIXES = {".ttf", ".otf", ".ttc", ".otc", ".deb"}
 
 
 def stage_cjk_font_script(host_workspace: Path) -> Path:
@@ -38,11 +43,42 @@ def stage_cjk_font_script(host_workspace: Path) -> Path:
     return dest
 
 
+def _is_font_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in _FONT_SUFFIXES
+
+
+def find_bundled_cjk_font() -> Path | None:
+    """Return the first font shipped under ``strix/runtime/fonts/``, if any."""
+    if not _BUNDLED_FONTS_DIR.is_dir():
+        return None
+    try:
+        fonts = sorted(p for p in _BUNDLED_FONTS_DIR.iterdir() if _is_font_file(p))
+    except OSError:
+        return None
+    return fonts[0] if fonts else None
+
+
+def build_cjk_fonts_mount() -> dict[str, Any] | None:
+    """Read-only bind mount of the packaged CJK fonts directory.
+
+    Same pattern as ``build_entrypoint_override_mount``: one host path, no
+    per-container copy into the scan workspace.
+    """
+    if find_bundled_cjk_font() is None:
+        logger.warning("Bundled CJK fonts missing under %s", _BUNDLED_FONTS_DIR)
+        return None
+    return {
+        "source": str(_BUNDLED_FONTS_DIR.resolve()),
+        "target": _CONTAINER_FONTS_DIR,
+        "read_only": True,
+    }
+
+
 async def ensure_cjk_fonts(
     session: BaseSandboxSession,
     host_workspace: Path | None,
 ) -> None:
-    """Best-effort CJK font install on the running sandbox. Never raises."""
+    """Best-effort CJK font ensure on the running sandbox. Never raises."""
     if host_workspace is None:
         logger.debug("Skipping CJK font ensure: no host workspace bind mount")
         return
@@ -61,7 +97,7 @@ async def ensure_cjk_fonts(
             timeout=_EXEC_TIMEOUT_S,
             user="root",
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("CJK font ensure exec failed")
         return
 

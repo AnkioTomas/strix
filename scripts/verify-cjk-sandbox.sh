@@ -15,6 +15,15 @@ mkdir -p "$WS/.strix" "$WS/out"
 cp "$ROOT/strix/runtime/ensure_cjk_fonts.sh" "$WS/.strix/ensure_cjk_fonts.sh"
 chmod +x "$WS/.strix/ensure_cjk_fonts.sh"
 
+BUNDLED_FONTS="$ROOT/strix/runtime/fonts"
+MOUNT_ARGS=(-v "$WS:/workspace")
+if [[ -f "$BUNDLED_FONTS/NotoSansSC-Regular.otf" ]]; then
+  MOUNT_ARGS+=(-v "$BUNDLED_FONTS:/usr/local/share/fonts/strix-cjk:ro")
+  echo "RO mount: $BUNDLED_FONTS -> /usr/local/share/fonts/strix-cjk"
+else
+  echo "WARN: bundled font missing at $BUNDLED_FONTS; ensure script will try apt."
+fi
+
 cat >"$WS/zh-sample.html" <<'EOF'
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -22,7 +31,7 @@ cat >"$WS/zh-sample.html" <<'EOF'
 <meta charset="utf-8"/>
 <title>中文截图验证</title>
 <style>
-  body { font-family: "Noto Sans CJK SC", "WenQuanYi Zen Hei", sans-serif;
+  body { font-family: "Noto Sans SC", "Noto Sans CJK SC", "WenQuanYi Zen Hei", sans-serif;
          margin: 40px; background: #111; color: #eee; }
   h1 { font-size: 36px; }
   p { font-size: 22px; line-height: 1.6; }
@@ -43,7 +52,7 @@ EOF
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 echo "Image: $IMG"
 docker run -d --name "$NAME" --shm-size=1g \
-  -v "$WS:/workspace" \
+  "${MOUNT_ARGS[@]}" \
   --entrypoint bash \
   "$IMG" -lc 'tail -f /dev/null'
 

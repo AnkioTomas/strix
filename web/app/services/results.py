@@ -4,11 +4,48 @@ from __future__ import annotations
 
 import contextlib
 import json
+import threading
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.services.findings import normalize_findings
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+_ZIP_LOCKS: dict[str, threading.Lock] = {}
+_ZIP_LOCKS_GUARD = threading.Lock()
+
+
+def _zip_lock_for(path: Path) -> threading.Lock:
+    key = str(path.resolve())
+    with _ZIP_LOCKS_GUARD:
+        lock = _ZIP_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _ZIP_LOCKS[key] = lock
+        return lock
+
+
+def _atomic_zip_write(
+    zip_path: Path,
+    write_entries: Callable[[zipfile.ZipFile], None],
+) -> Path | None:
+    """Write a zip via ``*.tmp`` + replace so readers never see truncation."""
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = zip_path.with_suffix(zip_path.suffix + ".tmp")
+    with _zip_lock_for(zip_path):
+        try:
+            with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                write_entries(zf)
+            tmp_path.replace(zip_path)
+        except OSError:
+            with contextlib.suppress(OSError):
+                tmp_path.unlink()
+            return None
+    return zip_path if zip_path.is_file() else None
 
 
 def workspace_run_dir(workspace: Path, run_name: str | None) -> Path | None:
@@ -90,12 +127,26 @@ def rebuild_delivery_report(
         )
     except Exception:
         return None
-    # Stale zip would still contain previously-included findings.
-    zip_path = run_dir / "penetration_test_report.zip"
-    if zip_path.is_file():
-        with contextlib.suppress(OSError):
-            zip_path.unlink()
+    # Keep the downloadable zip in sync without truncating an in-flight FileResponse
+    # (UI polls GET /report every few seconds while users may click Download).
+    md_path = run_dir / "penetration_test_report.md"
+    if md_path.is_file():
+        _build_report_zip(run_dir, md_path)
     return read_report_markdown(run_dir)
+
+
+def _build_report_zip(run_dir: Path, md_path: Path) -> Path | None:
+    zip_path = run_dir / "penetration_test_report.zip"
+
+    def _write(zf: zipfile.ZipFile) -> None:
+        zf.write(md_path, arcname="penetration_test_report.md")
+        images_dir = run_dir / "images"
+        if images_dir.is_dir():
+            for image in sorted(images_dir.iterdir()):
+                if image.is_file():
+                    zf.write(image, arcname=f"images/{image.name}")
+
+    return _atomic_zip_write(zip_path, _write)
 
 
 def resolve_report_package(run_dir: Path) -> Path | None:
@@ -109,17 +160,7 @@ def resolve_report_package(run_dir: Path) -> Path | None:
         if not alt.is_file():
             return None
         md_path = alt
-    try:
-        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            zf.write(md_path, arcname="penetration_test_report.md")
-            images_dir = run_dir / "images"
-            if images_dir.is_dir():
-                for image in sorted(images_dir.iterdir()):
-                    if image.is_file():
-                        zf.write(image, arcname=f"images/{image.name}")
-    except OSError:
-        return None
-    return zip_path if zip_path.is_file() else None
+    return _build_report_zip(run_dir, md_path)
 
 
 def summarize_llm_usage(raw: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -269,12 +310,14 @@ def build_task_logs_zip(workspace: Path) -> Path | None:
         return None
     root = Path(workspace)
     zip_path = root / "task_logs.zip"
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+
+    def _write(zf: zipfile.ZipFile) -> None:
         for item in files:
             path = root / item["path"]
             if path.is_file():
                 zf.write(path, arcname=item["path"])
-    return zip_path
+
+    return _atomic_zip_write(zip_path, _write)
 
 
 def resolve_artifact(run_dir: Path, name: str) -> Path | None:

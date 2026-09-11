@@ -1027,12 +1027,15 @@ class TaskManager:
 
     def get_report_package(self, task_id: str) -> Path:
         """Path to penetration_test_report.zip (markdown + images)."""
-        from app.services.results import resolve_report_package
+        from app.services.results import rebuild_delivery_report, resolve_report_package
 
         task = self.get_task(task_id)
         run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
         if not run_dir:
             raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
+        # Match the on-screen report (invalid findings filtered) before packaging.
+        exclude = invalid_finding_ids(self.db.list_finding_flags(task_id))
+        rebuild_delivery_report(run_dir, exclude_ids=exclude)
         package = resolve_report_package(run_dir)
         if package is None:
             if task["status"] in ACTIVE:

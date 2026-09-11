@@ -596,7 +596,8 @@
     renderOverview();
     await loadFindings();
     if (activeTab === "viewer") await loadViewer();
-    if (activeTab === "report") await loadReport();
+    // Do not reload the report on the 8s poll — rebuild races with zip download
+    // ("Failed to fetch"). Report loads on tab switch / explicit refresh.
     if (activeTab === "artifacts") await loadArtifacts();
   }
 
@@ -776,6 +777,7 @@
     const idx = findingsCache.findIndex((f) => f.id === selectedFindingId);
     if (idx >= 0) findingsCache[idx] = { ...findingsCache[idx], ...updated };
     showFindingDetail(selectedFindingId);
+    if (activeTab === "report") await loadReport();
   }
 
   $("findingInvalidateBtn").onclick = async () => {
@@ -1108,34 +1110,62 @@
     }
   };
 
+  async function downloadBlob(url, filename) {
+    await api.ensureSession();
+    const key = api.getKey();
+    const res = await fetch(url, {
+      credentials: "include",
+      headers: key ? { Authorization: `Bearer ${key}` } : {},
+    });
+    if (!res.ok) {
+      let msg = res.statusText;
+      try {
+        const data = await res.json();
+        msg = (data && data.error && data.error.message) || msg;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(msg || `下载失败 (${res.status})`);
+    }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  async function downloadWithRetry(url, filename) {
+    try {
+      await downloadBlob(url, filename);
+    } catch (first) {
+      // Transient races (report rebuild vs zip download) used to surface as the
+      // opaque browser TypeError "Failed to fetch". Retry once, then explain.
+      const transient =
+        first instanceof TypeError ||
+        /failed to fetch|networkerror|load failed/i.test(String(first && first.message));
+      if (!transient) throw first;
+      await new Promise((r) => setTimeout(r, 400));
+      try {
+        await downloadBlob(url, filename);
+      } catch (second) {
+        const detail = (second && second.message) || (first && first.message) || "未知错误";
+        throw new Error(
+          /failed to fetch|networkerror|load failed/i.test(detail)
+            ? "下载中断（报告可能正在刷新），请稍后再试"
+            : detail
+        );
+      }
+    }
+  }
+
   $("downloadReport").onclick = async () => {
     if (!selected) return;
     try {
-      await api.ensureSession();
-      const key = api.getKey();
-      const res = await fetch(
+      await downloadWithRetry(
         `/api/v1/tasks/${encodeURIComponent(selected)}/report?download=1`,
-        {
-          credentials: "include",
-          headers: key ? { Authorization: `Bearer ${key}` } : {},
-        }
+        `${selected}-report.zip`
       );
-      if (!res.ok) {
-        let msg = res.statusText;
-        try {
-          const data = await res.json();
-          msg = (data && data.error && data.error.message) || msg;
-        } catch {
-          /* ignore */
-        }
-        throw new Error(msg);
-      }
-      const blob = await res.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `${selected}-report.zip`;
-      a.click();
-      URL.revokeObjectURL(a.href);
     } catch (e) {
       alert(e.message);
     }
@@ -1144,31 +1174,10 @@
   $("downloadLogsBtn").onclick = async () => {
     if (!selected) return;
     try {
-      await api.ensureSession();
-      const key = api.getKey();
-      const res = await fetch(
+      await downloadWithRetry(
         `/api/v1/tasks/${encodeURIComponent(selected)}/logs?download=1`,
-        {
-          credentials: "include",
-          headers: key ? { Authorization: `Bearer ${key}` } : {},
-        }
+        `${selected}-logs.zip`
       );
-      if (!res.ok) {
-        let msg = res.statusText;
-        try {
-          const data = await res.json();
-          msg = (data && data.error && data.error.message) || msg;
-        } catch {
-          /* ignore */
-        }
-        throw new Error(msg);
-      }
-      const blob = await res.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `${selected}-logs.zip`;
-      a.click();
-      URL.revokeObjectURL(a.href);
     } catch (e) {
       alert(e.message);
     }

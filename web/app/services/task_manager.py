@@ -760,6 +760,7 @@ class TaskManager:
                 source_dir,
                 branch=task.get("source_branch"),
                 commit=task.get("source_commit"),
+                settings=self.settings,
             )
         except GitError as exc:
             raise TaskError("STRIX_START_FAILED", str(exc)) from exc

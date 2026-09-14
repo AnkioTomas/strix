@@ -101,7 +101,8 @@
           </label>
           <div id="auditFields" class="span-2 hidden">
             <label>Git HTTPS URL
-              <input id="gitUrl" placeholder="https://github.com/org/repo.git" />
+              <input id="gitUrl" placeholder="https://gitea.example.com/org/repo.git" />
+              <span class="field-hint">私有仓凭证走环境变量 STRIX_GIT_HOSTS / USERNAME / TOKEN，不要写进 URL。</span>
             </label>
             <label>Branch
               <input id="gitBranch" placeholder="main" />

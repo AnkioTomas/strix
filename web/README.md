@@ -78,6 +78,8 @@ PYTHONPATH=. python -m app
 | `STRIX_TASK_CPU_PERCENT` | 30 | 单任务 CPU 估算（top 风格：100%=1 核） |
 | `STRIX_TASK_MEMORY_GB` | 2 | 单任务内存估算（GiB）；用可用内存装箱 |
 | `STRIX_ALLOW_PRIVATE_TARGETS` | 1 | 是否允许扫私网/localhost |
+| `STRIX_GIT_HOSTS` | （空） | Gitea 主机白名单（逗号分隔）。非空时 audit 只接受这些 host |
+| `STRIX_GIT_USERNAME` / `STRIX_GIT_TOKEN` | （空） | Gitea HTTPS 机器人账号；必须成对出现，且要求 `STRIX_GIT_HOSTS`。不入库、不进 URL |
 
 浏览器根路径是控制台（`web/static/`：`index.html` + `css/` + `js/`）；静态资源在 `/static/*`。漏洞与报告页用 [Penna Markdown](https://penna.ankio.net/guide/getting-started) 只读渲染器（CDN `penna-markdown@0.2.5`）。OpenAPI 在 `/docs`。`GET /health` 返回 `admission`（当前是否放行、load/内存快照）。
 
@@ -131,6 +133,12 @@ curl -sS -X POST http://127.0.0.1:8787/api/v1/tasks \
   -H "Authorization: Bearer $STRIX_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"type":"audit","source":{"type":"local","path":"/path/to/app"},"scan_mode":"quick"}'
+
+# White-box audit（Gitea HTTPS；私有仓用 STRIX_GIT_*，URL 不要带 token）
+curl -sS -X POST http://127.0.0.1:8787/api/v1/tasks \
+  -H "Authorization: Bearer $STRIX_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"audit","source":{"type":"git","url":"https://gitea.example.com/org/repo.git"},"scan_mode":"quick"}'
 ```
 
 ## Viewer 代理
@@ -179,6 +187,7 @@ Worker 每秒估算可跑槽位：
 - 漏洞只按 `task_id` 暴露，不做全局汇聚
 - 固定 Bearer Token，不做账号体系
 - 不把 `viewer_token` 下发给浏览器
+- Gitea 私有仓凭证只走 `STRIX_GIT_*` 环境变量，不进 `source_url` / 数据库 / `git clone` 命令行
 
 ## 交互（实话）
 

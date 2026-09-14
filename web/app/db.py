@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS finding_flags (
     finding_id TEXT NOT NULL,
     review_status TEXT NOT NULL DEFAULT 'active',
     request_test INTEGER NOT NULL DEFAULT 0,
+    issue_number INTEGER,
+    issue_url TEXT,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (task_id, finding_id),
     FOREIGN KEY(task_id) REFERENCES tasks(id)
@@ -92,6 +94,16 @@ CREATE TABLE IF NOT EXISTS finding_flags (
 
 def utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _flag_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    item = dict(row)
+    item["request_test"] = bool(item.get("request_test"))
+    number = item.get("issue_number")
+    item["issue_number"] = int(number) if number is not None else None
+    url = item.get("issue_url")
+    item["issue_url"] = str(url) if url else None
+    return item
 
 
 class Database:
@@ -114,6 +126,11 @@ class Database:
             conn.execute("ALTER TABLE tasks ADD COLUMN name TEXT")
         if "notes" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN notes TEXT")
+        flag_cols = {row[1] for row in conn.execute("PRAGMA table_info(finding_flags)").fetchall()}
+        if "issue_number" not in flag_cols:
+            conn.execute("ALTER TABLE finding_flags ADD COLUMN issue_number INTEGER")
+        if "issue_url" not in flag_cols:
+            conn.execute("ALTER TABLE finding_flags ADD COLUMN issue_url TEXT")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -379,9 +396,37 @@ class Database:
                 "SELECT * FROM finding_flags WHERE task_id = ? AND finding_id = ?",
                 (task_id, finding_id),
             ).fetchone()
-        item = dict(out)
-        item["request_test"] = bool(item.get("request_test"))
-        return item
+        return _flag_row(out)
+
+    def set_finding_issue(
+        self,
+        task_id: str,
+        finding_id: str,
+        *,
+        issue_number: int,
+        issue_url: str,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO finding_flags (
+                    task_id, finding_id, review_status, request_test,
+                    issue_number, issue_url, updated_at
+                )
+                VALUES (?, ?, 'active', 0, ?, ?, ?)
+                ON CONFLICT(task_id, finding_id) DO UPDATE SET
+                    issue_number = excluded.issue_number,
+                    issue_url = excluded.issue_url,
+                    updated_at = excluded.updated_at
+                """,
+                (task_id, finding_id, issue_number, issue_url, now),
+            )
+            out = conn.execute(
+                "SELECT * FROM finding_flags WHERE task_id = ? AND finding_id = ?",
+                (task_id, finding_id),
+            ).fetchone()
+        return _flag_row(out)
 
     def list_finding_flags(self, task_id: str) -> dict[str, dict[str, Any]]:
         with self.connect() as conn:
@@ -389,12 +434,7 @@ class Database:
                 "SELECT * FROM finding_flags WHERE task_id = ?",
                 (task_id,),
             ).fetchall()
-        out: dict[str, dict[str, Any]] = {}
-        for row in rows:
-            item = dict(row)
-            item["request_test"] = bool(item.get("request_test"))
-            out[str(item["finding_id"])] = item
-        return out
+        return {str(item["finding_id"]): item for item in (_flag_row(row) for row in rows)}
 
     def clear_finding_request_test(self, task_id: str, finding_ids: list[str]) -> None:
         if not finding_ids:

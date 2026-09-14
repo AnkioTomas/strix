@@ -25,6 +25,7 @@ from app.services.agent_prompts import (
     focused_retest_instruction,
 )
 from app.services.findings import apply_finding_flags, invalid_finding_ids
+from app.services.gitea_issues import close_invalid_issue, sync_open_issues
 from app.services.git_clone import GitError, clone_repository
 from app.services.results import (
     load_normalized_findings,
@@ -572,8 +573,12 @@ class TaskManager:
                 task_id, finding_id, review_status="invalid", request_test=False
             )
         self._rebuild_report_for_task(task_id)
+        if flag["review_status"] == "invalid":
+            close_invalid_issue(self.db, self.settings, self.get_task(task_id), finding_id)
         match["review_status"] = flag["review_status"]
         match["request_test"] = flag["request_test"]
+        match["issue_number"] = flag.get("issue_number")
+        match["issue_url"] = flag.get("issue_url")
         return match
 
     def request_finding_test(self, task_id: str, finding_id: str) -> dict[str, Any]:
@@ -988,6 +993,7 @@ class TaskManager:
 
         findings = load_normalized_findings(run_dir, task_id=task["id"])
         self.db.replace_findings(task["id"], findings)
+        sync_open_issues(self.db, self.settings, task, findings)
 
     def get_results(self, task_id: str) -> list[dict[str, Any]]:
         task = self.get_task(task_id)

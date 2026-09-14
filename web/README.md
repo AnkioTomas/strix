@@ -79,7 +79,7 @@ PYTHONPATH=. python -m app
 | `STRIX_TASK_MEMORY_GB` | 2 | 单任务内存估算（GiB）；用可用内存装箱 |
 | `STRIX_ALLOW_PRIVATE_TARGETS` | 1 | 是否允许扫私网/localhost |
 | `STRIX_GIT_HOSTS` | （空） | Gitea 主机白名单（逗号分隔）。非空时 audit 只接受这些 host |
-| `STRIX_GIT_USERNAME` / `STRIX_GIT_TOKEN` | （空） | Gitea HTTPS 机器人账号；必须成对出现，且要求 `STRIX_GIT_HOSTS`。不入库、不进 URL |
+| `STRIX_GIT_USERNAME` / `STRIX_GIT_TOKEN` | （空） | Gitea HTTPS 机器人账号；必须成对出现，且要求 `STRIX_GIT_HOSTS`。不入库、不进 URL。审计完成后按漏洞开 issue；控制台标无效则评论并关 issue |
 
 浏览器根路径是控制台（`web/static/`：`index.html` + `css/` + `js/`）；静态资源在 `/static/*`。漏洞与报告页用 [Penna Markdown](https://penna.ankio.net/guide/getting-started) 只读渲染器（CDN `penna-markdown@0.2.5`）。OpenAPI 在 `/docs`。`GET /health` 返回 `admission`（当前是否放行、load/内存快照）。
 
@@ -188,6 +188,7 @@ Worker 每秒估算可跑槽位：
 - 固定 Bearer Token，不做账号体系
 - 不把 `viewer_token` 下发给浏览器
 - Gitea 私有仓凭证只走 `STRIX_GIT_*` 环境变量，不进 `source_url` / 数据库 / `git clone` 命令行
+- 审计 Git 源在 ingest 后按漏洞开 Gitea issue（已有 `issue_number` 不重复开；标无效则评论并关闭）。Gitea 失败不阻断本地审核
 
 ## 交互（实话）
 

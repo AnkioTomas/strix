@@ -176,6 +176,8 @@ class Finding(BaseModel):
     created_at: str | None = None
     review_status: Literal["active", "invalid"] = "active"
     request_test: bool = False
+    issue_number: int | None = None
+    issue_url: str | None = None
 
 
 class FindingsResponse(BaseModel):

@@ -1,6 +1,12 @@
+<p align="center">
+  <img src="static/android-chrome-192x192.png" alt="Strix" width="96" height="96">
+</p>
+
 # Local Strix Security API
 
 编排层，不是第二个 Agent。HTTP 管任务；**独立扫描子进程**跑 `run_strix_scan(interactive=True)` + viewer（API 重启不杀扫描）。
+
+品牌图标在 [`webapp/`](../webapp/)（源）与 [`static/`](static/)（控制台实际托管）：favicon、apple-touch、android-chrome、`site.webmanifest`。
 
 ## 能力
 

@@ -76,6 +76,11 @@ async def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> FileResponse:
+    return FileResponse(STATIC_DIR / "favicon.ico")
+
+
 @app.exception_handler(ValidationError)
 async def validation_error_handler(_request: Request, exc: ValidationError):
     return JSONResponse(

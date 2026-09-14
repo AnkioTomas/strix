@@ -32,12 +32,10 @@ class GiteaRepo:
 
 
 def repo_from_source_url(url: str, settings: Settings) -> GiteaRepo | None:
+    if settings.git_auth() is None:
+        return None
     parsed = urlparse((url or "").strip())
     if parsed.scheme != "https" or not parsed.hostname:
-        return None
-    host = parsed.hostname.lower()
-    allowed = settings.git_host_allowlist()
-    if not allowed or host not in allowed:
         return None
     parts = [part for part in parsed.path.split("/") if part]
     if len(parts) < 2:

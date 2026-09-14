@@ -41,11 +41,10 @@ class _Resp:
 def _settings(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    hosts: str = "gitea.example.com",
     username: str = "bot",
     token: str = "s3cret",  # noqa: S107
 ) -> Settings:
-    monkeypatch.setenv("STRIX_GIT_HOSTS", hosts)
+    monkeypatch.delenv("STRIX_GIT_HOSTS", raising=False)
     monkeypatch.setenv("STRIX_GIT_USERNAME", username)
     monkeypatch.setenv("STRIX_GIT_TOKEN", token)
     return Settings()
@@ -90,9 +89,16 @@ def test_parse_repo_from_https_url(monkeypatch: pytest.MonkeyPatch) -> None:
     assert repo.repo == "repo"
 
 
-def test_parse_repo_rejects_host_outside_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_parse_repo_requires_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _settings(monkeypatch, username="", token="")
+    assert repo_from_source_url("https://gitea.example.com/org/repo.git", settings) is None
+
+
+def test_parse_repo_accepts_any_https_host(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = _settings(monkeypatch)
-    assert repo_from_source_url("https://github.com/org/repo.git", settings) is None
+    repo = repo_from_source_url("https://git.internal/org/repo.git", settings)
+    assert repo is not None
+    assert repo.api_base == "https://git.internal/api/v1"
 
 
 def test_create_issue_posts_title_and_returns_number(

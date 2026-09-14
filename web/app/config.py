@@ -65,22 +65,17 @@ class Settings(BaseSettings):
     allow_private_targets: bool = Field(default=True, alias="STRIX_ALLOW_PRIVATE_TARGETS")
 
     allowed_source_root: Path | None = Field(default=None, alias="ALLOWED_SOURCE_ROOT")
-    # Gitea HTTPS clone. Token/username require a non-empty host allowlist.
-    git_hosts: str = Field(default="", alias="STRIX_GIT_HOSTS")
+    # Gitea HTTPS clone + issues. Username and token must be set together.
     git_username: str = Field(default="", alias="STRIX_GIT_USERNAME")
     git_token: str = Field(default="", alias="STRIX_GIT_TOKEN")
     host: str = Field(default="127.0.0.1", alias="STRIX_API_HOST")
     port: int = Field(default=8787, alias="STRIX_API_PORT")
 
     @model_validator(mode="after")
-    def git_auth_requires_hosts(self) -> Self:
+    def git_auth_pair(self) -> Self:
         user = self.git_username.strip()
         token = self.git_token.strip()
-        if not user and not token:
-            return self
-        if not self.git_host_allowlist():
-            raise ValueError("STRIX_GIT_USERNAME/STRIX_GIT_TOKEN require STRIX_GIT_HOSTS")
-        if not (user and token):
+        if bool(user) ^ bool(token):
             raise ValueError("STRIX_GIT_USERNAME and STRIX_GIT_TOKEN must be set together")
         return self
 
@@ -91,9 +86,6 @@ class Settings(BaseSettings):
     @property
     def tasks_dir(self) -> Path:
         return self.data_dir / "tasks"
-
-    def git_host_allowlist(self) -> list[str]:
-        return [part.strip().lower() for part in self.git_hosts.split(",") if part.strip()]
 
     def git_auth(self) -> tuple[str, str] | None:
         """``(username, token)`` when both are set, else ``None``."""

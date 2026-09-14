@@ -35,12 +35,6 @@ def _validate_git(source: GitSource, settings: Settings) -> GitSource:
             "Git URL must not contain credentials; use STRIX_GIT_USERNAME/STRIX_GIT_TOKEN",
         )
     host = parsed.hostname.lower()
-    allowed = settings.git_host_allowlist()
-    if allowed and host not in allowed:
-        raise SourceValidationError(
-            "INVALID_SOURCE",
-            f"Git host {host} is not in STRIX_GIT_HOSTS",
-        )
     if host in {"localhost", "127.0.0.1", "::1"} and not settings.allow_private_targets:
         raise SourceValidationError("INVALID_SOURCE", "localhost Git hosts blocked")
     try:

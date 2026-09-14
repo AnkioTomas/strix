@@ -7,7 +7,6 @@ import stat
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
 
 from app.services.git_askpass import PASSWORD_ENV, USERNAME_ENV
 
@@ -32,17 +31,12 @@ def clone_repository(
     if dest.exists():
         raise GitError(f"clone destination already exists: {dest}")
 
-    host = (urlparse(url).hostname or "").lower()
-    allowlist = settings.git_host_allowlist() if settings is not None else []
-    if allowlist and host not in allowlist:
-        raise GitError(f"Git host {host} is not in STRIX_GIT_HOSTS")
-
     cmd = ["git", "clone", "--depth", "1"]
     if branch:
         cmd.extend(["--branch", branch])
     cmd.extend([url, str(dest)])
 
-    env = _clone_env(host, settings)
+    env = _clone_env(settings)
     try:
         result = subprocess.run(  # noqa: S603
             cmd, capture_output=True, text=True, check=False, timeout=300, env=env
@@ -78,15 +72,14 @@ def clone_repository(
     return dest
 
 
-def _clone_env(host: str, settings: Settings | None) -> dict[str, str]:
+def _clone_env(settings: Settings | None) -> dict[str, str]:
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env.pop(USERNAME_ENV, None)
     env.pop(PASSWORD_ENV, None)
 
     auth = settings.git_auth() if settings is not None else None
-    allowlist = settings.git_host_allowlist() if settings is not None else []
-    if not (auth and host in allowlist):
+    if not auth:
         return env
 
     env["GIT_ASKPASS"] = _askpass_program()

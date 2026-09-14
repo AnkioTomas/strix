@@ -60,6 +60,7 @@ def create_issue(
         headers=_headers(token),
         json={"title": title, "body": body},
         timeout=_TIMEOUT,
+        verify=False,
     )
     if payload.status_code >= 400:
         raise GiteaError(_http_error("create issue", payload))
@@ -77,6 +78,7 @@ def close_issue_as_invalid(repo: GiteaRepo, token: str, number: int) -> None:
         headers=_headers(token),
         json={"body": _CLOSE_COMMENT},
         timeout=_TIMEOUT,
+        verify=False,
     )
     if comment.status_code >= 400:
         raise GiteaError(_http_error("comment issue", comment))
@@ -85,6 +87,7 @@ def close_issue_as_invalid(repo: GiteaRepo, token: str, number: int) -> None:
         headers=_headers(token),
         json={"state": "closed"},
         timeout=_TIMEOUT,
+        verify=False,
     )
     if closed.status_code >= 400:
         raise GiteaError(_http_error("close issue", closed))

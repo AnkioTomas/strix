@@ -96,6 +96,9 @@ def test_clone_injects_askpass_when_auth_set(
     assert env[USERNAME_ENV] == "bot"
     assert env[PASSWORD_ENV] == "s3cret"
     assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["GIT_SSL_NO_VERIFY"] == "1"
+    assert env["GIT_CONFIG_KEY_1"] == "http.sslVerify"
+    assert env["GIT_CONFIG_VALUE_1"] == "false"
 
 
 def test_clone_no_inject_without_auth(
@@ -118,6 +121,9 @@ def test_clone_no_inject_without_auth(
     assert "GIT_ASKPASS" not in env
     assert USERNAME_ENV not in env
     assert PASSWORD_ENV not in env
+    assert env["GIT_SSL_NO_VERIFY"] == "1"
+    assert env["GIT_CONFIG_KEY_0"] == "http.sslVerify"
+    assert env["GIT_CONFIG_VALUE_0"] == "false"
 
 
 def test_clone_redacts_token_from_stderr(

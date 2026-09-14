@@ -75,20 +75,28 @@ def clone_repository(
 def _clone_env(settings: Settings | None) -> dict[str, str]:
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
+    # Internal Gitea often uses a private CA / self-signed cert.
+    env["GIT_SSL_NO_VERIFY"] = "1"
     env.pop(USERNAME_ENV, None)
     env.pop(PASSWORD_ENV, None)
 
     auth = settings.git_auth() if settings is not None else None
     if not auth:
+        # Still force sslVerify off even without credentials.
+        env["GIT_CONFIG_COUNT"] = "1"
+        env["GIT_CONFIG_KEY_0"] = "http.sslVerify"
+        env["GIT_CONFIG_VALUE_0"] = "false"
         return env
 
     env["GIT_ASKPASS"] = _askpass_program()
     env[USERNAME_ENV] = auth[0]
     env[PASSWORD_ENV] = auth[1]
-    # Disable other helpers so they cannot prompt or persist the token.
-    env["GIT_CONFIG_COUNT"] = "1"
+    # Disable credential helpers so they cannot prompt or persist the token.
+    env["GIT_CONFIG_COUNT"] = "2"
     env["GIT_CONFIG_KEY_0"] = "credential.helper"
     env["GIT_CONFIG_VALUE_0"] = ""
+    env["GIT_CONFIG_KEY_1"] = "http.sslVerify"
+    env["GIT_CONFIG_VALUE_1"] = "false"
     return env
 
 

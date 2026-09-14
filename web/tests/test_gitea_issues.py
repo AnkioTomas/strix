@@ -113,6 +113,7 @@ def test_create_issue_posts_title_and_returns_number(
         seen["url"] = url
         seen["json"] = kwargs.get("json")
         seen["headers"] = kwargs.get("headers")
+        seen["verify"] = kwargs.get("verify")
         return _Resp(201, {"number": 12, "html_url": "https://gitea.example.com/org/repo/issues/12"})
 
     monkeypatch.setattr(httpx, "post", fake_post)
@@ -122,6 +123,7 @@ def test_create_issue_posts_title_and_returns_number(
     assert seen["url"].endswith("/repos/org/repo/issues")
     assert seen["json"] == {"title": "[HIGH] XSS", "body": "body"}
     assert seen["headers"]["Authorization"] == "token s3cret"
+    assert seen["verify"] is False
 
 
 def test_close_issue_comments_then_closes(monkeypatch: pytest.MonkeyPatch) -> None:

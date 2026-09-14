@@ -192,7 +192,7 @@ Worker 每秒估算可跑槽位：
 - 漏洞只按 `task_id` 暴露，不做全局汇聚
 - 固定 Bearer Token，不做账号体系
 - 不把 `viewer_token` 下发给浏览器
-- Gitea 私有仓凭证只走 `STRIX_GIT_USERNAME` / `STRIX_GIT_TOKEN`，任务填完整 HTTPS 仓库地址；凭证不进 `source_url` / 数据库 / `git clone` 命令行
+- Gitea 私有仓凭证只走 `STRIX_GIT_USERNAME` / `STRIX_GIT_TOKEN`，任务填完整 HTTPS 仓库地址；凭证不进 `source_url` / 数据库 / `git clone` 命令行。clone / checkout / Gitea API **固定忽略 SSL 校验**（内网自签）
 - 审计 Git 源在 ingest 后按漏洞开 Gitea issue（已有 `issue_number` 不重复开；标无效则评论并关闭）。Gitea 失败不阻断本地审核
 
 ## 交互（实话）

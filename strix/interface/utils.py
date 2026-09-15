@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-import requests
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -1120,17 +1119,6 @@ def resolve_diff_scope_context(
     )
 
 
-def _is_http_git_repo(url: str) -> bool:
-    check_url = f"{url.rstrip('/')}/info/refs?service=git-upload-pack"
-    try:
-        with requests.get(check_url, headers={"User-Agent": "git/2.43.0"}, timeout=10) as resp:
-            if resp.status_code >= 400:
-                return resp.status_code == 401
-            return "x-git-upload-pack-advertisement" in resp.headers.get("Content-Type", "")
-    except (requests.RequestException, ValueError):
-        return False
-
-
 def infer_target_type(target: str) -> tuple[str, dict[str, str]]:  # noqa: PLR0911
     if not target or not isinstance(target, str):
         raise ValueError("Target must be a non-empty string")
@@ -1167,11 +1155,6 @@ def infer_target_type(target: str) -> tuple[str, dict[str, str]]:  # noqa: PLR09
             return "repository", {"target_repo": target}
         if parsed.path.rstrip("/").endswith(".git"):
             return "repository", {"target_repo": target}
-        if parsed.query or parsed.fragment:
-            return "web_application", {"target_url": target}
-        path_segments = [s for s in parsed.path.split("/") if s]
-        if len(path_segments) >= 2 and _is_http_git_repo(target):
-            return "repository", {"target_repo": target}
         return "web_application", {"target_url": target}
 
     try:
@@ -1203,10 +1186,7 @@ def infer_target_type(target: str) -> tuple[str, dict[str, str]]:  # noqa: PLR09
     if "/" in target:
         host_part, _, path_part = target.partition("/")
         if "." in host_part and not host_part.startswith(".") and path_part:
-            full_url = f"https://{target}"
-            if _is_http_git_repo(full_url):
-                return "repository", {"target_repo": full_url}
-            return "web_application", {"target_url": full_url}
+            return "web_application", {"target_url": f"https://{target}"}
 
     if "." in target and "/" not in target and not target.startswith("."):
         parts = target.split(".")
@@ -1217,7 +1197,7 @@ def infer_target_type(target: str) -> tuple[str, dict[str, str]]:  # noqa: PLR09
         f"Invalid target: {target}\n"
         "Target must be one of:\n"
         "- A valid URL (http:// or https://)\n"
-        "- A Git repository URL (https://host/org/repo or git@host:org/repo.git)\n"
+        "- A Git repository URL (https://host/org/repo.git or git@host:org/repo.git)\n"
         "- A local directory path\n"
         "- An API spec file (OpenAPI/Swagger .json/.yaml or a Postman collection)\n"
         "- A Postman collection by id (postman://<collection-uid>[?env=<environment-uid>], "

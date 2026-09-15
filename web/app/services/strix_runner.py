@@ -184,7 +184,21 @@ class LiveStrixSession:
         else:
             if task.get("action") == "resume" and not task.get("run_name"):
                 raise RuntimeError("resume requested but task has no run_name")
-            build_targets_info(args)
+            if task.get("type") == "pentest":
+                from strix.interface.scan_setup import HOST_GATEWAY_HOSTNAME
+                from strix.interface.utils import rewrite_localhost_targets
+
+                url = target.strip()
+                args.targets_info = [
+                    {
+                        "type": "web_application",
+                        "details": {"target_url": url},
+                        "original": url,
+                    }
+                ]
+                rewrite_localhost_targets(args.targets_info, HOST_GATEWAY_HOSTNAME)
+            else:
+                build_targets_info(args)
             prepare_run(args)
         # Attachments under task workspace/attachments/ are authoritative for web tasks.
         attached = resolve_task_workspace_files(Path(task["workspace"]))

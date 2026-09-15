@@ -82,8 +82,6 @@ def apply_finding_flags(
         flag = flags.get(str(item.get("id") or ""), {})
         item["review_status"] = str(flag.get("review_status") or "active")
         item["request_test"] = bool(flag.get("request_test"))
-        item["issue_number"] = flag.get("issue_number")
-        item["issue_url"] = flag.get("issue_url")
     return findings
 
 

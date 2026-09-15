@@ -497,13 +497,6 @@
     if (f.request_test) {
       bits.push('<span class="finding-badge request-test">待测</span>');
     }
-    if (f.issue_url) {
-      bits.push(
-        `<a class="finding-badge" href="${esc(f.issue_url)}" target="_blank" rel="noreferrer">#${esc(
-          f.issue_number || "issue"
-        )}</a>`
-      );
-    }
     if (!bits.length) {
       bits.push('<span class="muted">有效</span>');
     }

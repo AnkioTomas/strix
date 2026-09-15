@@ -78,9 +78,6 @@
         f.request_test ? " · 已要求测试" : ""
       } |`
     );
-    if (f.issue_url) {
-      parts.push(`| Gitea | [#${f.issue_number || ""}](${f.issue_url}) |`);
-    }
     if (f.cwe) parts.push(`| CWE | ${f.cwe} |`);
     if (f.cvss != null) parts.push(`| CVSS | ${f.cvss} |`);
     parts.push("");

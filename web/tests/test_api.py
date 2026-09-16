@@ -725,8 +725,20 @@ def test_mark_finding_invalid_hides_from_report_and_retest(client: TestClient):
     )
     assert {item["id"] for item in prior} == {"v-keep"}
     assert "retest_status" not in prior[0]
+    assert prior[0].get("timestamp"), "seeded reports need timestamp for write_vulnerabilities"
     assert (Path(child["workspace"]) / "prior_findings" / "vulnerabilities" / "v-keep.md").is_file()
     assert not (Path(child["workspace"]) / "prior_findings" / "vulnerabilities" / "v-drop.md").is_file()
+
+    # Simulate retest startup: DB-cached findings have no ``raw``, then save_run_data
+    # must still be able to write the seeded vulnerabilities.json.
+    from strix.report.writer import write_vulnerabilities
+
+    run_dir = Path(child["workspace"]) / "strix_runs" / "retest_sim"
+    from app.services.results import apply_prior_findings
+
+    assert apply_prior_findings(Path(child["workspace"]), run_dir) is True
+    seeded = json.loads((run_dir / "vulnerabilities.json").read_text(encoding="utf-8"))
+    write_vulnerabilities(run_dir, seeded, set())  # must not KeyError on timestamp
 
 
 def test_request_finding_test_creates_focused_retest(client: TestClient):
@@ -788,6 +800,7 @@ def test_apply_prior_findings_seeds_run_dir(tmp_path: Path):
             "title": "XSS",
             "severity": "high",
             "description": "reflected",
+            "created_at": "2026-01-01T00:00:00Z",
             "raw": {
                 "id": "v1",
                 "title": "XSS",
@@ -805,10 +818,28 @@ def test_apply_prior_findings_seeds_run_dir(tmp_path: Path):
     assert apply_prior_findings(workspace, run_dir) is True
     seeded = json.loads((run_dir / "vulnerabilities.json").read_text(encoding="utf-8"))
     assert seeded[0]["id"] == "v1"
+    assert seeded[0]["timestamp"] == "2026-01-01T00:00:00Z"
     assert "retest_status" not in seeded[0]
     assert "fix_verification" not in seeded[0]
     assert (run_dir / "vulnerabilities" / "v1.md").is_file()
     assert (run_dir / "images" / "shot.png").is_file()
+
+    # DB-shaped finding (no raw) must still produce a writable report.
+    from app.services.results import _raw_retest_report
+
+    db_shaped = _raw_retest_report(
+        {
+            "id": "v2",
+            "title": "CSRF",
+            "severity": "medium",
+            "description": "no token",
+            "created_at": "2026-02-01T00:00:00Z",
+        }
+    )
+    assert db_shaped["timestamp"] == "2026-02-01T00:00:00Z"
+    from strix.report.writer import write_vulnerabilities
+
+    write_vulnerabilities(run_dir, [db_shaped], set())
 
 
 def test_reap_skips_until_worker_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

@@ -219,6 +219,23 @@ def test_atomic_write_text_keeps_payload_byte_for_byte(tmp_path: Path) -> None:
     assert path.read_bytes() == payload.encode("utf-8")
 
 
+def test_write_vulnerabilities_tolerates_missing_timestamp(tmp_path: Path) -> None:
+    reports = [
+        {
+            "id": "vuln-0001",
+            "title": "No stamp",
+            "severity": "low",
+            # timestamp intentionally absent — retest seeds from DB cache hit this.
+        }
+    ]
+    write_vulnerabilities(tmp_path, reports, set())
+    csv_rows = list(
+        csv.DictReader((tmp_path / "vulnerabilities.csv").read_text(encoding="utf-8").splitlines()),
+    )
+    assert csv_rows[0]["id"] == "vuln-0001"
+    assert csv_rows[0]["timestamp"] == ""
+
+
 def test_write_vulnerabilities_skips_already_saved_ids(tmp_path: Path) -> None:
     reports = [_sample_report(id="vuln-0001")]
     saved: set[str] = {"vuln-0001"}

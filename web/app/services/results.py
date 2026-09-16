@@ -89,6 +89,28 @@ def prior_findings_dir(workspace: Path) -> Path:
     return Path(workspace) / PRIOR_FINDINGS_DIRNAME
 
 
+def _ensure_seed_fields(report: dict[str, Any], *, fallback: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Fill identity fields write_vulnerabilities expects; strip prior retest state."""
+    out = dict(report)
+    for key in _RETEST_STRIP_KEYS:
+        out.pop(key, None)
+    fb = fallback or {}
+    if not out.get("id"):
+        out["id"] = fb.get("id") or "unknown"
+    if not out.get("title"):
+        out["title"] = fb.get("title") or out["id"]
+    if not out.get("severity"):
+        out["severity"] = fb.get("severity") or "info"
+    if not out.get("timestamp"):
+        out["timestamp"] = (
+            fb.get("created_at")
+            or fb.get("timestamp")
+            or out.get("created_at")
+            or "1970-01-01 00:00:00 UTC"
+        )
+    return out
+
+
 def _raw_retest_report(item: dict[str, Any]) -> dict[str, Any]:
     raw = item.get("raw")
     if isinstance(raw, dict):
@@ -106,9 +128,48 @@ def _raw_retest_report(item: dict[str, Any]) -> dict[str, Any]:
             "remediation_steps": item.get("recommendation"),
             "technical_analysis": item.get("technical_analysis"),
         }
-    for key in _RETEST_STRIP_KEYS:
-        report.pop(key, None)
-    return report
+        screenshots = item.get("screenshots")
+        if isinstance(screenshots, list) and screenshots:
+            report["screenshot_rels"] = list(screenshots)
+    return _ensure_seed_fields(report, fallback=item)
+
+
+def resolve_retest_reports(
+    *,
+    parent_run_dir: Path | None,
+    findings: list[dict[str, Any]],
+    include_ids: set[str] | None,
+    skipped_invalid: set[str],
+) -> list[dict[str, Any]]:
+    """Pick reports to retest.
+
+    Prefer on-disk ``vulnerabilities.json`` (imported / pre-findings-DB runs).
+    Fall back to normalized findings when the run dir has no vuln file.
+    """
+    disk = read_vulnerabilities(parent_run_dir) if parent_run_dir is not None else []
+    if disk:
+        reports: list[dict[str, Any]] = []
+        for raw in disk:
+            if not isinstance(raw, dict):
+                continue
+            rid = str(raw.get("id") or raw.get("report_id") or "")
+            if not rid or rid in skipped_invalid:
+                continue
+            if include_ids is not None and rid not in include_ids:
+                continue
+            fb = next((f for f in findings if str(f.get("id")) == rid), None)
+            reports.append(_ensure_seed_fields(dict(raw), fallback=fb))
+        return reports
+
+    reports = []
+    for item in findings:
+        rid = str(item.get("id") or "")
+        if not rid or rid in skipped_invalid:
+            continue
+        if include_ids is not None and rid not in include_ids:
+            continue
+        reports.append(_raw_retest_report(item))
+    return reports
 
 
 def write_prior_findings(
@@ -116,20 +177,23 @@ def write_prior_findings(
     *,
     findings: list[dict[str, Any]],
     parent_run_dir: Path | None,
+    reports: list[dict[str, Any]] | None = None,
 ) -> Path | None:
     """Persist the parent findings a retest child must hydrate from."""
-    if not findings:
+    seeded = list(reports) if reports is not None else [
+        _raw_retest_report(item) for item in findings
+    ]
+    if not seeded:
         return None
     dest = prior_findings_dir(workspace)
     dest.mkdir(parents=True, exist_ok=True)
-    reports = [_raw_retest_report(item) for item in findings]
     (dest / "vulnerabilities.json").write_text(
-        json.dumps(reports, ensure_ascii=False, indent=2, default=str),
+        json.dumps(seeded, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
     if parent_run_dir is None:
         return dest
-    ids = {str(report.get("id")) for report in reports if report.get("id")}
+    ids = {str(report.get("id")) for report in seeded if report.get("id")}
     src_md = parent_run_dir / "vulnerabilities"
     if src_md.is_dir():
         out_md = dest / "vulnerabilities"

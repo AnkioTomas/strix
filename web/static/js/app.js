@@ -268,6 +268,7 @@
             <span class="status-dot ${esc(t.status)}"></span>
             <span>${esc(t.status)}</span>
             <span>${esc(t.type)}</span>
+            ${t.action ? `<span class="task-action">${esc(actionLabel(t.action))}</span>` : ""}
           </div>
         </li>`;
       })
@@ -275,6 +276,14 @@
     list.querySelectorAll("li[data-id]").forEach((li) => {
       li.onclick = () => selectTask(li.dataset.id);
     });
+  }
+
+  function actionLabel(action) {
+    if (action === "retest") return "复测";
+    if (action === "retry") return "重试";
+    if (action === "resume") return "续跑";
+    if (action === "import") return "导入";
+    return action;
   }
 
   function selectTask(id) {

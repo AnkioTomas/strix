@@ -328,6 +328,15 @@ button, input, select, textarea {
   align-items: center;
 }
 
+.task-action {
+  padding: 0 0.35rem;
+  border-radius: 4px;
+  background: #e8eef8;
+  color: #2f6fed;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
 .status-dot {
   width: 0.5rem;
   height: 0.5rem;

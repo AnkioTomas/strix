@@ -316,6 +316,9 @@ class Database:
                 rels = raw.get("screenshot_rels")
                 if isinstance(rels, list) and rels:
                     item["screenshots"] = [str(x) for x in rels if str(x).strip()]
+            # Keep raw for retest seeding; empty object means nothing useful on disk.
+            if raw:
+                item["raw"] = raw
             results.append(item)
         return results
 

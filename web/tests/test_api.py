@@ -608,6 +608,7 @@ def test_retest_embeds_mandatory_instruction(client: TestClient):
     assert "screenshots" in child["instruction"]
     assert RETEST_INSTRUCTION.strip() in child["instruction"]
     assert "原始指令" in child["instruction"]
+    assert str(child.get("name") or "").startswith("复测 · ")
 
     with_creds = client.post(
         f"/api/v1/tasks/{created['id']}/retest",
@@ -756,12 +757,15 @@ def test_request_finding_test_creates_focused_retest(client: TestClient):
     assert "v-keep" in child["instruction"]
     assert "open /vuln" in child["instruction"]
     assert "Drop Me" not in child["instruction"]
+    assert "复测 ·" in str(child.get("name") or "")
+    assert "Keep Me" in str(child.get("name") or "")
     prior = json.loads(
         (
             Path(child["workspace"]) / "prior_findings" / "vulnerabilities.json"
         ).read_text(encoding="utf-8")
     )
     assert {item["id"] for item in prior} == {"v-keep"}
+    assert prior[0].get("timestamp") or prior[0].get("description")
 
 
 def test_retest_respects_request_test_queue(client: TestClient):
@@ -784,6 +788,59 @@ def test_retest_respects_request_test_queue(client: TestClient):
 
     flags = client.app.state.manager.db.list_finding_flags(task_id)
     assert flags["v-keep"]["request_test"] is False
+
+
+def test_resolve_retest_reports_prefers_disk_over_db_shaped_findings(tmp_path: Path):
+    """Imported / pre-DB runs only have vulnerabilities.json — that must win."""
+    from app.services.results import resolve_retest_reports, write_prior_findings
+
+    run_dir = tmp_path / "parent_run"
+    run_dir.mkdir()
+    (run_dir / "vulnerabilities.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "v-disk",
+                    "title": "From Disk",
+                    "severity": "high",
+                    "description": "full body",
+                    "timestamp": "2026-03-01 00:00:00 UTC",
+                    "poc_description": "steps",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    # DB-shaped finding: no raw, thin fields — must not override disk.
+    findings = [
+        {
+            "id": "v-disk",
+            "title": "From Disk",
+            "severity": "high",
+            "description": "thin",
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+    ]
+    reports = resolve_retest_reports(
+        parent_run_dir=run_dir,
+        findings=findings,
+        include_ids=None,
+        skipped_invalid=set(),
+    )
+    assert len(reports) == 1
+    assert reports[0]["description"] == "full body"
+    assert reports[0]["timestamp"] == "2026-03-01 00:00:00 UTC"
+    assert reports[0].get("poc_description") == "steps"
+
+    child = tmp_path / "child"
+    child.mkdir()
+    write_prior_findings(
+        child, findings=findings, parent_run_dir=run_dir, reports=reports
+    )
+    seeded = json.loads(
+        (child / "prior_findings" / "vulnerabilities.json").read_text(encoding="utf-8")
+    )
+    assert seeded[0]["description"] == "full body"
 
 
 def test_apply_prior_findings_seeds_run_dir(tmp_path: Path):

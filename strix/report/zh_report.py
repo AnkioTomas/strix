@@ -545,10 +545,13 @@ def write_zh_delivery_bundle(
     overview: str | None = None,
     scan_results: dict[str, Any] | None = None,
     file_bytes: dict[str, bytes] | None = None,
+    build_zip: bool = True,
 ) -> Path:
-    """Write delivery markdown, materialise images, and zip them.
+    """Write delivery markdown, materialise images, and optionally zip them.
 
-    Returns the path of ``penetration_test_report.zip``.
+    Returns ``penetration_test_report.zip`` when ``build_zip`` is true, else the
+    markdown path. UI readers should pass ``build_zip=False`` — packaging on
+    every report view is pure waste when the zip is only needed for download.
     """
     materialize_screenshots(run_dir, vulnerability_reports, file_bytes=file_bytes)
     md = render_zh_penetration_report(
@@ -559,6 +562,10 @@ def write_zh_delivery_bundle(
     )
     md_path = run_dir / "penetration_test_report.md"
     atomic_write_text(md_path, md)
+
+    if not build_zip:
+        logger.info("Wrote delivery markdown: %s", md_path)
+        return md_path
 
     zip_path = run_dir / "penetration_test_report.zip"
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:

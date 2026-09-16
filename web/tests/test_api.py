@@ -234,6 +234,90 @@ def test_get_results_refreshes_stale_cache(client: TestClient):
     assert "id" in (second[0].get("poc") or "")
     assert second[0].get("screenshots") == ["images/v2-1.png"]
 
+    # Unchanged disk must not thrash SQLite replace_findings on every poll.
+    before = manager.db.list_findings(task_id=task["id"], limit=1000)
+    third = client.get(f"/api/v1/tasks/{task['id']}/results").json()["findings"]
+    assert [f["id"] for f in third] == [f["id"] for f in before]
+    assert manager._findings_disk_mtime.get(task["id"]) is not None
+
+
+def test_get_report_skips_rebuild_when_fresh(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    manager = client.app.state.manager
+    task = manager.create_task(
+        CreateTaskRequest(type="pentest", target="https://example.com", scan_mode="quick")
+    )
+    run_name = "report-cache"
+    run_dir = Path(task["workspace"]) / "strix_runs" / run_name
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "run_name": run_name,
+                "status": "completed",
+                "scan_results": {
+                    "executive_summary": "摘要",
+                    "methodology": "方法",
+                    "technical_analysis": "分析",
+                    "recommendations": "建议",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "vulnerabilities.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "v1",
+                    "title": "XSS",
+                    "severity": "high",
+                    "description": "x",
+                    "target": "https://example.com",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    manager.db.update_task(
+        task["id"],
+        run_name=run_name,
+        status="completed",
+        finished_at="2026-01-01T00:00:00Z",
+    )
+
+    calls = {"n": 0}
+    from strix.report import zh_report
+
+    real = zh_report.write_zh_delivery_bundle
+
+    def counted(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(zh_report, "write_zh_delivery_bundle", counted)
+
+    first = client.get(f"/api/v1/tasks/{task['id']}/report")
+    assert first.status_code == 200, first.text
+    assert "XSS" in first.json()["content"]
+    assert calls["n"] == 1
+
+    second = client.get(f"/api/v1/tasks/{task['id']}/report")
+    assert second.status_code == 200
+    assert calls["n"] == 1, "fresh report must not rebuild markdown/zip"
+
+    # Marking invalid must force a rebuild so excluded findings disappear.
+    client.patch(
+        f"/api/v1/tasks/{task['id']}/findings/v1",
+        json={"review_status": "invalid"},
+    )
+    # update_finding_review already rebuilds; reset counter and fetch again.
+    calls["n"] = 0
+    third = client.get(f"/api/v1/tasks/{task['id']}/report")
+    assert third.status_code == 200
+    assert "XSS" not in third.json()["content"]
+    assert calls["n"] == 0  # stamp already updated by invalidate rebuild
+
 
 def test_ingest_results(client: TestClient):
     manager = client.app.state.manager

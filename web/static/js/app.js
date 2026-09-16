@@ -292,7 +292,6 @@
     renderTaskList();
     renderOverview();
     setTab(activeTab);
-    refreshDetails();
   }
 
   function formatUtc8(iso) {
@@ -594,7 +593,10 @@
 
   async function refreshDetails() {
     renderOverview();
-    await loadFindings();
+    // Findings/report payloads get huge; only fetch the active tab. setTab()
+    // still loads on switch. Polling every 8s while on overview was thrashing
+    // replace_findings + shipping full PoC bodies for every vuln.
+    if (activeTab === "findings") await loadFindings();
     if (activeTab === "viewer") await loadViewer();
     // Do not reload the report on the 8s poll — rebuild races with zip download
     // ("Failed to fetch"). Report loads on tab switch / explicit refresh.

@@ -170,16 +170,59 @@ def read_report_markdown(run_dir: Path) -> str:
     return ""
 
 
+_DELIVERY_EXCLUDE_STAMP = ".web_delivery_exclude"
+
+
+def _exclude_stamp(exclude_ids: set[str] | None) -> str:
+    return ",".join(sorted(exclude_ids or ()))
+
+
+def vulnerabilities_mtime(run_dir: Path) -> float:
+    """Newest mtime of inputs that feed the findings list / delivery report."""
+    newest = 0.0
+    for name in ("vulnerabilities.json", "run.json"):
+        path = run_dir / name
+        if path.is_file():
+            newest = max(newest, path.stat().st_mtime)
+    return newest
+
+
+def delivery_report_is_fresh(
+    run_dir: Path,
+    *,
+    exclude_ids: set[str] | None = None,
+) -> bool:
+    """True when on-disk markdown already matches vulns + console excludes."""
+    md_path = run_dir / "penetration_test_report.md"
+    if not md_path.is_file():
+        return False
+    stamp_path = run_dir / _DELIVERY_EXCLUDE_STAMP
+    try:
+        stamped = stamp_path.read_text(encoding="utf-8") if stamp_path.is_file() else None
+    except OSError:
+        stamped = None
+    if stamped != _exclude_stamp(exclude_ids):
+        return False
+    return md_path.stat().st_mtime >= vulnerabilities_mtime(run_dir)
+
+
 def rebuild_delivery_report(
     run_dir: Path,
     *,
     exclude_ids: set[str] | None = None,
+    build_zip: bool = False,
+    force: bool = False,
 ) -> str | None:
     """Re-assemble the customer markdown from run.json + vulnerabilities.json.
 
-    Lets chrome/layout fixes (retest gate, heading demotion, title tags) show up
-    on refresh without waiting for another agent finish_scan.
+    Skips work when the on-disk report is already fresh for this exclude set.
+    UI ``GET /report`` must not rebuild the download zip on every open — pass
+    ``build_zip=False`` (default). Download paths can force a zip via
+    ``resolve_report_package`` or ``build_zip=True``.
     """
+    if not force and delivery_report_is_fresh(run_dir, exclude_ids=exclude_ids):
+        return read_report_markdown(run_dir)
+
     from strix.report.writer import read_run_record
     from strix.report.zh_report import write_zh_delivery_bundle
 
@@ -202,14 +245,15 @@ def rebuild_delivery_report(
             run_record=record if isinstance(record, dict) else {},
             vulnerability_reports=vulns,
             scan_results=scan_results,
+            build_zip=build_zip,
         )
     except Exception:
         return None
-    # Keep the downloadable zip in sync without truncating an in-flight FileResponse
-    # (UI polls GET /report every few seconds while users may click Download).
-    md_path = run_dir / "penetration_test_report.md"
-    if md_path.is_file():
-        _build_report_zip(run_dir, md_path)
+    stamp_path = run_dir / _DELIVERY_EXCLUDE_STAMP
+    try:
+        stamp_path.write_text(_exclude_stamp(exclude_ids), encoding="utf-8")
+    except OSError:
+        pass
     return read_report_markdown(run_dir)
 
 

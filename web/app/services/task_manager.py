@@ -85,6 +85,8 @@ class TaskManager:
         self.db = db
         self.settings = settings
         self._processes: dict[str, DetachedScanHandle] = {}
+        # Skip DELETE+INSERT of findings when vulnerabilities.json is unchanged.
+        self._findings_disk_mtime: dict[str, float] = {}
 
     # --- create / list ---
 
@@ -999,6 +1001,9 @@ class TaskManager:
 
         findings = load_normalized_findings(run_dir, task_id=task["id"])
         self.db.replace_findings(task["id"], findings)
+        from app.services.results import vulnerabilities_mtime
+
+        self._findings_disk_mtime[task["id"]] = vulnerabilities_mtime(run_dir)
 
     def get_results(self, task_id: str) -> list[dict[str, Any]]:
         task = self.get_task(task_id)
@@ -1012,9 +1017,18 @@ class TaskManager:
                 run_dir = workspace_run_dir(Path(task["workspace"]), name)
         flags = self.db.list_finding_flags(task_id)
         if run_dir is not None:
-            # Always re-read disk: early polls must not freeze a partial cache.
+            from app.services.results import vulnerabilities_mtime
+
+            mtime = vulnerabilities_mtime(run_dir)
+            # Re-read only when disk inputs changed — polling used to DELETE+INSERT
+            # every finding (and its raw JSON) on every request.
+            if self._findings_disk_mtime.get(task_id) == mtime:
+                cached = self.db.list_findings(task_id=task_id, limit=1000)
+                if cached or mtime == 0.0:
+                    return apply_finding_flags(cached, flags)
             findings = load_normalized_findings(run_dir, task_id=task_id)
             self.db.replace_findings(task_id, findings)
+            self._findings_disk_mtime[task_id] = mtime
             return apply_finding_flags(findings, flags)
         cached = self.db.list_findings(task_id=task_id, limit=1000)
         if cached:
@@ -1031,7 +1045,10 @@ class TaskManager:
         from app.services.results import rebuild_delivery_report
 
         exclude = invalid_finding_ids(self.db.list_finding_flags(task_id))
-        rebuilt = rebuild_delivery_report(run_dir, exclude_ids=exclude)
+        # UI only needs markdown; skip zip rebuild on every tab open.
+        rebuilt = rebuild_delivery_report(
+            run_dir, exclude_ids=exclude, build_zip=False
+        )
         content = rebuilt if rebuilt is not None else read_report_markdown(run_dir)
         if not content and task["status"] in ACTIVE:
             raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
@@ -1047,7 +1064,7 @@ class TaskManager:
             raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
         # Match the on-screen report (invalid findings filtered) before packaging.
         exclude = invalid_finding_ids(self.db.list_finding_flags(task_id))
-        rebuild_delivery_report(run_dir, exclude_ids=exclude)
+        rebuild_delivery_report(run_dir, exclude_ids=exclude, build_zip=False)
         package = resolve_report_package(run_dir)
         if package is None:
             if task["status"] in ACTIVE:

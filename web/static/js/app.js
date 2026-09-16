@@ -127,8 +127,21 @@
     reportCache = null;
     reportRenderToken += 1;
     clearReportToc();
+    // Destroying mount children invalidates Penna's instance — must recreate.
+    reportRenderer = null;
     const view = $("reportView");
-    if (view) view.innerHTML = "";
+    if (view) {
+      view.innerHTML = `<p class="muted report-loading">正在加载报告…</p>`;
+    }
+  }
+
+  function resetFindingsListLoading() {
+    const count = $("findingsCount");
+    const body = $("findingsBody");
+    if (count) count.textContent = "加载中…";
+    if (body) {
+      body.innerHTML = `<tr><td colspan="4" class="muted">加载中…</td></tr>`;
+    }
   }
 
   function showCreate(show) {
@@ -239,8 +252,9 @@
     return (t && (t.name || t.target || t.source_url || t.id)) || "—";
   }
 
-  function setTab(name) {
+  function setTab(name, opts = {}) {
     activeTab = name;
+    const forceReload = opts.forceReload === true;
     document.querySelectorAll(".tab").forEach((el) => {
       el.classList.toggle("active", el.dataset.tab === name);
     });
@@ -250,9 +264,9 @@
     document.querySelector(".app")?.classList.toggle("viewer-focus", name === "viewer");
     $("detailPanel")?.classList.toggle("viewer-mode", name === "viewer");
     if (name === "viewer") loadViewer();
-    if (name === "report") loadReport();
-    if (name === "findings") loadFindings();
-    if (name === "artifacts") loadArtifacts();
+    if (name === "report") void loadReport({ force: forceReload });
+    if (name === "findings") void loadFindings();
+    if (name === "artifacts") void loadArtifacts();
   }
 
   function currentTask() {
@@ -307,6 +321,7 @@
     findingsDetailCache = {};
     clearReportView();
     showFindingsList();
+    resetFindingsListLoading();
     showCreate(false);
     $("emptyState").classList.add("hidden");
     $("detailPanel").classList.remove("hidden");
@@ -315,7 +330,8 @@
     $("selectedId").title = id;
     renderTaskList();
     renderOverview();
-    setTab(activeTab);
+    // Force reload so findings/report never keep the previous task's DOM.
+    setTab(activeTab, { forceReload: true });
   }
 
   function formatUtc8(iso) {
@@ -621,13 +637,15 @@
     }
   }
 
-  async function loadReport() {
+  async function loadReport(opts = {}) {
     if (!selected) return;
+    const force = opts.force === true;
     const taskId = selected;
     const token = ++reportRenderToken;
     const host = $("reportView");
     try {
       if (
+        !force &&
         reportCache &&
         reportCache.taskId === taskId &&
         host &&
@@ -637,6 +655,8 @@
         scheduleReportToc();
         return;
       }
+      // Any innerHTML wipe requires a fresh Penna instance on this mount.
+      reportRenderer = null;
       if (host) {
         host.innerHTML = `<p class="muted report-loading">正在加载报告…</p>`;
       }
@@ -645,6 +665,7 @@
       if (token !== reportRenderToken || selected !== taskId) return;
       const content = data.content || "> [!NOTE]\n> 无报告\n";
       if (content.length > 80_000 && host) {
+        reportRenderer = null;
         host.innerHTML = `<p class="muted report-loading">报告较大（${Math.round(
           content.length / 1024
         )} KB），正在渲染…</p>`;
@@ -660,6 +681,7 @@
       if (token !== reportRenderToken || selected !== taskId) return;
       reportCache = null;
       clearReportToc();
+      reportRenderer = null;
       renderWithPenna(
         ensureReportRenderer(),
         `> [!CAUTION]\n> ${e.message}\n`,

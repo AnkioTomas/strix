@@ -25,13 +25,14 @@ from app.services.agent_prompts import (
     focused_retest_instruction,
     format_prior_reports,
 )
-from app.services.findings import apply_finding_flags, invalid_finding_ids
+from app.services.findings import apply_finding_flags, invalid_finding_ids, normalize_findings
 from app.services.git_clone import GitError, clone_repository
 from app.services.results import (
     load_normalized_findings,
     read_events,
     read_report_markdown,
     read_run_record,
+    resolve_retest_reports,
     workspace_run_dir,
     write_prior_findings,
 )
@@ -70,6 +71,30 @@ def _merge_connectivity_note(existing: str | None, detail: str) -> str:
     else:
         merged = f"{base}\n{line}"
     return merged[:_NOTES_MAX_LEN]
+
+
+_RETEST_NAME_PREFIX = "复测 · "
+
+
+def _retest_display_name(parent: dict[str, Any], targets: list[dict[str, Any]]) -> str:
+    """Name the child task so the sidebar doesn't look like a twin of the parent."""
+    base = str(
+        parent.get("name")
+        or parent.get("target")
+        or parent.get("source_url")
+        or parent.get("id")
+        or "task"
+    ).strip()
+    if base.startswith(_RETEST_NAME_PREFIX):
+        base = base[len(_RETEST_NAME_PREFIX) :].strip() or base
+    if len(targets) == 1:
+        tip = str(targets[0].get("title") or targets[0].get("id") or "").strip()
+        name = f"{_RETEST_NAME_PREFIX}{base} · {tip}" if tip else f"{_RETEST_NAME_PREFIX}{base}"
+    elif targets:
+        name = f"{_RETEST_NAME_PREFIX}{base} · {len(targets)}项"
+    else:
+        name = f"{_RETEST_NAME_PREFIX}{base}"
+    return name[:200]
 
 
 class TaskError(Exception):
@@ -482,6 +507,9 @@ class TaskManager:
         findings = self.get_results(task_id)
         flags = self.db.list_finding_flags(task_id)
         skipped_invalid = invalid_finding_ids(flags)
+        parent_run = workspace_run_dir(
+            Path(parent["workspace"]), parent.get("run_name")
+        )
 
         selected_ids = [str(x) for x in (finding_ids or []) if str(x).strip()]
         if not selected_ids:
@@ -491,13 +519,18 @@ class TaskManager:
                 if flag.get("request_test") and str(flag.get("review_status") or "") != "invalid"
             ]
 
+        include_ids = set(selected_ids) if selected_ids else None
+        # Disk vulnerabilities.json is authoritative — works for imported runs
+        # that never had a findings-table cache.
+        seed_reports = resolve_retest_reports(
+            parent_run_dir=parent_run,
+            findings=findings,
+            include_ids=include_ids,
+            skipped_invalid=skipped_invalid,
+        )
+        targets = normalize_findings(seed_reports, task_id=task_id) if seed_reports else []
+
         if selected_ids:
-            targets = [
-                item
-                for item in findings
-                if str(item.get("id")) in set(selected_ids)
-                and str(item.get("id")) not in skipped_invalid
-            ]
             if not targets:
                 raise TaskError(
                     "NO_FINDINGS_TO_RETEST",
@@ -508,11 +541,6 @@ class TaskManager:
                 task_id, [str(item.get("id")) for item in targets]
             )
         else:
-            targets = [
-                item
-                for item in findings
-                if str(item.get("id")) not in skipped_invalid
-            ]
             if findings and not targets:
                 raise TaskError(
                     "NO_FINDINGS_TO_RETEST",
@@ -540,6 +568,7 @@ class TaskManager:
             base.instruction = f"{base.instruction}\n\n{note}"
         else:
             base.instruction = note
+        base.name = _retest_display_name(parent, targets)
         child = self.create_task(
             base,
             parent_task_id=task_id,
@@ -549,9 +578,8 @@ class TaskManager:
         write_prior_findings(
             Path(child["workspace"]),
             findings=targets,
-            parent_run_dir=workspace_run_dir(
-                Path(parent["workspace"]), parent.get("run_name")
-            ),
+            parent_run_dir=parent_run,
+            reports=seed_reports,
         )
         return child
 

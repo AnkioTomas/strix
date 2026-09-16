@@ -58,6 +58,11 @@ class CreateTaskRequest(BaseModel):
     max_budget: float | None = Field(default=None, gt=0)
     parent_task_id: str | None = None
     action: str | None = None
+    # Optional agent mandates (injected into instruction at scan start).
+    proxy_url: str | None = Field(default=None, max_length=500)
+    use_proxy: bool = False
+    request_headers: str | None = Field(default=None, max_length=8000)
+    use_headers: bool = False
 
     @model_validator(mode="after")
     def validate_shape(self) -> CreateTaskRequest:
@@ -66,6 +71,33 @@ class CreateTaskRequest(BaseModel):
                 raise ValueError("pentest tasks require target")
         elif self.source is None:
             raise ValueError("audit tasks require source")
+        if self.use_proxy:
+            from app.services.proxy_config import ProxyValidationError, normalize_proxy_url
+
+            try:
+                normalized = normalize_proxy_url(self.proxy_url)
+            except ProxyValidationError as exc:
+                raise ValueError(exc.message) from exc
+            if not normalized:
+                raise ValueError("use_proxy requires proxy_url")
+            self.proxy_url = normalized
+        else:
+            self.proxy_url = None
+        if self.use_headers:
+            from app.services.proxy_config import (
+                HeadersValidationError,
+                normalize_request_headers,
+            )
+
+            try:
+                normalized_headers = normalize_request_headers(self.request_headers)
+            except HeadersValidationError as exc:
+                raise ValueError(exc.message) from exc
+            if not normalized_headers:
+                raise ValueError("use_headers requires request_headers")
+            self.request_headers = normalized_headers
+        else:
+            self.request_headers = None
         return self
 
 
@@ -140,6 +172,9 @@ class TaskSummary(BaseModel):
     scan_finished_at: str | None = None
     duration_seconds: float | None = None
     llm_usage: LLMUsageSummary | None = None
+    proxy_url: str | None = None
+    proxy_display: str | None = None
+    request_headers: str | None = None
 
 
 class TaskListResponse(BaseModel):

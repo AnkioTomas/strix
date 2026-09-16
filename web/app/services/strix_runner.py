@@ -422,10 +422,17 @@ def _exit_code_from_report(report_state: Any) -> int:
 
 
 def _build_args(*, target: str, task: dict[str, Any], settings: Settings) -> argparse.Namespace:
+    from app.services.proxy_config import compose_agent_http_instruction
+
+    instruction = compose_agent_http_instruction(
+        task.get("instruction"),
+        proxy_url=(str(task.get("proxy_url") or "").strip() or None),
+        request_headers=(str(task.get("request_headers") or "").strip() or None),
+    )
     return argparse.Namespace(
         target=[target],
         target_list=None,
-        instruction=task.get("instruction"),
+        instruction=instruction,
         instruction_file=None,
         workspace_file=None,
         workspace_files=[],
@@ -441,7 +448,7 @@ def _build_args(*, target: str, task: dict[str, Any], settings: Settings) -> arg
         local_sources=[],
         diff_scope={"active": False},
         run_name=None,
-        user_instruction=task.get("instruction"),
+        user_instruction=instruction,
         user_explicit_instruction=None,
     )
 

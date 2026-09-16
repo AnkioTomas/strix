@@ -521,6 +521,16 @@ button, input, select, textarea {
   color: var(--text);
 }
 
+#proxyFields.proxy-disabled,
+#headerFields.proxy-disabled {
+  opacity: 0.55;
+}
+
+#proxyFields.proxy-disabled input,
+#headerFields.proxy-disabled textarea {
+  cursor: not-allowed;
+}
+
 .icon-btn {
   display: none;
   border: 1px solid var(--border);

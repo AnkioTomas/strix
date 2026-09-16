@@ -120,6 +120,10 @@ class Database:
             conn.execute("ALTER TABLE tasks ADD COLUMN name TEXT")
         if "notes" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN notes TEXT")
+        if "proxy_url" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN proxy_url TEXT")
+        if "request_headers" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN request_headers TEXT")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

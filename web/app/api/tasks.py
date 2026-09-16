@@ -55,7 +55,11 @@ def _error(exc: TaskError) -> JSONResponse:
 
 
 def _summary(task: dict[str, Any]) -> TaskSummary:
-    return TaskSummary.model_validate(attach_viewer_proxy_url(task))
+    data = attach_viewer_proxy_url(task)
+    from app.services.proxy_config import redact_proxy_url
+
+    data["proxy_display"] = redact_proxy_url(data.get("proxy_url"))
+    return TaskSummary.model_validate(data)
 
 
 def _form_value(form: Any, key: str) -> str | None:
@@ -82,6 +86,12 @@ async def _parse_create_payload(
             "name": _form_value(form, "name"),
             "notes": _form_value(form, "notes"),
             "held": str(form.get("held") or "").lower() in {"1", "true", "yes", "on"},
+            "use_proxy": str(form.get("use_proxy") or "").lower()
+            in {"1", "true", "yes", "on"},
+            "proxy_url": _form_value(form, "proxy_url"),
+            "use_headers": str(form.get("use_headers") or "").lower()
+            in {"1", "true", "yes", "on"},
+            "request_headers": _form_value(form, "request_headers"),
         }
         parent_task_id = _form_value(form, "parent_task_id")
         if parent_task_id:

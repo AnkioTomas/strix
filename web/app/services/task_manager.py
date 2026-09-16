@@ -209,6 +209,8 @@ class TaskManager:
             "instruction": req.instruction,
             "scan_mode": req.scan_mode,
             "max_budget": req.max_budget,
+            "proxy_url": req.proxy_url,
+            "request_headers": req.request_headers,
             "workspace": str(workspace),
             "run_name": None,
             "viewer_url": None,
@@ -468,6 +470,8 @@ class TaskManager:
             "instruction": fields["instruction"],
             "scan_mode": fields["scan_mode"],
             "max_budget": None,
+            "proxy_url": None,
+            "request_headers": None,
             "workspace": str(workspace),
             "run_name": run_name,
             "viewer_url": None,
@@ -1155,6 +1159,10 @@ class TaskManager:
         return sum(1 for p in self._processes.values() if p.poll() is None)
 
     def _request_from_task(self, task: dict[str, Any]) -> CreateTaskRequest:
+        proxy_url = task.get("proxy_url")
+        use_proxy = bool(proxy_url)
+        request_headers = task.get("request_headers")
+        use_headers = bool(request_headers)
         if task["type"] == "pentest":
             return CreateTaskRequest(
                 type="pentest",
@@ -1164,6 +1172,10 @@ class TaskManager:
                 notes=task.get("notes"),
                 scan_mode=task.get("scan_mode") or "deep",
                 max_budget=task.get("max_budget"),
+                proxy_url=proxy_url,
+                use_proxy=use_proxy,
+                request_headers=request_headers,
+                use_headers=use_headers,
             )
         if task.get("source_type") == "local":
             source: GitSource | LocalSource = LocalSource(type="local", path=task["source_path"])
@@ -1182,4 +1194,8 @@ class TaskManager:
             notes=task.get("notes"),
             scan_mode=task.get("scan_mode") or "deep",
             max_budget=task.get("max_budget"),
+            proxy_url=proxy_url,
+            use_proxy=use_proxy,
+            request_headers=request_headers,
+            use_headers=use_headers,
         )

@@ -179,6 +179,85 @@
     $("pentestFields").classList.toggle("hidden", audit);
   }
 
+  const PROXY_CACHE_KEY = "strix.web.proxyConfig";
+  const HEADERS_CACHE_KEY = "strix.web.requestHeaders";
+
+  function loadProxyCache() {
+    try {
+      const raw = localStorage.getItem(PROXY_CACHE_KEY);
+      if (!raw) return { url: "", use: false };
+      const data = JSON.parse(raw);
+      return {
+        url: String(data.url || ""),
+        use: Boolean(data.use),
+      };
+    } catch (_) {
+      return { url: "", use: false };
+    }
+  }
+
+  function saveProxyCache({ url, use }) {
+    try {
+      localStorage.setItem(
+        PROXY_CACHE_KEY,
+        JSON.stringify({ url: String(url || ""), use: Boolean(use) })
+      );
+    } catch (_) {
+      /* private mode / quota — ignore */
+    }
+  }
+
+  function loadHeadersCache() {
+    try {
+      const raw = localStorage.getItem(HEADERS_CACHE_KEY);
+      if (!raw) return { text: "", use: false };
+      const data = JSON.parse(raw);
+      return {
+        text: String(data.text || ""),
+        use: Boolean(data.use),
+      };
+    } catch (_) {
+      return { text: "", use: false };
+    }
+  }
+
+  function saveHeadersCache({ text, use }) {
+    try {
+      localStorage.setItem(
+        HEADERS_CACHE_KEY,
+        JSON.stringify({ text: String(text || ""), use: Boolean(use) })
+      );
+    } catch (_) {
+      /* private mode / quota — ignore */
+    }
+  }
+
+  function syncProxyFields() {
+    const on = $("useProxy").checked;
+    $("proxyUrl").disabled = !on;
+    $("proxyFields").classList.toggle("proxy-disabled", !on);
+  }
+
+  function syncHeaderFields() {
+    const on = $("useHeaders").checked;
+    $("requestHeaders").disabled = !on;
+    $("headerFields").classList.toggle("proxy-disabled", !on);
+  }
+
+  function applyProxyCacheToForm() {
+    const cached = loadProxyCache();
+    $("proxyUrl").value = cached.url || "";
+    $("useProxy").checked = Boolean(cached.use && cached.url);
+    syncProxyFields();
+  }
+
+  function applyHeadersCacheToForm() {
+    const cached = loadHeadersCache();
+    $("requestHeaders").value = cached.text || "";
+    $("useHeaders").checked = Boolean(cached.use && cached.text);
+    syncHeaderFields();
+  }
+
   function resetCreateForm() {
     createDraft = null;
     const title = $("createPanel").querySelector("h2");
@@ -194,6 +273,8 @@
     $("gitBranch").value = "";
     $("instruction").value = "";
     $("attachments").value = "";
+    applyProxyCacheToForm();
+    applyHeadersCacheToForm();
     syncCreateTypeFields();
     updateAttachmentsHint();
   }
@@ -213,6 +294,14 @@
     $("gitUrl").value = t.type === "audit" ? t.source_url || "" : "";
     $("gitBranch").value = t.source_branch || "";
     $("attachments").value = "";
+    const cachedProxy = loadProxyCache();
+    $("proxyUrl").value = t.proxy_url || cachedProxy.url || "";
+    $("useProxy").checked = Boolean(t.proxy_url);
+    syncProxyFields();
+    const cachedHeaders = loadHeadersCache();
+    $("requestHeaders").value = t.request_headers || cachedHeaders.text || "";
+    $("useHeaders").checked = Boolean(t.request_headers);
+    syncHeaderFields();
     syncCreateTypeFields();
     updateAttachmentsHint();
   }
@@ -431,6 +520,8 @@
       ["Token 总计", formatTokens(usage.total_tokens)],
       ["请求次数", formatCount(usage.requests)],
       ["Viewer 代理", t.viewer_proxy_url || "（运行后生成）"],
+      ["Agent 代理", t.proxy_display || t.proxy_url || "（未要求）"],
+      ["附加请求头", t.request_headers ? `${t.request_headers.split("\n").length} 条` : "（未要求）"],
       ["错误", t.error || "—"],
     ];
     $("overviewKv").innerHTML = rows
@@ -438,9 +529,18 @@
       .join("");
     const instrEl = $("overviewInstruction");
     if (instrEl) {
+      const parts = [];
       const text = (t.instruction || "").trim();
-      instrEl.textContent = text || "（未设置）";
-      instrEl.classList.toggle("empty", !text);
+      if (text) parts.push(text);
+      if (t.proxy_url) {
+        parts.push(`[出站代理 — 强制]\n${t.proxy_display || t.proxy_url}`);
+      }
+      if (t.request_headers) {
+        parts.push(`[附加请求头 — 强制]\n${t.request_headers}`);
+      }
+      const combined = parts.join("\n\n");
+      instrEl.textContent = combined || "（未设置）";
+      instrEl.classList.toggle("empty", !combined);
     }
     const notesEl = $("overviewNotes");
     if (notesEl && document.activeElement !== notesEl) {
@@ -1037,6 +1137,8 @@
   };
 
   $("taskType").onchange = syncCreateTypeFields;
+  $("useProxy").onchange = syncProxyFields;
+  $("useHeaders").onchange = syncHeaderFields;
 
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.onclick = () => setTab(tab.dataset.tab);
@@ -1055,6 +1157,21 @@
     if ($("taskHeld").checked) form.append("held", "true");
     const instruction = $("instruction").value.trim();
     if (instruction) form.append("instruction", instruction);
+    const proxyUrl = $("proxyUrl").value.trim();
+    const useProxy = $("useProxy").checked;
+    // Always remember the URL the user typed; use flag is their last preference.
+    saveProxyCache({ url: proxyUrl, use: useProxy });
+    if (useProxy) {
+      form.append("use_proxy", "true");
+      if (proxyUrl) form.append("proxy_url", proxyUrl);
+    }
+    const requestHeaders = $("requestHeaders").value;
+    const useHeaders = $("useHeaders").checked;
+    saveHeadersCache({ text: requestHeaders, use: useHeaders });
+    if (useHeaders) {
+      form.append("use_headers", "true");
+      if (requestHeaders.trim()) form.append("request_headers", requestHeaders);
+    }
     if (type === "pentest") {
       form.append("target", $("target").value.trim());
     } else {

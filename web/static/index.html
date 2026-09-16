@@ -118,6 +118,24 @@
           <label class="span-2">Instruction
             <textarea id="instruction" placeholder="重点测试 IDOR / SQL Injection …"></textarea>
           </label>
+          <label class="span-2 check">
+            <input id="useProxy" type="checkbox" />
+            要求 Agent 使用指定 HTTP 代理
+          </label>
+          <label class="span-2" id="proxyFields">
+            代理 URL
+            <input id="proxyUrl" placeholder="http://127.0.0.1:7890 或 socks5://user:pass@host:1080" />
+            <span class="field-hint">可选。缓存在本机；勾选才对本任务生效。Agent 会自行配置 curl / 浏览器等走此代理（本机地址会提示改写为 host.docker.internal）。</span>
+          </label>
+          <label class="span-2 check">
+            <input id="useHeaders" type="checkbox" />
+            要求 Agent 附加请求头
+          </label>
+          <label class="span-2" id="headerFields">
+            请求头（每行一条 Name: value）
+            <textarea id="requestHeaders" rows="4" placeholder="Authorization: Bearer …&#10;Cookie: session=…"></textarea>
+            <span class="field-hint">可选。同样本机缓存；勾选才生效。Agent 必须在相关 HTTP 请求里带上这些头。</span>
+          </label>
           <label class="span-2">备注
             <textarea id="taskNotes" placeholder="可选。给自己看的说明，不会发给模型。"></textarea>
           </label>
@@ -200,7 +218,7 @@
           <div class="notes-box">
             <div class="notes-head">
               <h3>初始提示</h3>
-              <span class="muted" style="font-size:0.8rem">创建任务时发给 Agent 的 instruction</span>
+              <span class="muted" style="font-size:0.8rem">用户 instruction；勾选的代理/请求头会在启动时一并注入 Agent</span>
             </div>
             <pre class="overview-instruction" id="overviewInstruction">（未设置）</pre>
           </div>

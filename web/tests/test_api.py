@@ -75,6 +75,86 @@ def test_create_and_list_pentest(client: TestClient):
     assert any(t["id"] == task["id"] for t in listed.json()["tasks"])
 
 
+def test_create_task_with_agent_proxy_and_headers(client: TestClient):
+    bad = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com",
+            "scan_mode": "quick",
+            "use_proxy": True,
+            "proxy_url": "ftp://bad",
+        },
+    )
+    assert bad.status_code == 400
+
+    missing = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com",
+            "scan_mode": "quick",
+            "use_proxy": True,
+        },
+    )
+    assert missing.status_code == 400
+
+    unused = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com",
+            "scan_mode": "quick",
+            "use_proxy": False,
+            "proxy_url": "http://127.0.0.1:7890",
+            "use_headers": False,
+            "request_headers": "Authorization: Bearer x",
+        },
+    )
+    assert unused.status_code == 202, unused.text
+    assert unused.json().get("proxy_url") in (None, "")
+    assert unused.json().get("request_headers") in (None, "")
+
+    bad_headers = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com",
+            "scan_mode": "quick",
+            "use_headers": True,
+            "request_headers": "not-a-header",
+        },
+    )
+    assert bad_headers.status_code == 400
+
+    ok = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com",
+            "scan_mode": "quick",
+            "instruction": "Focus on auth",
+            "use_proxy": True,
+            "proxy_url": "http://alice:s3cret@127.0.0.1:7890",
+            "use_headers": True,
+            "request_headers": "Authorization: Bearer tok\nCookie: s=1",
+        },
+    )
+    assert ok.status_code == 202, ok.text
+    body = ok.json()
+    assert body["proxy_url"] == "http://alice:s3cret@127.0.0.1:7890"
+    assert body["proxy_display"] == "http://***@127.0.0.1:7890"
+    assert body["request_headers"] == "Authorization: Bearer tok\nCookie: s=1"
+    # User instruction stays clean; mandates are composed at scan start.
+    assert body["instruction"] == "Focus on auth"
+    assert "[出站代理" not in (body["instruction"] or "")
+
+    detail = client.get(f"/api/v1/tasks/{body['id']}").json()
+    assert detail["proxy_url"] == body["proxy_url"]
+    assert detail["request_headers"] == body["request_headers"]
+    assert detail["proxy_display"] == body["proxy_display"]
+
+
 def test_create_task_with_attachments(client: TestClient):
     from app.config import get_settings
     from app.services.attachments import resolve_task_workspace_files

@@ -94,7 +94,7 @@ PYTHONPATH=. python -m app
 |--------|------|------|
 | POST | `/api/v1/session` | 写入会话 Cookie（需 Bearer） |
 | DELETE | `/api/v1/session` | 清除会话 Cookie |
-| POST | `/api/v1/tasks` | 创建任务（202，进入队列；也支持 multipart 附件） |
+| POST | `/api/v1/tasks` | 创建任务（202，进入队列；也支持 multipart 附件；可选 `use_proxy`/`proxy_url`、`use_headers`/`request_headers`，启动时注入 Agent 指令） |
 | POST | `/api/v1/tasks/import` | 导入旧版 CLI `strix_runs/`（可 `dry_run`） |
 | GET | `/api/v1/tasks` | 列表 |
 | GET | `/api/v1/tasks/{id}` | 详情（含 `viewer_proxy_url`） |

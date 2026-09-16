@@ -574,6 +574,9 @@ def _seed_completed_task_with_vulns(client: TestClient) -> tuple[dict, Path]:
                     "severity": "high",
                     "description": "real",
                     "target": "https://example.com",
+                    "poc_description": "open /vuln",
+                    "evidence": "HTTP 200 with reflected payload",
+                    "retest_status": "not_fixed",
                 },
                 {
                     "id": "v-drop",
@@ -586,6 +589,9 @@ def _seed_completed_task_with_vulns(client: TestClient) -> tuple[dict, Path]:
         ),
         encoding="utf-8",
     )
+    (run_dir / "vulnerabilities").mkdir(exist_ok=True)
+    (run_dir / "vulnerabilities" / "v-keep.md").write_text("# Keep Me\n", encoding="utf-8")
+    (run_dir / "vulnerabilities" / "v-drop.md").write_text("# Drop Me\n", encoding="utf-8")
     manager.db.update_task(
         created["id"],
         status="completed",
@@ -626,6 +632,17 @@ def test_mark_finding_invalid_hides_from_report_and_retest(client: TestClient):
     child = client.app.state.manager.get_task(retest.json()["id"])
     assert "Drop Me" in child["instruction"]
     assert "勿复测" in child["instruction"] or "无效" in child["instruction"]
+    assert "open /vuln" in child["instruction"]
+    assert "[原始漏洞报告]" in child["instruction"]
+    prior = json.loads(
+        (
+            Path(child["workspace"]) / "prior_findings" / "vulnerabilities.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert {item["id"] for item in prior} == {"v-keep"}
+    assert "retest_status" not in prior[0]
+    assert (Path(child["workspace"]) / "prior_findings" / "vulnerabilities" / "v-keep.md").is_file()
+    assert not (Path(child["workspace"]) / "prior_findings" / "vulnerabilities" / "v-drop.md").is_file()
 
 
 def test_request_finding_test_creates_focused_retest(client: TestClient):
@@ -640,7 +657,15 @@ def test_request_finding_test_creates_focused_retest(client: TestClient):
     assert child["action"] == "retest"
     assert "指定漏洞复测" in child["instruction"]
     assert "Keep Me" in child["instruction"]
+    assert "v-keep" in child["instruction"]
+    assert "open /vuln" in child["instruction"]
     assert "Drop Me" not in child["instruction"]
+    prior = json.loads(
+        (
+            Path(child["workspace"]) / "prior_findings" / "vulnerabilities.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert {item["id"] for item in prior} == {"v-keep"}
 
 
 def test_retest_respects_request_test_queue(client: TestClient):
@@ -663,6 +688,43 @@ def test_retest_respects_request_test_queue(client: TestClient):
 
     flags = client.app.state.manager.db.list_finding_flags(task_id)
     assert flags["v-keep"]["request_test"] is False
+
+
+def test_apply_prior_findings_seeds_run_dir(tmp_path: Path):
+    from app.services.results import apply_prior_findings, write_prior_findings
+
+    parent_run = tmp_path / "parent_run"
+    (parent_run / "vulnerabilities").mkdir(parents=True)
+    (parent_run / "images").mkdir()
+    (parent_run / "vulnerabilities" / "v1.md").write_text("# v1\n", encoding="utf-8")
+    (parent_run / "images" / "shot.png").write_bytes(b"png")
+    findings = [
+        {
+            "id": "v1",
+            "title": "XSS",
+            "severity": "high",
+            "description": "reflected",
+            "raw": {
+                "id": "v1",
+                "title": "XSS",
+                "severity": "high",
+                "description": "reflected",
+                "retest_status": "partial",
+                "fix_verification": "old",
+            },
+        }
+    ]
+    workspace = tmp_path / "child"
+    workspace.mkdir()
+    write_prior_findings(workspace, findings=findings, parent_run_dir=parent_run)
+    run_dir = workspace / "strix_runs" / "fresh"
+    assert apply_prior_findings(workspace, run_dir) is True
+    seeded = json.loads((run_dir / "vulnerabilities.json").read_text(encoding="utf-8"))
+    assert seeded[0]["id"] == "v1"
+    assert "retest_status" not in seeded[0]
+    assert "fix_verification" not in seeded[0]
+    assert (run_dir / "vulnerabilities" / "v1.md").is_file()
+    assert (run_dir / "images" / "shot.png").is_file()
 
 
 def test_reap_skips_until_worker_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

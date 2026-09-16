@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 REFRESH_REPORT_INSTRUCTION = """\
 [更新报告 — 强制]
 
@@ -26,9 +28,10 @@ REFRESH_REPORT_INSTRUCTION = """\
 RETEST_INSTRUCTION = """\
 [复测要求 — 强制]
 
-对父任务已报告的每一个漏洞标题逐条复测，禁止只写口头结论：
+父任务的原始漏洞已载入本次扫描（list_reports / get_report 用原 id），
+下文也附了原文。禁止只写口头结论，禁止为同一漏洞另开新报告。
 
-1. 验证该标题对应的漏洞是否仍可利用。
+1. 用原 id 逐条复测：验证是否仍可利用。
 2. 必须用 update_vulnerability_report 写入 retest_status，取值只能是：
    fixed（已修复）/ not_fixed（未修复）/ partial（部分修复）/ regressed（回归恶化）。
 3. 必须提供佐证：screenshots（沙箱内 PNG/JPEG 绝对路径）和/或 evidence /
@@ -38,22 +41,68 @@ RETEST_INSTRUCTION = """\
 5. finish_scan 的 executive_summary 概括整体复测结论。交付报告会单独生成
    「复测情况」章节，依赖你写入的 retest_status 与佐证。
 
-先 list_reports 拿到全部已有标题，再逐条复测与更新，最后 finish_scan 一次。
+先 list_reports / get_report 核对原文，再逐条更新，最后 finish_scan 一次。
 """
 
+_BODY_FIELDS = (
+    ("description", "描述"),
+    ("poc", "PoC"),
+    ("evidence", "证据"),
+    ("technical_analysis", "技术分析"),
+    ("impact", "影响"),
+    ("recommendation", "修复建议"),
+    ("cwe", "CWE"),
+)
 
-def focused_retest_instruction(titles: list[str]) -> str:
-    """Retest only the listed finding titles (console-selected / request-test)."""
-    lines = "\n".join(f"- {title}" for title in titles if str(title).strip())
+
+def format_prior_reports(findings: list[dict[str, Any]]) -> str:
+    """Render original finding bodies so a retest agent is not title-blind."""
+    if not findings:
+        return ""
+    blocks = ["[原始漏洞报告]"]
+    for item in findings:
+        fid = str(item.get("id") or "").strip() or "unknown"
+        title = str(item.get("title") or fid)
+        lines = [f"## {fid} — {title}"]
+        severity = item.get("severity")
+        if severity:
+            lines.append(f"- severity: {severity}")
+        asset = item.get("asset")
+        if asset:
+            lines.append(f"- target: {asset}")
+        location = item.get("location")
+        if isinstance(location, dict):
+            for key in ("url", "endpoint", "file", "method", "line"):
+                value = location.get(key)
+                if value not in (None, ""):
+                    lines.append(f"- {key}: {value}")
+        for key, label in _BODY_FIELDS:
+            text = item.get(key)
+            if text:
+                lines.append(f"\n### {label}\n{text}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def focused_retest_instruction(findings: list[dict[str, Any]]) -> str:
+    """Retest only the listed findings (console-selected / request-test)."""
+    lines = "\n".join(
+        f"- {item.get('id')}: {item.get('title') or item.get('id')}"
+        for item in findings
+        if str(item.get("id") or item.get("title") or "").strip()
+    )
+    reports = format_prior_reports(findings)
+    extra = f"\n\n{reports}" if reports else ""
     return f"""\
 [指定漏洞复测 — 强制]
 
-只复测下列漏洞，禁止扩大到其它标题，禁止只写口头结论：
+只复测下列漏洞（用原 id，禁止另开新报告），禁止扩大到其它标题，禁止只写口头结论：
 
 {lines}
+{extra}
 
-对每一个列出的标题：
-1. 验证是否仍可利用。
+对每一个列出的 id：
+1. 验证是否仍可利用。get_report(id) 可读原文。
 2. 用 update_vulnerability_report 写入 retest_status：
    fixed / not_fixed / partial / regressed。
 3. 必须提供 screenshots 和/或 evidence / fix_verification 硬证据；无证据不得标 fixed。

@@ -212,6 +212,15 @@ class LiveStrixSession:
                 f"got {self.run_name!r}"
             )
         run_dir = run_dir_for(self.run_name)
+        if task.get("action") == "retest":
+            from app.services.results import apply_prior_findings
+
+            if apply_prior_findings(Path(task["workspace"]), run_dir):
+                logger.info(
+                    "seeded parent vulnerability reports into retest run task=%s run=%s",
+                    self.task_id,
+                    self.run_name,
+                )
 
         scan_config: dict[str, Any] = {
             "scan_id": self.run_name,

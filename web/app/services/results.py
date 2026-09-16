@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import contextlib
 import json
+import shutil
 import threading
 import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from app.services.findings import normalize_findings
+
+PRIOR_FINDINGS_DIRNAME = "prior_findings"
+_RETEST_STRIP_KEYS = ("retest_status", "fix_verification")
 
 
 if TYPE_CHECKING:
@@ -79,6 +83,80 @@ def read_vulnerabilities(run_dir: Path) -> list[dict[str, Any]]:
 
 def load_normalized_findings(run_dir: Path, *, task_id: str) -> list[dict[str, Any]]:
     return normalize_findings(read_vulnerabilities(run_dir), task_id=task_id)
+
+
+def prior_findings_dir(workspace: Path) -> Path:
+    return Path(workspace) / PRIOR_FINDINGS_DIRNAME
+
+
+def _raw_retest_report(item: dict[str, Any]) -> dict[str, Any]:
+    raw = item.get("raw")
+    if isinstance(raw, dict):
+        report = dict(raw)
+    else:
+        report = {
+            "id": item.get("id"),
+            "title": item.get("title"),
+            "severity": item.get("severity"),
+            "description": item.get("description"),
+            "target": item.get("asset"),
+            "evidence": item.get("evidence"),
+            "poc": item.get("poc"),
+            "impact": item.get("impact"),
+            "remediation_steps": item.get("recommendation"),
+            "technical_analysis": item.get("technical_analysis"),
+        }
+    for key in _RETEST_STRIP_KEYS:
+        report.pop(key, None)
+    return report
+
+
+def write_prior_findings(
+    workspace: Path,
+    *,
+    findings: list[dict[str, Any]],
+    parent_run_dir: Path | None,
+) -> Path | None:
+    """Persist the parent findings a retest child must hydrate from."""
+    if not findings:
+        return None
+    dest = prior_findings_dir(workspace)
+    dest.mkdir(parents=True, exist_ok=True)
+    reports = [_raw_retest_report(item) for item in findings]
+    (dest / "vulnerabilities.json").write_text(
+        json.dumps(reports, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+    if parent_run_dir is None:
+        return dest
+    ids = {str(report.get("id")) for report in reports if report.get("id")}
+    src_md = parent_run_dir / "vulnerabilities"
+    if src_md.is_dir():
+        out_md = dest / "vulnerabilities"
+        out_md.mkdir(exist_ok=True)
+        for fid in ids:
+            src = src_md / f"{fid}.md"
+            if src.is_file():
+                shutil.copy2(src, out_md / f"{fid}.md")
+    src_images = parent_run_dir / "images"
+    if src_images.is_dir():
+        shutil.copytree(src_images, dest / "images", dirs_exist_ok=True)
+    return dest
+
+
+def apply_prior_findings(workspace: Path, run_dir: Path) -> bool:
+    """Copy staged parent reports into a fresh Strix run dir before hydrate."""
+    src = prior_findings_dir(workspace)
+    json_path = src / "vulnerabilities.json"
+    if not json_path.is_file():
+        return False
+    run_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(json_path, run_dir / "vulnerabilities.json")
+    for name in ("vulnerabilities", "images"):
+        src_dir = src / name
+        if src_dir.is_dir():
+            shutil.copytree(src_dir, run_dir / name, dirs_exist_ok=True)
+    return True
 
 
 def read_report_markdown(run_dir: Path) -> str:

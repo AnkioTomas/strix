@@ -23,6 +23,7 @@ from app.services.agent_prompts import (
     REFRESH_REPORT_INSTRUCTION,
     RETEST_INSTRUCTION,
     focused_retest_instruction,
+    format_prior_reports,
 )
 from app.services.findings import apply_finding_flags, invalid_finding_ids
 from app.services.git_clone import GitError, clone_repository
@@ -32,6 +33,7 @@ from app.services.results import (
     read_report_markdown,
     read_run_record,
     workspace_run_dir,
+    write_prior_findings,
 )
 from app.services.run_import import (
     discover_run_dirs,
@@ -499,24 +501,25 @@ class TaskManager:
                     "NO_FINDINGS_TO_RETEST",
                     "No eligible findings to retest (missing or marked invalid)",
                 )
-            note = focused_retest_instruction(
-                [str(item.get("title") or item.get("id")) for item in targets]
-            )
+            note = focused_retest_instruction(targets)
             self.db.clear_finding_request_test(
                 task_id, [str(item.get("id")) for item in targets]
             )
         else:
-            valid = [
+            targets = [
                 item
                 for item in findings
                 if str(item.get("id")) not in skipped_invalid
             ]
-            if findings and not valid:
+            if findings and not targets:
                 raise TaskError(
                     "NO_FINDINGS_TO_RETEST",
                     "All findings are marked invalid; nothing to retest",
                 )
             note = RETEST_INSTRUCTION
+            reports = format_prior_reports(targets)
+            if reports:
+                note = f"{note}\n\n{reports}"
             if skipped_invalid:
                 skipped_titles = [
                     str(item.get("title") or item.get("id"))
@@ -535,12 +538,20 @@ class TaskManager:
             base.instruction = f"{base.instruction}\n\n{note}"
         else:
             base.instruction = note
-        return self.create_task(
+        child = self.create_task(
             base,
             parent_task_id=task_id,
             action="retest",
             copy_attachments_from=parent["workspace"],
         )
+        write_prior_findings(
+            Path(child["workspace"]),
+            findings=targets,
+            parent_run_dir=workspace_run_dir(
+                Path(parent["workspace"]), parent.get("run_name")
+            ),
+        )
+        return child
 
     def update_finding_review(
         self,

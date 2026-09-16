@@ -25,7 +25,12 @@ from app.services.agent_prompts import (
     focused_retest_instruction,
     format_prior_reports,
 )
-from app.services.findings import apply_finding_flags, invalid_finding_ids, normalize_findings
+from app.services.findings import (
+    apply_finding_flags,
+    invalid_finding_ids,
+    normalize_findings,
+    sort_findings,
+)
 from app.services.git_clone import GitError, clone_repository
 from app.services.results import (
     load_normalized_findings,
@@ -1053,14 +1058,14 @@ class TaskManager:
             if self._findings_disk_mtime.get(task_id) == mtime:
                 cached = self.db.list_findings(task_id=task_id, limit=1000)
                 if cached or mtime == 0.0:
-                    return apply_finding_flags(cached, flags)
+                    return sort_findings(apply_finding_flags(cached, flags))
             findings = load_normalized_findings(run_dir, task_id=task_id)
             self.db.replace_findings(task_id, findings)
             self._findings_disk_mtime[task_id] = mtime
-            return apply_finding_flags(findings, flags)
+            return sort_findings(apply_finding_flags(findings, flags))
         cached = self.db.list_findings(task_id=task_id, limit=1000)
         if cached:
-            return apply_finding_flags(cached, flags)
+            return sort_findings(apply_finding_flags(cached, flags))
         if task["status"] in ACTIVE:
             raise TaskError("RESULT_NOT_READY", "Results not ready", status_code=409)
         return []

@@ -640,6 +640,29 @@ button, input, select, textarea {
   opacity: 0.55;
 }
 
+.findings-table thead th {
+  padding: 0;
+}
+
+.findings-table button.th-sort {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0.55rem 0.65rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.findings-table button.th-sort:hover,
+.findings-table button.th-sort.active {
+  color: var(--accent);
+}
+
 .findings-table tbody tr {
   cursor: pointer;
 }

@@ -63,6 +63,11 @@ def normalize_findings(raw_items: list[Any], *, task_id: str) -> list[dict[str, 
     for item in raw_items:
         if isinstance(item, dict):
             findings.append(normalize_finding(item, task_id=task_id))
+    return sort_findings(findings)
+
+
+def sort_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Severity first (critical→info), then time, then id — stable for the UI list."""
     findings.sort(
         key=lambda item: (
             _SEVERITY_RANK.get(str(item.get("severity") or "").lower(), 9),

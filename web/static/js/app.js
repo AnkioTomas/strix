@@ -17,6 +17,17 @@
   let reportCache = null;
   let reportRenderToken = 0;
   let findingsTableBound = false;
+  let findingsSortBound = false;
+  /** @type {{ key: string, dir: number }} dir: 1 asc, -1 desc */
+  let findingsSort = { key: "severity", dir: 1 };
+  const SEVERITY_RANK = {
+    critical: 0,
+    high: 1,
+    medium: 2,
+    low: 3,
+    info: 4,
+    unknown: 5,
+  };
   /** @type {{ parentId: string, action: string } | null} */
   let createDraft = null;
 
@@ -585,8 +596,79 @@
     });
   }
 
+  function ensureFindingsSortHeaders() {
+    if (findingsSortBound) return;
+    const table = document.querySelector(".findings-table");
+    if (!table) return;
+    findingsSortBound = true;
+    table.querySelectorAll("button.th-sort").forEach((btn) => {
+      btn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const key = btn.getAttribute("data-sort") || "severity";
+        if (findingsSort.key === key) {
+          findingsSort = { key, dir: -findingsSort.dir };
+        } else {
+          findingsSort = { key, dir: 1 };
+        }
+        renderFindingsTable();
+      });
+    });
+  }
+
+  function findingSortValue(f, key) {
+    if (key === "severity") {
+      return SEVERITY_RANK[String(f.severity || "unknown").toLowerCase()] ?? 9;
+    }
+    if (key === "title") {
+      return String(f.title || "").toLowerCase();
+    }
+    if (key === "location") {
+      return String(penna.locationLabel(f) || "").toLowerCase();
+    }
+    if (key === "status") {
+      if (String(f.review_status || "") === "invalid") return 2;
+      if (f.request_test) return 1;
+      return 0;
+    }
+    return "";
+  }
+
+  function sortedFindings() {
+    const rows = findingsCache.slice();
+    const { key, dir } = findingsSort;
+    rows.sort((a, b) => {
+      const va = findingSortValue(a, key);
+      const vb = findingSortValue(b, key);
+      let cmp = 0;
+      if (typeof va === "number" && typeof vb === "number") {
+        cmp = va - vb;
+      } else {
+        cmp = String(va).localeCompare(String(vb), "zh");
+      }
+      if (cmp !== 0) return cmp * dir;
+      return String(a.id || "").localeCompare(String(b.id || ""));
+    });
+    return rows;
+  }
+
+  function syncFindingsSortHeaders() {
+    document.querySelectorAll(".findings-table button.th-sort").forEach((btn) => {
+      const key = btn.getAttribute("data-sort");
+      const active = key === findingsSort.key;
+      btn.classList.toggle("active", active);
+      btn.dataset.dir = active ? (findingsSort.dir > 0 ? "asc" : "desc") : "";
+      const label = btn.textContent.replace(/\s*[↑↓]$/, "").trim();
+      btn.textContent = active
+        ? `${label} ${findingsSort.dir > 0 ? "↑" : "↓"}`
+        : label;
+    });
+  }
+
   function renderFindingsTable() {
     ensureFindingsTableDelegation();
+    ensureFindingsSortHeaders();
+    syncFindingsSortHeaders();
     const body = $("findingsBody");
     const count = $("findingsCount");
     if (!findingsCache.length) {
@@ -594,14 +676,14 @@
       body.innerHTML = `<tr><td colspan="4" class="muted">该任务暂无漏洞</td></tr>`;
       return;
     }
+    const rows = sortedFindings();
     const invalidCount = findingsCache.filter((f) => f.review_status === "invalid").length;
     const pendingCount = findingsCache.filter((f) => f.request_test).length;
     const extra = [];
     if (invalidCount) extra.push(`无效 ${invalidCount}`);
     if (pendingCount) extra.push(`待测 ${pendingCount}`);
     count.textContent = `共 ${findingsCache.length} 条${extra.length ? ` · ${extra.join(" · ")}` : ""} · 点击查看详情`;
-    // Build once; click handled by delegation — N listeners was free jank.
-    body.innerHTML = findingsCache
+    body.innerHTML = rows
       .map((f) => {
         const sev = String(f.severity || "unknown").toLowerCase();
         const where = penna.locationLabel(f);

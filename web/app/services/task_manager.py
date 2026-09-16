@@ -1065,6 +1065,17 @@ class TaskManager:
             raise TaskError("RESULT_NOT_READY", "Results not ready", status_code=409)
         return []
 
+    def get_finding(self, task_id: str, finding_id: str) -> dict[str, Any]:
+        """Full finding body for the detail pane (list uses summary)."""
+        findings = self.get_results(task_id)
+        match = next(
+            (item for item in findings if str(item.get("id")) == str(finding_id)),
+            None,
+        )
+        if match is None:
+            raise TaskError("FINDING_NOT_FOUND", f"Finding {finding_id} not found", status_code=404)
+        return match
+
     def get_report(self, task_id: str) -> str:
         task = self.get_task(task_id)
         run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))

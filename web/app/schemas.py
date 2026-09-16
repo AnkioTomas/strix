@@ -178,6 +178,33 @@ class Finding(BaseModel):
     request_test: bool = False
 
 
+# List views only need triage columns — full PoC bodies kill the browser.
+FINDING_SUMMARY_KEYS = frozenset(
+    {
+        "id",
+        "task_id",
+        "title",
+        "severity",
+        "confidence",
+        "asset",
+        "location",
+        "cwe",
+        "cvss",
+        "created_at",
+        "review_status",
+        "request_test",
+    }
+)
+
+
+def summarize_finding(finding: dict[str, Any]) -> dict[str, Any]:
+    """Drop narrative/PoC fields for list endpoints."""
+    out = {key: finding.get(key) for key in FINDING_SUMMARY_KEYS}
+    out["id"] = str(finding.get("id") or "unknown")
+    out["title"] = str(finding.get("title") or "Untitled")
+    return out
+
+
 class FindingsResponse(BaseModel):
     task_id: str | None = None
     findings: list[Finding]

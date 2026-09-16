@@ -10,7 +10,13 @@
   let findingsRenderer = null;
   let reportRenderer = null;
   let findingsCache = [];
+  /** @type {Record<string, object>} full bodies keyed by finding id */
+  let findingsDetailCache = {};
   let selectedFindingId = null;
+  /** @type {{ taskId: string, content: string } | null} */
+  let reportCache = null;
+  let reportRenderToken = 0;
+  let findingsTableBound = false;
   /** @type {{ parentId: string, action: string } | null} */
   let createDraft = null;
 
@@ -67,9 +73,9 @@
     const view = $("reportView");
     const toc = $("reportToc");
     if (!view || !toc) return;
-    const headings = Array.from(view.querySelectorAll("h1, h2")).filter(
-      (h) => h.textContent && h.textContent.trim()
-    );
+    const headings = Array.from(view.querySelectorAll("h1, h2"))
+      .filter((h) => h.textContent && h.textContent.trim())
+      .slice(0, 200);
     if (!headings.length) {
       clearReportToc();
       return;
@@ -113,9 +119,16 @@
   }
 
   function scheduleReportToc() {
-    // Penna may paint headings after render() returns.
-    queueMicrotask(buildReportToc);
-    setTimeout(buildReportToc, 60);
+    // One delayed pass — Penna paints async; double-scheduling was waste on large reports.
+    setTimeout(buildReportToc, 80);
+  }
+
+  function clearReportView() {
+    reportCache = null;
+    reportRenderToken += 1;
+    clearReportToc();
+    const view = $("reportView");
+    if (view) view.innerHTML = "";
   }
 
   function showCreate(show) {
@@ -291,6 +304,8 @@
     viewerLoadedFor = null;
     selectedFindingId = null;
     findingsCache = [];
+    findingsDetailCache = {};
+    clearReportView();
     showFindingsList();
     showCreate(false);
     $("emptyState").classList.add("hidden");
@@ -475,15 +490,47 @@
     selectedFindingId = null;
   }
 
-  function showFindingDetail(findingId) {
-    const finding = findingsCache.find((f) => f.id === findingId);
-    if (!finding) return;
+  async function showFindingDetail(findingId) {
+    const summary = findingsCache.find((f) => f.id === findingId);
+    if (!summary) return;
     selectedFindingId = findingId;
     $("findingsListPane").classList.add("hidden");
     $("findingsDetailPane").classList.remove("hidden");
+    syncFindingActionButtons(summary);
+    highlightFindingRow(findingId);
+
+    let finding = findingsDetailCache[findingId];
+    if (!finding) {
+      renderWithPenna(
+        ensureFindingsRenderer(),
+        `> [!NOTE]\n> 加载漏洞详情…\n`,
+        selected
+      );
+      try {
+        finding = await api.api(
+          `/api/v1/tasks/${selected}/findings/${encodeURIComponent(findingId)}`
+        );
+        findingsDetailCache[findingId] = finding;
+      } catch (e) {
+        renderWithPenna(
+          ensureFindingsRenderer(),
+          `> [!CAUTION]\n> ${e.message}\n`,
+          selected
+        );
+        return;
+      }
+    }
+    if (selectedFindingId !== findingId) return;
     renderWithPenna(ensureFindingsRenderer(), penna.findingToMarkdown(finding), selected);
-    renderFindingsTable();
     syncFindingActionButtons(finding);
+  }
+
+  function highlightFindingRow(findingId) {
+    const body = $("findingsBody");
+    if (!body) return;
+    body.querySelectorAll("tr[data-id]").forEach((tr) => {
+      tr.classList.toggle("active", tr.dataset.id === findingId);
+    });
   }
 
   function syncFindingActionButtons(finding) {
@@ -511,7 +558,19 @@
     return bits.join(" ");
   }
 
+  function ensureFindingsTableDelegation() {
+    const body = $("findingsBody");
+    if (!body || findingsTableBound) return;
+    findingsTableBound = true;
+    body.addEventListener("click", (event) => {
+      const tr = event.target.closest("tr[data-id]");
+      if (!tr) return;
+      void showFindingDetail(tr.dataset.id);
+    });
+  }
+
   function renderFindingsTable() {
+    ensureFindingsTableDelegation();
     const body = $("findingsBody");
     const count = $("findingsCount");
     if (!findingsCache.length) {
@@ -525,6 +584,7 @@
     if (invalidCount) extra.push(`无效 ${invalidCount}`);
     if (pendingCount) extra.push(`待测 ${pendingCount}`);
     count.textContent = `共 ${findingsCache.length} 条${extra.length ? ` · ${extra.join(" · ")}` : ""} · 点击查看详情`;
+    // Build once; click handled by delegation — N listeners was free jank.
     body.innerHTML = findingsCache
       .map((f) => {
         const sev = String(f.severity || "unknown").toLowerCase();
@@ -538,18 +598,17 @@
         </tr>`;
       })
       .join("");
-    body.querySelectorAll("tr[data-id]").forEach((tr) => {
-      tr.onclick = () => showFindingDetail(tr.dataset.id);
-    });
   }
 
   async function loadFindings() {
     if (!selected) return;
     try {
-      const findings = await api.api(`/api/v1/tasks/${selected}/results`).catch(() => ({ findings: [] }));
+      const findings = await api
+        .api(`/api/v1/tasks/${selected}/results?summary=1`)
+        .catch(() => ({ findings: [] }));
       findingsCache = findings.findings || [];
       if (selectedFindingId && findingsCache.some((f) => f.id === selectedFindingId)) {
-        showFindingDetail(selectedFindingId);
+        await showFindingDetail(selectedFindingId);
       } else {
         showFindingsList();
         renderFindingsTable();
@@ -564,17 +623,47 @@
 
   async function loadReport() {
     if (!selected) return;
+    const taskId = selected;
+    const token = ++reportRenderToken;
+    const host = $("reportView");
     try {
-      const data = await api.api(`/api/v1/tasks/${selected}/report`);
+      if (
+        reportCache &&
+        reportCache.taskId === taskId &&
+        host &&
+        !host.querySelector(".report-loading") &&
+        host.childNodes.length
+      ) {
+        scheduleReportToc();
+        return;
+      }
+      if (host) {
+        host.innerHTML = `<p class="muted report-loading">正在加载报告…</p>`;
+      }
+      clearReportToc();
+      const data = await api.api(`/api/v1/tasks/${taskId}/report`);
+      if (token !== reportRenderToken || selected !== taskId) return;
       const content = data.content || "> [!NOTE]\n> 无报告\n";
-      renderWithPenna(ensureReportRenderer(), content, selected);
+      if (content.length > 80_000 && host) {
+        host.innerHTML = `<p class="muted report-loading">报告较大（${Math.round(
+          content.length / 1024
+        )} KB），正在渲染…</p>`;
+        await new Promise((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(resolve));
+        });
+        if (token !== reportRenderToken || selected !== taskId) return;
+      }
+      renderWithPenna(ensureReportRenderer(), content, taskId);
+      reportCache = { taskId, content };
       scheduleReportToc();
     } catch (e) {
+      if (token !== reportRenderToken || selected !== taskId) return;
+      reportCache = null;
       clearReportToc();
       renderWithPenna(
         ensureReportRenderer(),
         `> [!CAUTION]\n> ${e.message}\n`,
-        selected
+        taskId
       );
     }
   }
@@ -625,6 +714,8 @@
           viewerLoadedFor = null;
           selectedFindingId = null;
           findingsCache = [];
+          findingsDetailCache = {};
+          clearReportView();
           showCreate(false);
           $("detailPanel").classList.add("hidden");
           $("emptyState").classList.remove("hidden");
@@ -786,8 +877,19 @@
       body: JSON.stringify(body),
     });
     const idx = findingsCache.findIndex((f) => f.id === selectedFindingId);
-    if (idx >= 0) findingsCache[idx] = { ...findingsCache[idx], ...updated };
-    showFindingDetail(selectedFindingId);
+    if (idx >= 0) {
+      // Keep list row light; detail cache holds the narrative body.
+      findingsCache[idx] = {
+        ...findingsCache[idx],
+        review_status: updated.review_status,
+        request_test: updated.request_test,
+        title: updated.title ?? findingsCache[idx].title,
+        severity: updated.severity ?? findingsCache[idx].severity,
+      };
+    }
+    findingsDetailCache[selectedFindingId] = updated;
+    reportCache = null;
+    await showFindingDetail(selectedFindingId);
     if (activeTab === "report") await loadReport();
   }
 
@@ -1068,6 +1170,8 @@
       viewerLoadedFor = null;
       selectedFindingId = null;
       findingsCache = [];
+      findingsDetailCache = {};
+      clearReportView();
       $("detailPanel").classList.add("hidden");
       $("emptyState").classList.remove("hidden");
       await refresh();

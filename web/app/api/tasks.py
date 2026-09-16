@@ -32,6 +32,7 @@ from app.schemas import (
     TaskSummary,
     UpdateFindingRequest,
     UpdateTaskRequest,
+    summarize_finding,
 )
 from app.api.viewer_proxy import attach_viewer_proxy_url
 from app.security.auth import require_api_key
@@ -343,12 +344,34 @@ async def resume_task(
 
 
 @router.get("/tasks/{task_id}/results", response_model=FindingsResponse)
-async def task_results(task_id: str, manager: TaskManager = Depends(get_manager)):
+async def task_results(
+    task_id: str,
+    summary: bool = Query(
+        default=False,
+        description="Omit PoC/evidence bodies — use for list UIs; fetch one finding for detail",
+    ),
+    manager: TaskManager = Depends(get_manager),
+):
     try:
         findings = await asyncio.to_thread(manager.get_results, task_id)
     except TaskError as exc:
         return _error(exc)
+    if summary:
+        findings = [summarize_finding(item) for item in findings]
     return FindingsResponse(task_id=task_id, findings=findings)
+
+
+@router.get("/tasks/{task_id}/findings/{finding_id}", response_model=Finding)
+async def get_finding(
+    task_id: str,
+    finding_id: str,
+    manager: TaskManager = Depends(get_manager),
+):
+    try:
+        finding = await asyncio.to_thread(manager.get_finding, task_id, finding_id)
+    except TaskError as exc:
+        return _error(exc)
+    return finding
 
 
 @router.get("/tasks/{task_id}/report", response_model=ReportResponse)

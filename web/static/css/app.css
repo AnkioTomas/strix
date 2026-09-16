@@ -781,6 +781,17 @@ button, input, select, textarea {
   max-width: none;
 }
 
+/* Skip layout for off-screen report sections (many vulns). */
+.report-layout .penna-host h2,
+.report-layout .penna-host hr {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 5rem;
+}
+
+.report-loading {
+  padding: 1rem 0.25rem;
+}
+
 @media (max-width: 960px) {
   .report-layout {
     grid-template-columns: 1fr;

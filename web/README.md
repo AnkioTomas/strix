@@ -110,7 +110,8 @@ PYTHONPATH=. python -m app
 | POST | `/api/v1/tasks/{id}/retest` | 复测子任务（强制标记修复状态 + 佐证；把父任务原始漏洞正文写入 instruction，并 seed 进子 run 供 `list_reports`/`get_report`；JSON `instruction` 可附凭证；`finding_ids` 可指定漏洞；跳过已标无效项；若存在待测标记则只测那些） |
 | PATCH | `/api/v1/tasks/{id}/findings/{fid}` | 漏洞审核：`review_status=active\|invalid`，`request_test`；无效项不进报告、不参与复测 |
 | POST | `/api/v1/tasks/{id}/findings/{fid}/test` | 对指定漏洞发起聚焦复测子任务 |
-| GET | `/api/v1/tasks/{id}/results` | 该任务 Finding（含 `review_status` / `request_test`） |
+| GET | `/api/v1/tasks/{id}/results` | 该任务 Finding（含 `review_status` / `request_test`）；`?summary=1` 省略 PoC/证据正文，列表页请用这个 |
+| GET | `/api/v1/tasks/{id}/findings/{fid}` | 单条 Finding 全文（详情页） |
 | GET | `/api/v1/tasks/{id}/report` | Markdown 报告 |
 | GET | `/api/v1/tasks/{id}/events` | Agent 事件 |
 | GET | `/api/v1/tasks/{id}/events/stream` | SSE |

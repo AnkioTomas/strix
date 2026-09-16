@@ -240,6 +240,14 @@ def test_get_results_refreshes_stale_cache(client: TestClient):
     assert [f["id"] for f in third] == [f["id"] for f in before]
     assert manager._findings_disk_mtime.get(task["id"]) is not None
 
+    summary = client.get(f"/api/v1/tasks/{task['id']}/results?summary=1").json()["findings"]
+    assert [f["id"] for f in summary] == ["v2", "v1"]
+    assert summary[0].get("poc") in (None, "")
+    assert summary[0].get("description") in (None, "")
+    detail = client.get(f"/api/v1/tasks/{task['id']}/findings/v2").json()
+    assert "click" in (detail.get("poc") or "")
+    assert detail.get("screenshots") == ["images/v2-1.png"]
+
 
 def test_get_report_skips_rebuild_when_fresh(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     manager = client.app.state.manager

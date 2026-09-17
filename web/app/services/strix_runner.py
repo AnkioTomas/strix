@@ -174,16 +174,18 @@ class LiveStrixSession:
         from app.services.attachments import resolve_task_workspace_files
 
         args = _build_args(target=target, task=task, settings=settings)
-        if task.get("action") == "resume" and task.get("run_name"):
+        resume_like = task.get("action") in {"resume", "retest"} and task.get("run_name")
+        if resume_like:
             logger.info(
-                "resuming Strix run task=%s run_name=%s (CLI --resume equivalent)",
+                "resuming Strix run task=%s run_name=%s action=%s (CLI --resume equivalent)",
                 self.task_id,
                 task.get("run_name"),
+                task.get("action"),
             )
             _prepare_resume_args(args, run_name=str(task["run_name"]), task=task)
         else:
-            if task.get("action") == "resume" and not task.get("run_name"):
-                raise RuntimeError("resume requested but task has no run_name")
+            if task.get("action") in {"resume", "retest"} and not task.get("run_name"):
+                raise RuntimeError(f"{task.get('action')} requested but task has no run_name")
             if task.get("type") == "pentest":
                 from strix.interface.scan_setup import HOST_GATEWAY_HOSTNAME
                 from strix.interface.utils import rewrite_localhost_targets
@@ -206,21 +208,12 @@ class LiveStrixSession:
             args.workspace_files = attached
         self.run_name = args.run_name
         assert self.run_name
-        if task.get("action") == "resume" and self.run_name != task.get("run_name"):
+        if resume_like and self.run_name != task.get("run_name"):
             raise RuntimeError(
                 f"resume must keep run_name={task.get('run_name')!r}, "
                 f"got {self.run_name!r}"
             )
         run_dir = run_dir_for(self.run_name)
-        if task.get("action") == "retest":
-            from app.services.results import apply_prior_findings
-
-            if apply_prior_findings(Path(task["workspace"]), run_dir):
-                logger.info(
-                    "seeded parent vulnerability reports into retest run task=%s run=%s",
-                    self.task_id,
-                    self.run_name,
-                )
 
         scan_config: dict[str, Any] = {
             "scan_id": self.run_name,

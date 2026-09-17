@@ -255,7 +255,24 @@ def _retest_tag(status: object | None) -> str | None:
     return report_labels()[key]
 
 
+def _short_evidence_blurb(text: str, *, max_len: int = 160) -> str:
+    """One short cell-safe line — strip ATX headings, collapse fluff."""
+    lines: list[str] = []
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not stripped or _ATX_HEADING_RE.match(stripped):
+            continue
+        lines.append(stripped)
+    collapsed = " ".join(lines)
+    collapsed = re.sub(r"\s+", " ", collapsed).strip()
+    if len(collapsed) <= max_len:
+        return collapsed
+    cut = collapsed[: max_len - 1].rsplit(" ", 1)[0] or collapsed[: max_len - 1]
+    return f"{cut}…"
+
+
 def _retest_evidence_cell(report: dict[str, Any]) -> str:
+    """Screenshots first; never dump a novel into the summary table."""
     labels = report_labels()
     bits: list[str] = []
     rels = report.get("screenshot_rels") or []
@@ -269,16 +286,18 @@ def _retest_evidence_cell(report: dict[str, Any]) -> str:
             if shot:
                 bits.append(f"`{shot}`")
     verification = str(report.get("fix_verification") or "").strip()
-    if verification:
-        bits.append(verification.replace("|", "\\|").replace("\n", "<br>"))
     evidence = str(report.get("evidence") or "").strip()
     cited = extract_screenshot_paths(evidence, verification)
     if cited and not rels:
         for path in cited[:3]:
             bits.append(f"`{path}`")
+    # Full write-up lives under the finding appendix; the table only needs a cue.
+    if not bits and verification:
+        blurb = _short_evidence_blurb(verification)
+        if blurb:
+            bits.append(blurb.replace("|", "\\|"))
     if not bits:
         return labels["retest_no_evidence"]
-    # Deduplicate while preserving order.
     ordered: list[str] = []
     seen: set[str] = set()
     for bit in bits:
@@ -286,6 +305,14 @@ def _retest_evidence_cell(report: dict[str, Any]) -> str:
             seen.add(bit)
             ordered.append(bit)
     return "<br>".join(ordered)
+
+
+def _labeled_prose(label: str, text: object) -> list[str]:
+    """Label + demoted agent prose so nested ``#`` cannot enter the TOC."""
+    body = demote_markdown_headings(str(text), min_level=4).strip()
+    if not body:
+        return []
+    return [f"**{label}** {body}", ""]
 
 
 def _has_retest_data(vulnerability_reports: list[dict[str, Any]]) -> bool:
@@ -401,27 +428,23 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
         )
         appendix_bits.append("")
     if report.get("assumptions"):
-        appendix_bits.append(f"**{labels['assumptions']}** {report['assumptions']}")
-        appendix_bits.append("")
+        appendix_bits.extend(_labeled_prose(labels["assumptions"], report["assumptions"]))
     if report.get("counterevidence"):
-        appendix_bits.append(f"**{labels['counterevidence']}** {report['counterevidence']}")
-        appendix_bits.append("")
+        appendix_bits.extend(_labeled_prose(labels["counterevidence"], report["counterevidence"]))
     if report.get("confidence"):
-        appendix_bits.append(f"**{labels['confidence']}** {report['confidence']}")
-        appendix_bits.append("")
+        appendix_bits.extend(_labeled_prose(labels["confidence"], report["confidence"]))
     if report.get("confidence_rationale"):
-        appendix_bits.append(
-            f"**{labels['confidence_rationale']}** {report['confidence_rationale']}"
+        appendix_bits.extend(
+            _labeled_prose(labels["confidence_rationale"], report["confidence_rationale"])
         )
-        appendix_bits.append("")
     if report.get("severity_change_conditions"):
-        appendix_bits.append(
-            f"**{labels['severity_change']}** {report['severity_change_conditions']}"
+        appendix_bits.extend(
+            _labeled_prose(labels["severity_change"], report["severity_change_conditions"])
         )
-        appendix_bits.append("")
     if report.get("fix_verification"):
-        appendix_bits.append(f"**{labels['fix_verification']}** {report['fix_verification']}")
-        appendix_bits.append("")
+        appendix_bits.extend(
+            _labeled_prose(labels["fix_verification"], report["fix_verification"])
+        )
     if report.get("retest_status"):
         status_text = _retest_status_label(report.get("retest_status"))
         if chrome_locale() == "zh":

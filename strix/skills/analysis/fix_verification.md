@@ -121,9 +121,7 @@ Withhold and explain when:
 
 ## Recording It
 
-Everything above goes in `fix_verification`, which is required whenever
-any location carries a `fix_after`. Write the actual commands and their
-results, grouped by gate, and mark every gate you could only reason
-about — rather than execute — as an explicit gap. Do not hide proof
-gaps; a reviewer who knows gate 5 was skipped can run it themselves, but
-one who was told it passed cannot.
+Everything above is process. Put a short factual record in
+`fix_verification` (required when any location has `fix_after`):
+commands + results, and which gates were only reasoned about. No
+thinking, rule restatements, or ATX headings. Do not hide proof gaps.

@@ -23,12 +23,10 @@ from app.services.agent_prompts import (
     REFRESH_REPORT_INSTRUCTION,
     RETEST_INSTRUCTION,
     focused_retest_instruction,
-    format_prior_reports,
 )
 from app.services.findings import (
     apply_finding_flags,
     invalid_finding_ids,
-    normalize_findings,
     sort_findings,
 )
 from app.services.git_clone import GitError, clone_repository
@@ -37,9 +35,7 @@ from app.services.results import (
     read_events,
     read_report_markdown,
     read_run_record,
-    resolve_retest_reports,
     workspace_run_dir,
-    write_prior_findings,
 )
 from app.services.run_import import (
     discover_run_dirs,
@@ -76,30 +72,6 @@ def _merge_connectivity_note(existing: str | None, detail: str) -> str:
     else:
         merged = f"{base}\n{line}"
     return merged[:_NOTES_MAX_LEN]
-
-
-_RETEST_NAME_PREFIX = "复测 · "
-
-
-def _retest_display_name(parent: dict[str, Any], targets: list[dict[str, Any]]) -> str:
-    """Name the child task so the sidebar doesn't look like a twin of the parent."""
-    base = str(
-        parent.get("name")
-        or parent.get("target")
-        or parent.get("source_url")
-        or parent.get("id")
-        or "task"
-    ).strip()
-    if base.startswith(_RETEST_NAME_PREFIX):
-        base = base[len(_RETEST_NAME_PREFIX) :].strip() or base
-    if len(targets) == 1:
-        tip = str(targets[0].get("title") or targets[0].get("id") or "").strip()
-        name = f"{_RETEST_NAME_PREFIX}{base} · {tip}" if tip else f"{_RETEST_NAME_PREFIX}{base}"
-    elif targets:
-        name = f"{_RETEST_NAME_PREFIX}{base} · {len(targets)}项"
-    else:
-        name = f"{_RETEST_NAME_PREFIX}{base}"
-    return name[:200]
 
 
 class TaskError(Exception):
@@ -509,16 +481,14 @@ class TaskManager:
         *,
         finding_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        parent = self.get_task(task_id)
-        if parent["status"] not in TERMINAL:
+        """Resume the same run with a retest nudge (reuse agents, scripts, vulns)."""
+        task = self.get_task(task_id)
+        if task["status"] not in TERMINAL:
             raise TaskError("TASK_ALREADY_RUNNING", "Only finished tasks can be retested")
-        base = self._request_from_task(parent)
+
         findings = self.get_results(task_id)
         flags = self.db.list_finding_flags(task_id)
         skipped_invalid = invalid_finding_ids(flags)
-        parent_run = workspace_run_dir(
-            Path(parent["workspace"]), parent.get("run_name")
-        )
 
         selected_ids = [str(x) for x in (finding_ids or []) if str(x).strip()]
         if not selected_ids:
@@ -528,18 +498,14 @@ class TaskManager:
                 if flag.get("request_test") and str(flag.get("review_status") or "") != "invalid"
             ]
 
-        include_ids = set(selected_ids) if selected_ids else None
-        # Disk vulnerabilities.json is authoritative — works for imported runs
-        # that never had a findings-table cache.
-        seed_reports = resolve_retest_reports(
-            parent_run_dir=parent_run,
-            findings=findings,
-            include_ids=include_ids,
-            skipped_invalid=skipped_invalid,
-        )
-        targets = normalize_findings(seed_reports, task_id=task_id) if seed_reports else []
-
+        active = [
+            item
+            for item in findings
+            if str(item.get("id") or "") not in skipped_invalid
+        ]
         if selected_ids:
+            wanted = set(selected_ids)
+            targets = [item for item in active if str(item.get("id") or "") in wanted]
             if not targets:
                 raise TaskError(
                     "NO_FINDINGS_TO_RETEST",
@@ -550,15 +516,12 @@ class TaskManager:
                 task_id, [str(item.get("id")) for item in targets]
             )
         else:
-            if findings and not targets:
+            if findings and not active:
                 raise TaskError(
                     "NO_FINDINGS_TO_RETEST",
                     "All findings are marked invalid; nothing to retest",
                 )
             note = RETEST_INSTRUCTION
-            reports = format_prior_reports(targets)
-            if reports:
-                note = f"{note}\n\n{reports}"
             if skipped_invalid:
                 skipped_titles = [
                     str(item.get("title") or item.get("id"))
@@ -566,31 +529,14 @@ class TaskManager:
                     if str(item.get("id")) in skipped_invalid
                 ]
                 note = (
-                    f"{note}\n\n[控制台排除 — 无效漏洞，勿复测]\n"
+                    f"{note}\n\n[跳过 — 无效漏洞]\n"
                     + "\n".join(f"- {title}" for title in skipped_titles)
                 )
 
         extra = (instruction or "").strip()
         if extra:
             note = f"{note}\n\n[附加说明]\n{extra}"
-        if base.instruction:
-            base.instruction = f"{base.instruction}\n\n{note}"
-        else:
-            base.instruction = note
-        base.name = _retest_display_name(parent, targets)
-        child = self.create_task(
-            base,
-            parent_task_id=task_id,
-            action="retest",
-            copy_attachments_from=parent["workspace"],
-        )
-        write_prior_findings(
-            Path(child["workspace"]),
-            findings=targets,
-            parent_run_dir=parent_run,
-            reports=seed_reports,
-        )
-        return child
+        return self.resume_task(task_id, note, action="retest")
 
     def update_finding_review(
         self,
@@ -658,7 +604,13 @@ class TaskManager:
             f"Cannot refresh report for task in status {task['status']}",
         )
 
-    def resume_task(self, task_id: str, instruction: str | None = None) -> dict[str, Any]:
+    def resume_task(
+        self,
+        task_id: str,
+        instruction: str | None = None,
+        *,
+        action: str = "resume",
+    ) -> dict[str, Any]:
         """Continue a finished scan in-place via Strix ``--resume`` (same task id)."""
         from strix.core.paths import RUNS_DIR_NAME, RUNTIME_STATE_DIR_NAME
 
@@ -729,10 +681,11 @@ class TaskManager:
                     exc_info=True,
                 )
 
+        resume_action = action if action in {"resume", "retest"} else "resume"
         updated = self.db.update_task(
             task_id,
             status="queued",
-            action="resume",
+            action=resume_action,
             exit_code=None,
             error=None,
             finished_at=None,

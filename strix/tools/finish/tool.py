@@ -218,8 +218,9 @@ async def finish_scan(
       Never leak internal identifiers (proxy request IDs, internal
       vulnerability report IDs, or any system-generated IDs) into any
       field.
-    - Tone: formal, third-person, objective, concise. This is a
-      consultant deliverable, not an engineering log.
+    - Tone: formal, third-person, objective, concise. Client facts only —
+      no thinking, rule restatements, or methodology essays. No ATX
+      ``#``/``##`` inside fields (delivery chrome owns those levels).
     - Each section has a specific role:
 
         - ``executive_summary`` — for non-technical leadership **and**
@@ -238,19 +239,15 @@ async def finish_scan(
           Copied into the delivery report **appendix**.
         - ``recommendations`` — prioritized actions grouped by urgency
           (Immediate / Short-term / Medium-term), each with concrete
-          remediation steps. End with retest/validation guidance.
+          remediation steps. One short retest line is enough.
           Copied into the delivery report **appendix**.
 
         Do **not** invent a metadata table (system name / tech stack /
         standards / engagement type). Put that context in these prose
         fields if it matters.
 
-    - **Formatting — use markdown in every field.** These fields may be
-      rendered into generated reports, so structure them clearly: lead
-      each section with a short ``# Heading``, use ``**bold**`` for labels/emphasis,
-      ``inline code`` for identifiers/paths/parameters, bullet or
-      numbered lists for enumerations, and fenced code blocks
-      (```` ```language ````) for any code/payload excerpts. Never emit
+    - **Formatting — use markdown in every field.** Prefer ``**bold**``,
+      lists, and fenced code; do not lead with ``#``/``##``. Never emit
       one flat wall of prose or leave code unformatted.
     - If **zero** vulnerabilities were found, say so plainly and
       characterize the posture positively; ``technical_analysis`` should
@@ -260,11 +257,8 @@ async def finish_scan(
     Example (abbreviated — mirror this structure, not the wording)::
 
         executive_summary:
-            # Executive Summary
-
             An external assessment of the **Acme Customer Portal**
-            identified multiple weaknesses that could lead to
-            unauthorized access to customer data.
+            identified weaknesses that could expose customer data.
 
             **Overall risk posture:** Elevated.
 
@@ -273,45 +267,35 @@ async def finish_scan(
               network ranges.
             - Broken tenant isolation enabling cross-tenant data access.
 
-            **Business impact**
-            - Potential exposure of customer records across tenants.
+            **Business impact:** potential exposure of customer records
+            across tenants.
 
         methodology:
-            # Methodology
-
-            Conducted per the **OWASP WSTG**.
-
-            **Engagement type:** Gray-box external test.
-            **Scope:** `https://app.acme.example`, `.../api/v1/`.
-
-            **Activities:** recon, authn/session review, authorization
-            and tenant-isolation testing, input/SSRF testing.
+            Conducted per the **OWASP WSTG**. Gray-box external test of
+            `https://app.acme.example` and `.../api/v1/` — recon,
+            authn/session, authorization/tenant isolation, input/SSRF.
 
         technical_analysis:
-            # Technical Analysis
+            **Severity** = exploitability × impact.
 
-            **Severity model** reflects exploitability x impact.
+            1. **SSRF in URL preview** (Critical) — no destination
+               allowlist; reaches link-local addresses.
+            2. **Broken tenant isolation** (High) — object IDs accepted
+               without ownership checks.
 
-            1. **SSRF in URL preview** (Critical) — insufficient
-               destination validation; reaches link-local addresses.
-            2. **Broken tenant isolation** (High) — object identifiers
-               accepted without ownership checks.
-
-            **Systemic themes:** authorization enforced inconsistently;
-            no deny-by-default egress policy.
+            **Themes:** inconsistent authorization; no deny-by-default
+            egress.
 
         recommendations:
-            # Recommendations
-
             **Immediate**
-            1. Remediate SSRF: enforce a destination allowlist,
-               deny-by-default, re-validate on every redirect hop.
+            1. SSRF: destination allowlist, deny-by-default, re-validate
+               redirects.
 
             **Short-term**
             2. Centralize authorization with deny-by-default middleware.
 
-            **Retest & validation:** re-test immediate items to confirm
-            SSRF and tenant-isolation controls hold.
+            **Retest:** re-check SSRF and tenant isolation after the
+            immediate fixes.
 
     Args:
         executive_summary: Business-level summary for leadership.

@@ -1048,7 +1048,8 @@ def test_tool_descriptions_include_formatting_guidance() -> None:
 
     finish_desc = finish_scan.description
     assert "markdown" in finish_desc.lower()
-    assert "# Executive Summary" in finish_desc
+    assert "Overall risk posture" in finish_desc
+    assert "thinking" in finish_desc.lower() or "rule restatement" in finish_desc
 
     dep_desc = create_dependency_report.description
     assert "cve" in dep_desc.lower()

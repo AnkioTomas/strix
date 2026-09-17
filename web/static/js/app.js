@@ -1328,7 +1328,7 @@
     if (!selected) return;
     const note = await openInstructionModal({
       title: "复测",
-      sub: "将创建复测子任务，逐条验证漏洞是否修复并要求截图/佐证。凭证过期、新账号、环境变更等信息请写在下面，会一并交给 Agent。",
+      sub: "将在同一 run 上 resume 复测：复用已有 Agent 环境、脚本与漏洞报告。凭证过期、新账号、环境变更等信息请写在下面。",
       label: "复测说明（凭证 / 环境）",
       placeholder:
         "例如：\n登录账号 admin / 新密码 xxx\nCookie: session=...\n目标仍是 https://example.com，忽略证书错误",
@@ -1343,6 +1343,7 @@
       });
       await refresh();
       selectTask(t.id);
+      setTab("viewer");
     } catch (e) {
       alert(e.message);
     }

@@ -932,9 +932,9 @@ async def create_vulnerability_report(
       Never leak internal identifiers (proxy request IDs, internal
       report IDs) into any field.
     - Tone: formal, objective, third-person, vendor-neutral, concise.
-      Avoid internal-guidance headings like "QUICK", "Approach", or
-      "Techniques" that read like an engineering runbook rather than a
-      client deliverable.
+      Client facts only — no thinking, rule restatements, methodology
+      essays, or ATX ``#``/``##`` inside fields. Avoid runbook headings
+      like "QUICK" / "Approach" / "Techniques".
     - **Use markdown in every text field**: ``**bold**`` for emphasis,
       ``inline code`` for identifiers/values/parameters, and fenced
       code blocks (```` ```language ````) for any code/payload/HTTP
@@ -1206,7 +1206,8 @@ async def create_vulnerability_report(
 
             Then write what you did: the commands you ran and their
             results, and every gate you could only reason about rather
-            than execute, marked explicitly as a gap. Do not claim a
+            than execute, marked explicitly as a gap. Keep it short —
+            facts only, no thinking or rule restatements. Do not claim a
             gate passed because it looks right. If a gate fails, revise
             the patch or drop ``fix_after`` and leave the location
             informational — never compensate for a failed security

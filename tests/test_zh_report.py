@@ -218,10 +218,53 @@ def test_demote_headings_keeps_appendix_out_of_top_toc() -> None:
             "description": "desc",
             "impact": "impact",
             "technical_analysis": "# 根因\n\n查询结构逆向",
+            "fix_verification": (
+                "## 一、复测侧的验证已做到什么\n\n"
+                "原 PoC 仍返回 200。\n\n"
+                "## 二、四个假阴性陷阱\n\n"
+                "长篇方法论……"
+            ),
         },
         index=1,
     )
     assert "### 附录" in section
     assert "#### 根因" in section
+    assert "#### 一、复测侧的验证已做到什么" in section
     assert re.search(r"^# 根因", section, re.MULTILINE) is None
     assert re.search(r"^## 根因", section, re.MULTILINE) is None
+    assert re.search(r"^## 一、复测侧", section, re.MULTILINE) is None
+
+
+def test_retest_evidence_cell_prefers_screenshots_over_essay() -> None:
+    from strix.report.zh_report import _retest_evidence_cell
+
+    cell = _retest_evidence_cell(
+        {
+            "screenshot_rels": ["images/vuln-0001-1.png"],
+            "fix_verification": (
+                "## 一、复测侧\n\n"
+                + ("很长的方法论。" * 40)
+            ),
+        }
+    )
+    assert "images/vuln-0001-1.png" in cell
+    assert "假阴性" not in cell
+    assert "很长的方法论" not in cell
+
+
+def test_retest_evidence_cell_shortens_text_when_no_shots() -> None:
+    from strix.report.zh_report import _retest_evidence_cell
+
+    cell = _retest_evidence_cell(
+        {
+            "fix_verification": (
+                "## 一、标题\n\n"
+                "结论：未修复。重放原 PoC 仍返回 200 与完整管理员面板。"
+                + (" 额外废话。" * 30)
+            ),
+        }
+    )
+    assert "一、标题" not in cell
+    assert "未修复" in cell
+    assert len(cell) < 200
+    assert cell.endswith("…") or "结论" in cell

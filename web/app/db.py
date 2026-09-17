@@ -201,10 +201,15 @@ class Database:
         return int(row["c"] if row else 0)
 
     def claim_next_queued(self) -> dict[str, Any] | None:
-        """Atomically move one queued task to starting."""
+        """Atomically move one queued task to starting.
+
+        Order by ``updated_at`` (not ``created_at``) so resume/retest
+        re-queues go to the *back* of the line instead of cutting ahead
+        of newer tasks that are already waiting.
+        """
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM tasks WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1"
+                "SELECT * FROM tasks WHERE status = 'queued' ORDER BY updated_at ASC LIMIT 1"
             ).fetchone()
             if not row:
                 return None

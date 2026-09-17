@@ -677,6 +677,55 @@ def test_refresh_report_writes_resume_instruction(client: TestClient):
     assert REFRESH_REPORT_INSTRUCTION.strip() in note.read_text(encoding="utf-8")
 
 
+def test_retest_queues_behind_existing_waiting_tasks(client: TestClient):
+    """Retest must not cut the line via the original created_at timestamp."""
+    manager = client.app.state.manager
+
+    waiting = client.post(
+        "/api/v1/tasks",
+        json={"type": "pentest", "target": "https://example.com/wait", "scan_mode": "quick"},
+    ).json()
+    assert waiting["status"] == "queued"
+
+    old = client.post(
+        "/api/v1/tasks",
+        json={"type": "pentest", "target": "https://example.com/old", "scan_mode": "quick"},
+    ).json()
+    task = manager.get_task(old["id"])
+    workspace = Path(task["workspace"])
+    run_name = "old_retest_queue"
+    state_dir = workspace / "strix_runs" / run_name / ".state"
+    state_dir.mkdir(parents=True)
+    (workspace / "strix_runs" / run_name / "run.json").write_text(
+        json.dumps({"run_name": run_name, "status": "completed", "targets_info": []}),
+        encoding="utf-8",
+    )
+    (state_dir / "agents.json").write_text("{}", encoding="utf-8")
+    # Simulate an older finished task (created earlier than ``waiting``).
+    manager.db.update_task(
+        old["id"],
+        status="completed",
+        finished_at="2026-01-01T00:00:00Z",
+        run_name=run_name,
+        created_at="2020-01-01T00:00:00Z",
+        updated_at="2020-01-01T00:00:00Z",
+    )
+    manager._processes.pop(old["id"], None)
+
+    retest = client.post(f"/api/v1/tasks/{old['id']}/retest")
+    assert retest.status_code == 202, retest.text
+    assert retest.json()["status"] == "queued"
+    assert retest.json()["action"] == "retest"
+
+    first = manager.db.claim_next_queued()
+    assert first is not None
+    assert first["id"] == waiting["id"], "waiting task must stay ahead of retest"
+
+    second = manager.db.claim_next_queued()
+    assert second is not None
+    assert second["id"] == old["id"]
+
+
 def test_retest_embeds_mandatory_instruction(client: TestClient):
     from app.services.agent_prompts import RETEST_INSTRUCTION
 

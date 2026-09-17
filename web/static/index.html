@@ -139,6 +139,11 @@
           <label class="span-2">备注
             <textarea id="taskNotes" placeholder="可选。给自己看的说明，不会发给模型。"></textarea>
           </label>
+          <label>
+            最早开始
+            <input id="earliestStart" type="datetime-local" />
+            <span class="field-hint">可选。到点前保持排队，不插队；留空则立即可被认领。</span>
+          </label>
           <label class="span-2">附件（挂载到沙箱 /workspace，并告知模型）
             <input id="attachments" type="file" multiple />
             <span class="field-hint" id="attachmentsHint">可选。例如 PoC、wordlist、凭证说明。</span>

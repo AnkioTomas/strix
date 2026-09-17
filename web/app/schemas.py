@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 ScanMode = Literal["quick", "standard", "deep"]
@@ -19,6 +20,22 @@ TaskStatus = Literal[
     "failed",
     "cancelled",
 ]
+
+
+def normalize_earliest_start(value: str | None) -> str | None:
+    """Normalize optional ISO datetime to UTC ``…Z``; empty → None."""
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("earliest_start must be an ISO-8601 datetime") from exc
+    if dt.tzinfo is None:
+        raise ValueError("earliest_start must include a timezone (Z or offset)")
+    return dt.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 class GitSource(BaseModel):
@@ -54,6 +71,7 @@ class CreateTaskRequest(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     notes: str | None = Field(default=None, max_length=4000)
     held: bool = False
+    earliest_start: str | None = None
     scan_mode: ScanMode = "deep"
     max_budget: float | None = Field(default=None, gt=0)
     parent_task_id: str | None = None
@@ -63,6 +81,13 @@ class CreateTaskRequest(BaseModel):
     use_proxy: bool = False
     request_headers: str | None = Field(default=None, max_length=8000)
     use_headers: bool = False
+
+    @field_validator("earliest_start", mode="before")
+    @classmethod
+    def _normalize_earliest_start(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        return normalize_earliest_start(str(value))
 
     @model_validator(mode="after")
     def validate_shape(self) -> CreateTaskRequest:
@@ -112,6 +137,19 @@ class ResumeTaskRequest(BaseModel):
     """Optional nudge delivered as Strix ``resume_instruction``."""
 
     instruction: str | None = None
+
+
+class RetryTaskRequest(BaseModel):
+    """Optional schedule for a retry child task."""
+
+    earliest_start: str | None = None
+
+    @field_validator("earliest_start", mode="before")
+    @classmethod
+    def _normalize_earliest_start(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        return normalize_earliest_start(str(value))
 
 
 class ImportRunsRequest(BaseModel):
@@ -175,6 +213,7 @@ class TaskSummary(BaseModel):
     proxy_url: str | None = None
     proxy_display: str | None = None
     request_headers: str | None = None
+    earliest_start: str | None = None
 
 
 class TaskListResponse(BaseModel):

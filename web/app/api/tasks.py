@@ -27,6 +27,7 @@ from app.schemas import (
     RequestFindingTestResponse,
     ResumeTaskRequest,
     RetestTaskRequest,
+    RetryTaskRequest,
     TaskListResponse,
     TaskLogsResponse,
     TaskSummary,
@@ -86,6 +87,7 @@ async def _parse_create_payload(
             "name": _form_value(form, "name"),
             "notes": _form_value(form, "notes"),
             "held": str(form.get("held") or "").lower() in {"1", "true", "yes", "on"},
+            "earliest_start": _form_value(form, "earliest_start"),
             "use_proxy": str(form.get("use_proxy") or "").lower()
             in {"1", "true", "yes", "on"},
             "proxy_url": _form_value(form, "proxy_url"),
@@ -261,9 +263,18 @@ async def delete_task(task_id: str, manager: TaskManager = Depends(get_manager))
 
 
 @router.post("/tasks/{task_id}/retry", status_code=202, response_model=TaskSummary)
-async def retry_task(task_id: str, manager: TaskManager = Depends(get_manager)):
+async def retry_task(
+    task_id: str,
+    payload: RetryTaskRequest | None = None,
+    manager: TaskManager = Depends(get_manager),
+):
+    earliest_start = payload.earliest_start if payload else None
     try:
-        task = await asyncio.to_thread(manager.retry_task, task_id)
+        task = await asyncio.to_thread(
+            manager.retry_task,
+            task_id,
+            earliest_start=earliest_start,
+        )
     except TaskError as exc:
         return _error(exc)
     return _summary(task)

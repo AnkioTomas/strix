@@ -1236,3 +1236,64 @@ def test_import_cli_runs(client: TestClient, tmp_path: Path):
     ).json()
     assert again["imported_count"] == 0
     assert again["skipped_count"] == 1
+
+
+def test_earliest_start_skips_claim_until_due(client: TestClient):
+    """Future earliest_start stays queued; due/null tasks claim first."""
+    manager = client.app.state.manager
+
+    scheduled = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com/scheduled",
+            "scan_mode": "quick",
+            "earliest_start": "2099-01-01T00:00:00Z",
+        },
+    )
+    assert scheduled.status_code == 202, scheduled.text
+    body = scheduled.json()
+    assert body["status"] == "queued"
+    assert body["earliest_start"] == "2099-01-01T00:00:00Z"
+
+    ready = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com/ready",
+            "scan_mode": "quick",
+        },
+    ).json()
+
+    claimed = manager.db.claim_next_queued()
+    assert claimed is not None
+    assert claimed["id"] == ready["id"]
+
+    assert manager.db.claim_next_queued() is None
+
+    manager.db.update_task(body["id"], earliest_start="2000-01-01T00:00:00Z")
+    due = manager.db.claim_next_queued()
+    assert due is not None
+    assert due["id"] == body["id"]
+
+
+def test_retry_with_earliest_start(client: TestClient):
+    created = client.post(
+        "/api/v1/tasks",
+        json={"type": "pentest", "target": "https://example.com", "scan_mode": "quick"},
+    ).json()
+    manager = client.app.state.manager
+    manager.db.update_task(created["id"], status="failed", finished_at="2026-01-01T00:00:00Z")
+    manager._processes.pop(created["id"], None)
+
+    retried = client.post(
+        f"/api/v1/tasks/{created['id']}/retry",
+        json={"earliest_start": "2099-06-01T12:30:00+08:00"},
+    )
+    assert retried.status_code == 202, retried.text
+    body = retried.json()
+    assert body["parent_task_id"] == created["id"]
+    assert body["action"] == "retry"
+    assert body["status"] == "queued"
+    assert body["earliest_start"] == "2099-06-01T04:30:00Z"
+    assert manager.db.claim_next_queued() is None

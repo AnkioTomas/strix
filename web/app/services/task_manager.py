@@ -213,6 +213,7 @@ class TaskManager:
             "parent_task_id": parent_task_id,
             "action": action,
             "error": None,
+            "earliest_start": req.earliest_start or None,
             "created_at": now,
             "started_at": None,
             "finished_at": None,
@@ -483,11 +484,21 @@ class TaskManager:
         self.ingest_results(task)
         return self.get_task(task_id)
 
-    def retry_task(self, task_id: str) -> dict[str, Any]:
+    def retry_task(
+        self,
+        task_id: str,
+        *,
+        earliest_start: str | None = None,
+    ) -> dict[str, Any]:
         parent = self.get_task(task_id)
         if parent["status"] not in TERMINAL:
             raise TaskError("TASK_ALREADY_RUNNING", "Only finished tasks can be retried")
         req = self._request_from_task(parent)
+        # Do not inherit parent schedule; only apply when the caller sets one.
+        if earliest_start is not None:
+            req = CreateTaskRequest.model_validate(
+                {**req.model_dump(), "earliest_start": earliest_start}
+            )
         return self.create_task(
             req,
             parent_task_id=task_id,

@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     parent_task_id TEXT,
     action TEXT,
     error TEXT,
+    earliest_start TEXT,
     created_at TEXT NOT NULL,
     started_at TEXT,
     finished_at TEXT,
@@ -124,6 +125,8 @@ class Database:
             conn.execute("ALTER TABLE tasks ADD COLUMN proxy_url TEXT")
         if "request_headers" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN request_headers TEXT")
+        if "earliest_start" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN earliest_start TEXT")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -206,14 +209,19 @@ class Database:
         Order by ``updated_at`` (not ``created_at``) so resume/retest
         re-queues go to the *back* of the line instead of cutting ahead
         of newer tasks that are already waiting.
+
+        Skip tasks whose ``earliest_start`` is still in the future.
         """
+        now = utc_now()
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM tasks WHERE status = 'queued' ORDER BY updated_at ASC LIMIT 1"
+                "SELECT * FROM tasks WHERE status = 'queued' "
+                "AND (earliest_start IS NULL OR earliest_start <= ?) "
+                "ORDER BY updated_at ASC LIMIT 1",
+                (now,),
             ).fetchone()
             if not row:
                 return None
-            now = utc_now()
             conn.execute(
                 "UPDATE tasks SET status = 'starting', started_at = ?, updated_at = ? "
                 "WHERE id = ? AND status = 'queued'",

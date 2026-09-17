@@ -266,6 +266,7 @@
     $("taskName").value = "";
     $("taskNotes").value = "";
     $("taskHeld").checked = false;
+    $("earliestStart").value = "";
     $("taskType").value = "pentest";
     $("scanMode").value = "deep";
     $("target").value = "";
@@ -287,6 +288,7 @@
     $("taskName").value = t.name || "";
     $("taskNotes").value = t.notes || "";
     $("taskHeld").checked = false;
+    $("earliestStart").value = "";
     $("taskType").value = t.type || "pentest";
     $("scanMode").value = t.scan_mode || "deep";
     $("instruction").value = t.instruction || "";
@@ -396,6 +398,7 @@
             <span>${esc(t.status)}</span>
             <span>${esc(t.type)}</span>
             ${t.action ? `<span class="task-action">${esc(actionLabel(t.action))}</span>` : ""}
+            ${t.earliest_start ? `<span class="task-action">定时：${esc(formatLocalShort(t.earliest_start))}</span>` : ""}
           </div>
         </li>`;
       })
@@ -452,6 +455,23 @@
     return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}:${get("second")} (UTC+8)`;
   }
 
+  function formatLocalShort(iso) {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  /** datetime-local value → UTC ISO with Z; empty → null. */
+  function localDatetimeToUtcZ(value) {
+    const text = (value || "").trim();
+    if (!text) return null;
+    const d = new Date(text);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString().replace(/\.\d{3}Z$/, "Z");
+  }
+
   function formatDuration(seconds) {
     if (seconds == null || !Number.isFinite(Number(seconds))) return "—";
     let s = Math.max(0, Math.floor(Number(seconds)));
@@ -500,13 +520,16 @@
       }
     }
     const usage = t.llm_usage || {};
-    $("selectedMeta").textContent = `${t.status} · ${t.scan_mode || "—"} · ${formatUtc8(t.created_at)}`;
+    $("selectedMeta").textContent = t.earliest_start
+      ? `${t.status} · ${t.scan_mode || "—"} · ${formatUtc8(t.created_at)} · 定时：${formatLocalShort(t.earliest_start)}`
+      : `${t.status} · ${t.scan_mode || "—"} · ${formatUtc8(t.created_at)}`;
     const rows = [
       ["名称", t.name || "（未命名）"],
       ["状态", t.status],
       ["类型", t.type],
       ["目标", t.target || t.source_url || "—"],
       ["动作", t.action || "—"],
+      ["最早开始", t.earliest_start ? formatLocalShort(t.earliest_start) : "（立即）"],
       ["Scan mode", t.scan_mode || "—"],
       ["Run", t.run_name || "—"],
       ["任务 ID", t.id],
@@ -1155,6 +1178,8 @@
     const notes = $("taskNotes").value.trim();
     if (notes) form.append("notes", notes);
     if ($("taskHeld").checked) form.append("held", "true");
+    const earliestStart = localDatetimeToUtcZ($("earliestStart").value);
+    if (earliestStart) form.append("earliest_start", earliestStart);
     const instruction = $("instruction").value.trim();
     if (instruction) form.append("instruction", instruction);
     const proxyUrl = $("proxyUrl").value.trim();

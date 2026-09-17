@@ -51,9 +51,12 @@ dependencies = [
   # the Intel macOS (macos-x86_64) release build's `uv sync --frozen`.
   "cryptography>=48.0.1,<49",
   "pyyaml>=6.0",
+  # Local OCR for ocr_image. RapidOCR pulls opencv-python (needs libGL); we
+  # force the headless build via [tool.uv].override-dependencies below.
   "rapidocr-onnxruntime>=1.3.0",
   "pillow>=10.0.0",
   "onnxruntime>=1.16.0",
+  "opencv-python-headless>=4.5.1.48",
 ]
 
 [project.optional-dependencies]
@@ -74,6 +77,13 @@ dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
   "types-requests>=2.32",
+]
+
+[tool.uv]
+# rapidocr-onnxruntime depends on opencv-python (GUI). On headless servers that
+# ImportError looks like "package missing". Force the headless build instead.
+override-dependencies = [
+  "opencv-python ; sys_platform == 'never'",
 ]
 
 [tool.pytest.ini_options]

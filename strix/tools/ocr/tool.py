@@ -22,7 +22,7 @@ _ENGINE_ERROR: str | None = None
 
 
 def _load_engine() -> Any:
-    """Lazy-load RapidOCR once. Raises RuntimeError with install hint if missing."""
+    """Lazy-load RapidOCR once. Raises RuntimeError with a real cause on failure."""
     global _ENGINE, _ENGINE_ERROR  # noqa: PLW0603
     if _ENGINE is not None:
         return _ENGINE
@@ -36,11 +36,23 @@ def _load_engine() -> Any:
         try:
             from rapidocr_onnxruntime import RapidOCR  # noqa: PLC0415
         except ImportError as exc:
-            _ENGINE_ERROR = (
-                "rapidocr_onnxruntime is missing from this Strix install. "
-                "Reinstall with: pip install -e .   (or: uv sync)"
-            )
-            raise RuntimeError(_ENGINE_ERROR) from exc
+            # Do NOT cache ImportError: host deps may be fixed without restarting
+            # the interpreter module, and a sticky message hides the real fix.
+            detail = str(exc).strip() or exc.__class__.__name__
+            hint = ""
+            low = detail.lower()
+            if "libgl" in low or "libglib" in low or "cv2" in low:
+                hint = (
+                    " Headless host tip: "
+                    "uv pip uninstall -y opencv-python && "
+                    "uv pip install opencv-python-headless"
+                    " — then restart the Strix process."
+                )
+            raise RuntimeError(
+                f"OCR import failed ({detail}). "
+                f"If packages are already installed, this is usually OpenCV/libGL"
+                f" on a headless server.{hint}"
+            ) from exc
         try:
             _ENGINE = RapidOCR()
         except Exception as exc:

@@ -56,7 +56,7 @@ async def test_ocr_image_missing_dependency(monkeypatch: pytest.MonkeyPatch) -> 
     )
     result = json.loads(raw)
     assert result["success"] is False
-    assert "rapidocr_onnxruntime" in result["error"] or "Reinstall" in result["error"]
+    assert "OCR import failed" in result["error"]
 
 
 @pytest.mark.asyncio

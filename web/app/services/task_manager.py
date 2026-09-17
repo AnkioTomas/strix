@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -72,6 +73,26 @@ def _merge_connectivity_note(existing: str | None, detail: str) -> str:
     else:
         merged = f"{base}\n{line}"
     return merged[:_NOTES_MAX_LEN]
+
+
+_DOWNLOAD_UNSAFE = re.compile(r'[/\\:*?"<>|\x00-\x1f]+')
+
+
+def report_download_filename(task: dict[str, Any]) -> str:
+    """Client-facing zip name: task name, with 「复测-」 when action is retest."""
+    base = str(
+        task.get("name")
+        or task.get("target")
+        or task.get("source_url")
+        or task.get("id")
+        or "report"
+    ).strip()
+    base = _DOWNLOAD_UNSAFE.sub("_", base)
+    base = re.sub(r"\s+", " ", base).strip(" ._") or "report"
+    base = base[:120]
+    if str(task.get("action") or "") == "retest" and not base.startswith("复测"):
+        base = f"复测-{base}"
+    return f"{base}-报告.zip"
 
 
 class TaskError(Exception):

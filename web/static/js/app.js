@@ -1464,12 +1464,36 @@
       }
       throw new Error(msg || `下载失败 (${res.status})`);
     }
+    const fromHeader = filenameFromContentDisposition(res.headers.get("content-disposition"));
     const blob = await res.blob();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = filename;
+    a.download = fromHeader || filename;
     a.click();
     URL.revokeObjectURL(a.href);
+  }
+
+  function filenameFromContentDisposition(header) {
+    if (!header) return "";
+    const star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(header);
+    if (star) {
+      try {
+        return decodeURIComponent(star[1].trim().replace(/["']/g, ""));
+      } catch {
+        /* fall through */
+      }
+    }
+    const plain = /filename\s*=\s*"([^"]+)"|filename\s*=\s*([^;]+)/i.exec(header);
+    return plain ? (plain[1] || plain[2] || "").trim() : "";
+  }
+
+  function reportDownloadFallbackName(task) {
+    if (!task) return "report-报告.zip";
+    let base = String(task.name || task.target || task.source_url || task.id || "report").trim();
+    base = base.replace(/[/\\:*?"<>|]/g, "_").replace(/\s+/g, " ").replace(/^[._\s]+|[._\s]+$/g, "");
+    if (!base) base = "report";
+    if (task.action === "retest" && !base.startsWith("复测")) base = `复测-${base}`;
+    return `${base.slice(0, 120)}-报告.zip`;
   }
 
   async function downloadWithRetry(url, filename) {
@@ -1501,7 +1525,7 @@
     try {
       await downloadWithRetry(
         `/api/v1/tasks/${encodeURIComponent(selected)}/report?download=1`,
-        `${selected}-report.zip`
+        reportDownloadFallbackName(currentTask())
       );
     } catch (e) {
       alert(e.message);

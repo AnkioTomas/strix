@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import urllib.parse
 from pathlib import Path
 
 import pytest
@@ -454,6 +455,15 @@ def test_ingest_results(client: TestClient):
     assert zipped.status_code == 200
     assert "zip" in zipped.headers.get("content-type", "")
     assert zipped.content[:2] == b"PK"
+    disposition = urllib.parse.unquote(zipped.headers.get("content-disposition", ""))
+    assert "报告.zip" in disposition
+    assert "example.com" in disposition
+
+    manager.db.update_task(task["id"], name="客户A门户", action="retest")
+    renamed = client.get(f"/api/v1/tasks/{task['id']}/report?download=1")
+    assert renamed.status_code == 200
+    renamed_disp = urllib.parse.unquote(renamed.headers.get("content-disposition", ""))
+    assert "复测-客户A门户-报告.zip" in renamed_disp
 
     empty_logs = client.get(f"/api/v1/tasks/{task['id']}/logs")
     assert empty_logs.status_code == 200

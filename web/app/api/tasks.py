@@ -37,7 +37,7 @@ from app.schemas import (
 from app.api.viewer_proxy import attach_viewer_proxy_url
 from app.security.auth import require_api_key
 from app.services.results import list_artifacts, resolve_artifact, resolve_task_log, workspace_run_dir
-from app.services.task_manager import TaskError, TaskManager
+from app.services.task_manager import TaskError, TaskManager, report_download_filename
 
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_key)])
@@ -392,13 +392,14 @@ async def task_report(
 ):
     if download:
         try:
+            task = await asyncio.to_thread(manager.get_task, task_id)
             package = await asyncio.to_thread(manager.get_report_package, task_id)
         except TaskError as exc:
             return _error(exc)
         return FileResponse(
             package,
             media_type="application/zip",
-            filename=f"{task_id}-report.zip",
+            filename=report_download_filename(task),
         )
     try:
         content = await asyncio.to_thread(manager.get_report, task_id)

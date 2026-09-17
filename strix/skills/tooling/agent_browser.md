@@ -262,16 +262,19 @@ only for simple expressions.
 
 `agent-browser screenshot` writes a PNG to disk in the sandbox. The
 shell command alone does **not** put the image into your context —
-chain it with the SDK ``view_image`` tool to actually see it:
+chain it with the SDK ``view_image`` tool to actually see it, or
+``ocr_image`` to extract text locally without a vision model:
 
 ```bash
 exec_command:  agent-browser screenshot
 view_image:    {"path": "<path printed on stdout>"}
+# or, when you only need strings (URL / error text / labels):
+ocr_image:     {"path": "<path printed on stdout>"}
 ```
 
 Default output directory is ``/workspace/.agent-browser-screenshots/``,
-which ``view_image`` can read. Prefer the no-arg form (the CLI prints
-the full path on stdout — pass that to ``view_image``). If you need a
+which ``view_image`` / ``ocr_image`` can read. Prefer the no-arg form (the CLI prints
+the full path on stdout — pass that to ``view_image`` or ``ocr_image``). If you need a
 specific filename, keep it inside that directory or a sibling hidden
 dir under ``/workspace``. Never write screenshots to ``/tmp`` —
 ``view_image`` rejects anything outside the workspace root.

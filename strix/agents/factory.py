@@ -38,6 +38,7 @@ from strix.tools.notes.tools import (
     update_note,
 )
 from strix.tools.nullish import is_nullish
+from strix.tools.ocr.tool import ocr_image
 from strix.tools.output_store import bound_and_store, bound_text
 from strix.tools.proxy.tools import (
     list_requests,
@@ -580,6 +581,7 @@ _BASE_TOOLS: tuple[Tool, ...] = (
     amend_threat_model,
     web_search,
     web_get_contents,
+    ocr_image,
     create_vulnerability_report,
     create_dependency_report,
     update_vulnerability_report,

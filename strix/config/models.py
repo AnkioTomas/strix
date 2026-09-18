@@ -546,10 +546,10 @@ class StrixProvider(MultiProvider):
 
 
 DEFAULT_MODEL_RETRY = ModelRetrySettings(
-    max_retries=5,
+    max_retries=10,
     backoff=ModelRetryBackoffSettings(
         initial_delay=2.0,
-        max_delay=90.0,
+        max_delay=300.0,
         multiplier=2.0,
         jitter=False,
     ),

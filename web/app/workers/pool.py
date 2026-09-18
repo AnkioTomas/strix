@@ -4,9 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from app.db import utc_now
+from app.services.feishu import (
+    clear_needs_user_state,
+    dump_notify_state,
+    needs_user_fingerprint,
+    notify_status,
+    notify_task,
+)
 from app.services.system_load import effective_concurrency, sample_system
 from app.services.task_manager import TaskError
 
@@ -81,6 +89,8 @@ class WorkerPool:
             cancelled = bool(task and task["status"] == "cancelling")
             await asyncio.to_thread(self.manager.finish_process, task_id, cancelled=cancelled)
 
+        await asyncio.to_thread(self._poll_needs_user)
+
         snap = sample_system()
         allowed, reason = effective_concurrency(
             max_concurrent=self.settings.max_concurrent,
@@ -110,6 +120,41 @@ class WorkerPool:
                 break
             await self._launch(claimed)
 
+    def _poll_needs_user(self) -> None:
+        """Edge-detect agents.json wait_kinds=user; dedupe via tasks.feishu_notify."""
+        if not self.settings.feishu_webhook.strip():
+            return
+        if "needs_user" not in self.settings.feishu_event_set():
+            return
+
+        from strix.core.paths import RUNTIME_STATE_DIR_NAME
+        from app.services.results import workspace_run_dir
+
+        for task_id in list(self.manager._processes.keys()):
+            task = self.manager.db.get_task(task_id)
+            if not task or task.get("status") != "running":
+                continue
+            run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
+            if run_dir is None:
+                continue
+            agents_path = run_dir / RUNTIME_STATE_DIR_NAME / "agents.json"
+            fingerprint = needs_user_fingerprint(agents_path)
+            if fingerprint is None:
+                cleared = clear_needs_user_state(task)
+                if cleared is not None:
+                    self.manager.db.update_task(
+                        task_id, feishu_notify=dump_notify_state(cleared)
+                    )
+                continue
+            notify_task(
+                self.settings,
+                self.manager.db,
+                "needs_user",
+                task,
+                detail=f"等待 Agent: {fingerprint}",
+                fingerprint=fingerprint,
+            )
+
     async def _launch(self, task: dict) -> None:
         task_id = task["id"]
         try:
@@ -119,17 +164,25 @@ class WorkerPool:
             logger.info("task %s running pid=%s", task_id, process.pid)
         except TaskError as exc:
             logger.error("task %s failed to start: %s", task_id, exc.message)
-            self.manager.db.update_task(
+            failed = self.manager.db.update_task(
                 task_id,
                 status="failed",
                 error=exc.message,
                 finished_at=utc_now(),
             )
+            if failed:
+                await asyncio.to_thread(
+                    notify_status, self.settings, self.manager.db, failed, "failed"
+                )
         except Exception as exc:
             logger.exception("task %s crashed during start", task_id)
-            self.manager.db.update_task(
+            failed = self.manager.db.update_task(
                 task_id,
                 status="failed",
                 error=str(exc),
                 finished_at=utc_now(),
             )
+            if failed:
+                await asyncio.to_thread(
+                    notify_status, self.settings, self.manager.db, failed, "failed"
+                )

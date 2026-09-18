@@ -83,6 +83,8 @@ PYTHONPATH=. python -m app
 | `STRIX_MAX_CONCURRENT` | 8 | 同时跑的扫描硬上限 |
 | `STRIX_TASK_CPU_PERCENT` | 30 | 单任务 CPU 估算（top 风格：100%=1 核） |
 | `STRIX_TASK_MEMORY_GB` | 2 | 单任务内存估算（GiB）；用可用内存装箱 |
+| `STRIX_FEISHU_WEBHOOK` | （空） | 飞书群机器人 Webhook；空=关闭。web 在跑时推送开始/结束/失败/取消/等人 |
+| `STRIX_FEISHU_EVENTS` | `started,finished,failed,cancelled,needs_user` | 启用的推送事件（逗号分隔） |
 | `STRIX_ALLOW_PRIVATE_TARGETS` | 1 | 是否允许扫私网/localhost |
 | `STRIX_GIT_USERNAME` / `STRIX_GIT_TOKEN` | （空） | Gitea HTTPS 机器人账号；必须成对出现。任务里填完整 `https://gitea…/org/repo.git`，凭证不入库、不进 URL |
 

@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     action TEXT,
     error TEXT,
     earliest_start TEXT,
+    feishu_notify TEXT,
     created_at TEXT NOT NULL,
     started_at TEXT,
     finished_at TEXT,
@@ -127,6 +128,8 @@ class Database:
             conn.execute("ALTER TABLE tasks ADD COLUMN request_headers TEXT")
         if "earliest_start" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN earliest_start TEXT")
+        if "feishu_notify" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN feishu_notify TEXT")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

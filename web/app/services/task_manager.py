@@ -25,6 +25,7 @@ from app.services.agent_prompts import (
     RETEST_INSTRUCTION,
     focused_retest_instruction,
 )
+from app.services.feishu import notify_status, notify_task
 from app.services.findings import (
     apply_finding_flags,
     invalid_finding_ids,
@@ -247,11 +248,13 @@ class TaskManager:
             raise TaskError("TASK_NOT_CANCELLABLE", f"Task status is {task['status']}")
 
         if task["status"] == "queued":
-            return self.db.update_task(
+            updated = self.db.update_task(
                 task_id,
                 status="cancelled",
                 finished_at=utc_now(),
             ) or task
+            self._feishu_status(updated, "cancelled")
+            return updated
 
         self.db.update_task(task_id, status="cancelling")
         process = self._processes.get(task_id)
@@ -259,7 +262,7 @@ class TaskManager:
             code = process.terminate(self.settings.cancel_grace_seconds)
             close_process_logs(process)
             self._processes.pop(task_id, None)
-            return (
+            updated = (
                 self.db.update_task(
                     task_id,
                     status="cancelled",
@@ -269,8 +272,10 @@ class TaskManager:
                 )
                 or task
             )
+            self._feishu_status(updated, "cancelled")
+            return updated
 
-        return (
+        updated = (
             self.db.update_task(
                 task_id,
                 status="cancelled",
@@ -278,6 +283,8 @@ class TaskManager:
             )
             or task
         )
+        self._feishu_status(updated, "cancelled")
+        return updated
 
     def delete_task(self, task_id: str) -> None:
         """Permanently remove a finished or held task (DB + workspace on disk)."""
@@ -835,6 +842,8 @@ class TaskManager:
             viewer_url=process.viewer_url,
             viewer_token=process.viewer_token,
         )
+        running = self.get_task(task_id)
+        notify_task(self.settings, self.db, "started", running)
         return process
 
     def reattach_running_scans(self) -> int:
@@ -868,7 +877,7 @@ class TaskManager:
                     logger.warning(
                         "orphaned task %s (pid=%s dead); marking failed", task_id, pid
                     )
-                    self.db.update_task(
+                    failed = self.db.update_task(
                         task_id,
                         status="failed",
                         error="SCAN_WORKER_GONE",
@@ -877,6 +886,8 @@ class TaskManager:
                         viewer_url=None,
                         viewer_token=None,
                     )
+                    if failed:
+                        self._feishu_status(failed, "failed")
                     continue
                 handle = DetachedScanHandle.attach(workspace, task_id)
                 self._processes[task_id] = handle
@@ -940,6 +951,7 @@ class TaskManager:
         if updated:
             self.ingest_results(updated)
             self._stop_task_sandbox(updated)
+            self._feishu_status(updated, web_status)
         logger.info(
             "finalized orphaned task %s from run.json status=%s → %s",
             task["id"],
@@ -991,7 +1003,11 @@ class TaskManager:
         assert updated is not None
         self.ingest_results(updated)
         self._stop_task_sandbox(updated)
+        self._feishu_status(updated, status)
         return updated
+
+    def _feishu_status(self, task: dict[str, Any], status: str) -> None:
+        notify_status(self.settings, self.db, task, status)
 
     def _stop_task_sandbox(self, task: dict[str, Any]) -> None:
         """Stop the Docker sandbox even if the scan worker skipped cleanup."""

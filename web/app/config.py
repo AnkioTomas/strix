@@ -71,6 +71,13 @@ class Settings(BaseSettings):
     host: str = Field(default="127.0.0.1", alias="STRIX_API_HOST")
     port: int = Field(default=8787, alias="STRIX_API_PORT")
 
+    # Feishu group bot webhook (empty = disabled). Events are web-side only.
+    feishu_webhook: str = Field(default="", alias="STRIX_FEISHU_WEBHOOK")
+    feishu_events: str = Field(
+        default="started,finished,failed,cancelled,needs_user",
+        alias="STRIX_FEISHU_EVENTS",
+    )
+
     @model_validator(mode="after")
     def git_auth_pair(self) -> Self:
         user = self.git_username.strip()
@@ -78,6 +85,12 @@ class Settings(BaseSettings):
         if bool(user) ^ bool(token):
             raise ValueError("STRIX_GIT_USERNAME and STRIX_GIT_TOKEN must be set together")
         return self
+
+    def feishu_event_set(self) -> set[str]:
+        raw = self.feishu_events.strip()
+        if not raw:
+            return set()
+        return {part.strip().lower() for part in raw.split(",") if part.strip()}
 
     @property
     def database_path(self) -> Path:

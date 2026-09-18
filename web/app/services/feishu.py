@@ -235,8 +235,18 @@ def _console_url(settings: Settings) -> str | None:
     return f"http://{host}:{port}/"
 
 
-def post_json(webhook: str, payload: dict[str, Any], *, timeout: float = 3.0) -> bool:
-    """POST JSON to Feishu bot webhook. Never raises."""
+def post_json(
+    webhook: str,
+    payload: dict[str, Any],
+    *,
+    timeout: float = 3.0,
+    proxy: str | None = None,
+) -> bool:
+    """POST JSON to Feishu bot webhook. Never raises.
+
+    ``proxy`` is an optional ``http://`` / ``https://`` proxy used only for
+    this outbound call (does not inherit process ``HTTP_PROXY``).
+    """
     url = webhook.strip()
     if not url:
         return False
@@ -247,8 +257,16 @@ def post_json(webhook: str, payload: dict[str, Any], *, timeout: float = 3.0) ->
         headers={"Content-Type": "application/json; charset=utf-8"},
         method="POST",
     )
+    proxy_url = (proxy or "").strip()
+    if proxy_url:
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+        )
+    else:
+        # Explicit empty handler: ignore ambient HTTP(S)_PROXY for Feishu.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with opener.open(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
         data = json.loads(raw) if raw.strip() else {}
         if isinstance(data, dict) and data.get("code") not in (None, 0):
@@ -260,20 +278,34 @@ def post_json(webhook: str, payload: dict[str, Any], *, timeout: float = 3.0) ->
         return False
 
 
-def post_card(webhook: str, card: dict[str, Any], *, timeout: float = 3.0) -> bool:
+def post_card(
+    webhook: str,
+    card: dict[str, Any],
+    *,
+    timeout: float = 3.0,
+    proxy: str | None = None,
+) -> bool:
     return post_json(
         webhook,
         {"msg_type": "interactive", "card": card},
         timeout=timeout,
+        proxy=proxy,
     )
 
 
-def post_text(webhook: str, text: str, *, timeout: float = 3.0) -> bool:
+def post_text(
+    webhook: str,
+    text: str,
+    *,
+    timeout: float = 3.0,
+    proxy: str | None = None,
+) -> bool:
     """Legacy plain text helper (kept for ad-hoc curls / tests)."""
     return post_json(
         webhook,
         {"msg_type": "text", "content": {"text": text}},
         timeout=timeout,
+        proxy=proxy,
     )
 
 
@@ -297,7 +329,7 @@ def notify(
         detail=detail,
         console_url=_console_url(settings),
     )
-    return post_card(webhook, card)
+    return post_card(webhook, card, proxy=settings.feishu_proxy.strip() or None)
 
 
 def notify_task(

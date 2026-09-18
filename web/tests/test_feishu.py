@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import urllib.request
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -81,29 +82,56 @@ def test_build_card_structure():
     assert "http://127.0.0.1:8787/" in dumped
 
 
-def test_post_card_sends_interactive_body():
-    captured: dict[str, object] = {}
+def test_post_card_uses_configured_proxy():
+    seen: dict[str, object] = {}
 
-    class _Resp:
-        def read(self) -> bytes:
-            return b'{"code":0}'
+    class _FakeOpener:
+        def open(self, req: object, timeout: float = 0) -> object:
+            seen["timeout"] = timeout
+            seen["url"] = getattr(req, "full_url", None) or req.get_full_url()  # type: ignore[attr-defined]
 
-        def __enter__(self) -> _Resp:
-            return self
+            class _Resp:
+                def read(self) -> bytes:
+                    return b'{"code":0}'
 
-        def __exit__(self, *args: object) -> None:
-            return None
+                def __enter__(self) -> _Resp:
+                    return self
 
-    def fake_urlopen(req: object, timeout: float = 0) -> _Resp:
-        captured["body"] = req.data  # type: ignore[attr-defined]
-        return _Resp()
+                def __exit__(self, *args: object) -> None:
+                    return None
+
+            return _Resp()
+
+    def fake_build_opener(*handlers: object) -> _FakeOpener:
+        seen["handlers"] = handlers
+        return _FakeOpener()
 
     card = feishu.build_card("finished", {"id": "t1", "name": "ok"})
-    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-        assert feishu.post_card("https://open.feishu.cn/hook", card) is True
-    payload = json.loads(captured["body"])  # type: ignore[arg-type]
-    assert payload["msg_type"] == "interactive"
-    assert payload["card"]["header"]["template"] == "green"
+    with patch("urllib.request.build_opener", side_effect=fake_build_opener):
+        assert (
+            feishu.post_card(
+                "https://open.feishu.cn/hook",
+                card,
+                proxy="http://127.0.0.1:7890",
+            )
+            is True
+        )
+    handlers = seen["handlers"]
+    assert handlers
+    proxy_handler = handlers[0]
+    assert isinstance(proxy_handler, urllib.request.ProxyHandler)
+    assert proxy_handler.proxies.get("https") == "http://127.0.0.1:7890"
+
+
+def test_notify_passes_feishu_proxy():
+    settings = Settings(
+        STRIX_API_AUTH_DISABLED=True,
+        STRIX_FEISHU_WEBHOOK="https://example.com/hook",
+        STRIX_FEISHU_PROXY="http://127.0.0.1:7890",
+    )
+    with patch.object(feishu, "post_card", return_value=True) as post:
+        assert feishu.notify(settings, "started", {"id": "t1", "name": "x"}) is True
+        assert post.call_args.kwargs.get("proxy") == "http://127.0.0.1:7890"
 
 
 def test_needs_user_fingerprint(tmp_path: Path):

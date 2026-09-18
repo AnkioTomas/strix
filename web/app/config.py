@@ -77,6 +77,8 @@ class Settings(BaseSettings):
         default="started,finished,failed,cancelled,needs_user",
         alias="STRIX_FEISHU_EVENTS",
     )
+    # Outbound proxy for Feishu webhook only (http/https). Empty = direct.
+    feishu_proxy: str = Field(default="", alias="STRIX_FEISHU_PROXY")
 
     @model_validator(mode="after")
     def git_auth_pair(self) -> Self:

@@ -22,6 +22,15 @@ _EVENT_TITLES = {
     "needs_user": "需要用户回复",
 }
 
+# Feishu card header templates (bot webhook interactive cards).
+_EVENT_TEMPLATES = {
+    "started": "blue",
+    "finished": "green",
+    "failed": "red",
+    "cancelled": "orange",
+    "needs_user": "purple",
+}
+
 _STATUS_TO_EVENT = {
     "completed": "finished",
     "failed": "failed",
@@ -106,12 +115,98 @@ def _task_label(task: dict[str, Any]) -> str:
     return str(task.get("target") or task.get("source_url") or task.get("id") or "—")
 
 
+def _md_escape(value: object) -> str:
+    """Keep lark_md fields readable; strip control chars that break cards."""
+    text = str(value if value is not None else "—").replace("\r", " ").strip()
+    return text or "—"
+
+
+def _field(label: str, value: object, *, is_short: bool = True) -> dict[str, Any]:
+    return {
+        "is_short": is_short,
+        "text": {
+            "tag": "lark_md",
+            "content": f"**{label}**\n{_md_escape(value)}",
+        },
+    }
+
+
+def build_card(
+    event: str,
+    task: dict[str, Any],
+    *,
+    detail: str | None = None,
+    console_url: str | None = None,
+) -> dict[str, Any]:
+    """Build a Feishu interactive card payload (``msg_type=interactive`` body)."""
+    key = event.strip().lower()
+    title = _EVENT_TITLES.get(key, key)
+    template = _EVENT_TEMPLATES.get(key, "blue")
+    label = _task_label(task)
+    target = task.get("target") or task.get("source_url")
+
+    fields: list[dict[str, Any]] = [
+        _field("任务", label),
+        _field("任务 ID", task.get("id") or "—"),
+    ]
+    if target and str(target) != label:
+        fields.append(_field("目标", target, is_short=False))
+    if task.get("run_name"):
+        fields.append(_field("Run", task["run_name"]))
+    if task.get("scan_mode"):
+        fields.append(_field("模式", task["scan_mode"]))
+    if task.get("type"):
+        fields.append(_field("类型", task["type"]))
+    if key == "failed" and task.get("error"):
+        fields.append(_field("错误", task["error"], is_short=False))
+    if detail:
+        fields.append(_field("说明", detail, is_short=False))
+
+    elements: list[dict[str, Any]] = [
+        {"tag": "div", "fields": fields},
+        {"tag": "hr"},
+        {
+            "tag": "note",
+            "elements": [
+                {
+                    "tag": "plain_text",
+                    "content": "Strix Local Security API",
+                }
+            ],
+        },
+    ]
+    if console_url:
+        elements.insert(
+            -1,
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "打开控制台"},
+                        "type": "primary",
+                        "url": console_url,
+                    }
+                ],
+            },
+        )
+
+    return {
+        "header": {
+            "title": {"tag": "plain_text", "content": f"Strix · {title}"},
+            "template": template,
+        },
+        "elements": elements,
+    }
+
+
 def format_message(
     event: str,
     task: dict[str, Any],
     *,
     detail: str | None = None,
 ) -> str:
+    """Plain-text fallback (tests / logs). Prefer ``build_card`` for delivery."""
     title = _EVENT_TITLES.get(event, event)
     lines = [
         f"[Strix] {title}",
@@ -132,15 +227,20 @@ def format_message(
     return "\n".join(lines)
 
 
-def post_text(webhook: str, text: str, *, timeout: float = 3.0) -> bool:
-    """POST Feishu bot text message. Never raises."""
+def _console_url(settings: Settings) -> str | None:
+    host = (settings.host or "").strip()
+    if not host or host in {"0.0.0.0", "::"}:
+        host = "127.0.0.1"
+    port = int(settings.port or 8787)
+    return f"http://{host}:{port}/"
+
+
+def post_json(webhook: str, payload: dict[str, Any], *, timeout: float = 3.0) -> bool:
+    """POST JSON to Feishu bot webhook. Never raises."""
     url = webhook.strip()
     if not url:
         return False
-    body = json.dumps(
-        {"msg_type": "text", "content": {"text": text}},
-        ensure_ascii=False,
-    ).encode("utf-8")
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
         url,
         data=body,
@@ -150,14 +250,31 @@ def post_text(webhook: str, text: str, *, timeout: float = 3.0) -> bool:
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
-        payload = json.loads(raw) if raw.strip() else {}
-        if isinstance(payload, dict) and payload.get("code") not in (None, 0):
-            logger.warning("feishu webhook rejected: %s", payload)
+        data = json.loads(raw) if raw.strip() else {}
+        if isinstance(data, dict) and data.get("code") not in (None, 0):
+            logger.warning("feishu webhook rejected: %s", data)
             return False
         return True
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
         logger.warning("feishu webhook failed: %s", exc)
         return False
+
+
+def post_card(webhook: str, card: dict[str, Any], *, timeout: float = 3.0) -> bool:
+    return post_json(
+        webhook,
+        {"msg_type": "interactive", "card": card},
+        timeout=timeout,
+    )
+
+
+def post_text(webhook: str, text: str, *, timeout: float = 3.0) -> bool:
+    """Legacy plain text helper (kept for ad-hoc curls / tests)."""
+    return post_json(
+        webhook,
+        {"msg_type": "text", "content": {"text": text}},
+        timeout=timeout,
+    )
 
 
 def notify(
@@ -167,15 +284,20 @@ def notify(
     *,
     detail: str | None = None,
 ) -> bool:
-    """Send one lifecycle event if webhook + event filter allow it (no dedupe)."""
+    """Send one lifecycle card if webhook + event filter allow it (no dedupe)."""
     webhook = settings.feishu_webhook.strip()
     if not webhook:
         return False
     key = event.strip().lower()
     if key not in settings.feishu_event_set():
         return False
-    text = format_message(key, task, detail=detail)
-    return post_text(webhook, text)
+    card = build_card(
+        key,
+        task,
+        detail=detail,
+        console_url=_console_url(settings),
+    )
+    return post_card(webhook, card)
 
 
 def notify_task(

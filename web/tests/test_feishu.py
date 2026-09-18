@@ -32,7 +32,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 def test_notify_noop_without_webhook():
     settings = Settings(STRIX_API_AUTH_DISABLED=True, STRIX_FEISHU_WEBHOOK="")
-    with patch.object(feishu, "post_text") as post:
+    with patch.object(feishu, "post_card") as post:
         assert feishu.notify(settings, "started", {"id": "t1", "name": "x"}) is False
         post.assert_not_called()
 
@@ -44,7 +44,7 @@ def test_notify_respects_event_filter():
         STRIX_FEISHU_EVENTS="finished,failed",
     )
     db = MagicMock()
-    with patch.object(feishu, "post_text", return_value=True) as post:
+    with patch.object(feishu, "post_card", return_value=True) as post:
         assert feishu.notify_task(settings, db, "started", {"id": "t1"}) is False
         post.assert_not_called()
         assert (
@@ -52,13 +52,36 @@ def test_notify_respects_event_filter():
             is True
         )
         post.assert_called_once()
-        text = post.call_args.args[1]
-        assert "扫描失败" in text
-        assert "boom" in text
+        card = post.call_args.args[1]
+        assert card["header"]["template"] == "red"
+        assert "扫描失败" in card["header"]["title"]["content"]
+        body = json.dumps(card, ensure_ascii=False)
+        assert "boom" in body
         db.update_task.assert_called_once()
 
 
-def test_post_text_sends_feishu_body():
+def test_build_card_structure():
+    card = feishu.build_card(
+        "started",
+        {
+            "id": "task_demo",
+            "name": "DVWA 深扫",
+            "target": "https://dvwa.example.com",
+            "run_name": "demo_run",
+            "scan_mode": "deep",
+            "type": "pentest",
+        },
+        console_url="http://127.0.0.1:8787/",
+    )
+    assert card["header"]["template"] == "blue"
+    assert card["header"]["title"]["content"] == "Strix · 扫描开始"
+    dumped = json.dumps(card, ensure_ascii=False)
+    assert "DVWA 深扫" in dumped
+    assert "打开控制台" in dumped
+    assert "http://127.0.0.1:8787/" in dumped
+
+
+def test_post_card_sends_interactive_body():
     captured: dict[str, object] = {}
 
     class _Resp:
@@ -72,15 +95,15 @@ def test_post_text_sends_feishu_body():
             return None
 
     def fake_urlopen(req: object, timeout: float = 0) -> _Resp:
-        captured["url"] = getattr(req, "full_url", None) or getattr(req, "get_full_url")()
         captured["body"] = req.data  # type: ignore[attr-defined]
-        captured["timeout"] = timeout
         return _Resp()
 
+    card = feishu.build_card("finished", {"id": "t1", "name": "ok"})
     with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-        assert feishu.post_text("https://open.feishu.cn/hook", "hello") is True
+        assert feishu.post_card("https://open.feishu.cn/hook", card) is True
     payload = json.loads(captured["body"])  # type: ignore[arg-type]
-    assert payload == {"msg_type": "text", "content": {"text": "hello"}}
+    assert payload["msg_type"] == "interactive"
+    assert payload["card"]["header"]["template"] == "green"
 
 
 def test_needs_user_fingerprint(tmp_path: Path):
@@ -107,16 +130,15 @@ def test_notify_task_dedupes_across_restart(client: TestClient, monkeypatch: pyt
     task_id = created["id"]
     manager.db.update_task(task_id, status="running", run_name="run_a")
 
-    posts: list[str] = []
+    cards: list[dict] = []
 
-    def capture(_url: str, text: str, **_kwargs: object) -> bool:
-        posts.append(text)
+    def capture(_url: str, card: dict, **_kwargs: object) -> bool:
+        cards.append(card)
         return True
 
-    with patch.object(feishu, "post_text", side_effect=capture):
+    with patch.object(feishu, "post_card", side_effect=capture):
         task = manager.get_task(task_id)
         assert feishu.notify_task(manager.settings, manager.db, "started", task) is True
-        # Simulate web restart: reload row from DB, memory gone.
         task2 = manager.get_task(task_id)
         assert task2.get("feishu_notify")
         assert feishu.notify_task(manager.settings, manager.db, "started", task2) is False
@@ -127,9 +149,9 @@ def test_notify_task_dedupes_across_restart(client: TestClient, monkeypatch: pyt
         failed2 = manager.get_task(task_id)
         assert feishu.notify_status(manager.settings, manager.db, failed2, "failed") is False
 
-    assert len(posts) == 2
-    assert "扫描开始" in posts[0]
-    assert "扫描失败" in posts[1]
+    assert len(cards) == 2
+    assert cards[0]["header"]["template"] == "blue"
+    assert cards[1]["header"]["template"] == "red"
 
 
 def test_pool_needs_user_survives_restart(
@@ -158,26 +180,26 @@ def test_pool_needs_user_survives_restart(
     agents.write_text(json.dumps({"wait_kinds": {"root": "user"}}), encoding="utf-8")
     manager.db.update_task(task_id, status="running", run_name=run_name)
 
-    posts: list[str] = []
+    cards: list[dict] = []
 
-    def capture(_url: str, text: str, **_kwargs: object) -> bool:
-        posts.append(text)
+    def capture(_url: str, card: dict, **_kwargs: object) -> bool:
+        cards.append(card)
         return True
 
-    with patch.object(feishu, "post_text", side_effect=capture):
+    with patch.object(feishu, "post_card", side_effect=capture):
         pool = WorkerPool(manager)
         pool.manager._processes[task_id] = MagicMock()
         pool._poll_needs_user()
-        assert len(posts) == 1
+        assert len(cards) == 1
+        assert cards[0]["header"]["template"] == "purple"
 
-        # New pool instance = web restart; DB still has fingerprint.
         pool2 = WorkerPool(manager)
         pool2.manager._processes[task_id] = MagicMock()
         pool2._poll_needs_user()
-        assert len(posts) == 1
+        assert len(cards) == 1
 
         agents.write_text(json.dumps({"wait_kinds": {}}), encoding="utf-8")
         pool2._poll_needs_user()
         agents.write_text(json.dumps({"wait_kinds": {"root": "user"}}), encoding="utf-8")
         pool2._poll_needs_user()
-        assert len(posts) == 2
+        assert len(cards) == 2

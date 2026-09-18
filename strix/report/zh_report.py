@@ -307,14 +307,6 @@ def _retest_evidence_cell(report: dict[str, Any]) -> str:
     return "<br>".join(ordered)
 
 
-def _labeled_prose(label: str, text: object) -> list[str]:
-    """Label + demoted agent prose so nested ``#`` cannot enter the TOC."""
-    body = demote_markdown_headings(str(text), min_level=4).strip()
-    if not body:
-        return []
-    return [f"**{label}** {body}", ""]
-
-
 def _has_retest_data(vulnerability_reports: list[dict[str, Any]]) -> bool:
     """Only show「复测情况」when agents explicitly set retest_status."""
     return any(str(r.get("retest_status") or "").strip() for r in vulnerability_reports)
@@ -421,37 +413,9 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
         ]
     )
 
-    appendix_bits: list[str] = []
-    if report.get("technical_analysis"):
-        appendix_bits.append(
-            demote_markdown_headings(str(report["technical_analysis"]), min_level=4)
-        )
-        appendix_bits.append("")
-    if report.get("assumptions"):
-        appendix_bits.extend(_labeled_prose(labels["assumptions"], report["assumptions"]))
-    if report.get("counterevidence"):
-        appendix_bits.extend(_labeled_prose(labels["counterevidence"], report["counterevidence"]))
-    if report.get("confidence"):
-        appendix_bits.extend(_labeled_prose(labels["confidence"], report["confidence"]))
-    if report.get("confidence_rationale"):
-        appendix_bits.extend(
-            _labeled_prose(labels["confidence_rationale"], report["confidence_rationale"])
-        )
-    if report.get("severity_change_conditions"):
-        appendix_bits.extend(
-            _labeled_prose(labels["severity_change"], report["severity_change_conditions"])
-        )
-    if report.get("fix_verification"):
-        appendix_bits.extend(
-            _labeled_prose(labels["fix_verification"], report["fix_verification"])
-        )
-    if report.get("retest_status"):
-        status_text = _retest_status_label(report.get("retest_status"))
-        if chrome_locale() == "zh":
-            appendix_bits.append(f"**{labels['retest_col_status']}：** {status_text}")
-        else:
-            appendix_bits.append(f"**{labels['retest_col_status']}:** {status_text}")
-        appendix_bits.append("")
+    # Customer delivery stops at remediation. Do not park technical_analysis /
+    # assumptions / fix_verification essays under a per-finding「附录」— that
+    # turned every vuln into a methodology dump. Keep only hard facts.
     dep = report.get("dependency_metadata")
     if isinstance(dep, dict) and dep:
         for key, label_key in (
@@ -462,25 +426,23 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
         ):
             if dep.get(key):
                 if chrome_locale() == "zh":
-                    appendix_bits.append(f"**{labels[label_key]}：** {dep[key]}")
+                    lines.append(f"**{labels[label_key]}：** {dep[key]}")
                 else:
-                    appendix_bits.append(f"**{labels[label_key]}:** {dep[key]}")
-        appendix_bits.append("")
+                    lines.append(f"**{labels[label_key]}:** {dep[key]}")
+        lines.append("")
     locations = report.get("code_locations")
     if isinstance(locations, list):
         for loc in locations:
             if not isinstance(loc, dict):
                 continue
             file_path = loc.get("file") or "unknown"
-            appendix_bits.append(f"**{labels['code_location']}** `{file_path}`")
+            lines.append(f"**{labels['code_location']}** `{file_path}`")
             snippet = loc.get("snippet")
             if snippet:
                 fence = safe_fence(str(snippet))
-                appendix_bits.extend([f"{fence}", str(snippet), fence, ""])
+                lines.extend([f"{fence}", str(snippet), fence, ""])
             else:
-                appendix_bits.append("")
-    if appendix_bits:
-        lines.extend([f"### {labels['appendix']}", "", *appendix_bits])
+                lines.append("")
     return "\n".join(lines).rstrip()
 
 

@@ -227,12 +227,12 @@ def test_demote_headings_keeps_appendix_out_of_top_toc() -> None:
         },
         index=1,
     )
-    assert "### 附录" in section
-    assert "#### 根因" in section
-    assert "#### 一、复测侧的验证已做到什么" in section
+    # Per-finding「附录」is gone — methodology essays must not appear in delivery.
+    assert "### 附录" not in section
+    assert "查询结构逆向" not in section
+    assert "假阴性" not in section
+    assert "#### 根因" not in section
     assert re.search(r"^# 根因", section, re.MULTILINE) is None
-    assert re.search(r"^## 根因", section, re.MULTILINE) is None
-    assert re.search(r"^## 一、复测侧", section, re.MULTILINE) is None
 
 
 def test_retest_evidence_cell_prefers_screenshots_over_essay() -> None:

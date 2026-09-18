@@ -75,8 +75,8 @@ def test_render_vulnerability_md_includes_core_sections() -> None:
     assert "### 影响" in md
     assert "### 复现步骤" in md
     assert "### 修复建议" in md
-    assert "### 附录" in md
-    assert "Root cause in UserDAO." in md
+    assert "### 附录" not in md
+    assert "Root cause in UserDAO." not in md
     assert "| 端点 | /api/login |" in md
 
 
@@ -109,8 +109,8 @@ def test_render_vulnerability_md_includes_dependency_fields() -> None:
     assert "**已安装版本：** 4.17.20" in md
     assert "**修复版本：** 4.17.21" in md
     assert "| CWE | CWE-94 |" in md
-    assert "### 附录" in md
-    assert "Assumes lodash ships in deployed builds." in md
+    assert "### 附录" not in md
+    assert "Assumes lodash ships in deployed builds." not in md
 
 
 def test_render_vulnerability_md_poc_code_cannot_break_out_of_fence() -> None:
@@ -254,9 +254,8 @@ def test_write_executive_report_writes_markdown(tmp_path: Path) -> None:
     assert "Scan complete. No critical issues." in content
 
 
-def test_render_vulnerability_md_surfaces_calibration_metadata() -> None:
-    """Confidence, the case against the finding, and retest status are part of
-    the deliverable — storing them without rendering hides the reasoning."""
+def test_render_vulnerability_md_omits_calibration_essay() -> None:
+    """Internal calibration fields stay in JSON; delivery markdown stays short."""
     md = render_vulnerability_md(
         {
             "id": "vuln-0009",
@@ -270,11 +269,17 @@ def test_render_vulnerability_md_surfaces_calibration_metadata() -> None:
             "severity_change_conditions": "Critical if egress filtering is removed.",
             "remediation_steps": "Allowlist destinations.",
             "fix_verification": "Not retested.",
+            "technical_analysis": "Long root-cause essay.",
         }
     )
 
-    assert "**置信度：** medium" in md
-    assert "**反证：** Egress appears filtered at the network layer." in md
-    assert "**置信度说明：** Reproduced once out of three attempts." in md
-    assert "**严重性可变条件：** Critical if egress filtering is removed." in md
-    assert "**修复验证：** Not retested." in md
+    assert "### 附录" not in md
+    assert "置信度" not in md
+    assert "反证" not in md
+    assert "Egress appears filtered" not in md
+    assert "Reproduced once" not in md
+    assert "egress filtering is removed" not in md
+    assert "Not retested." not in md
+    assert "Long root-cause essay." not in md
+    assert "### 描述" in md
+    assert "### 修复建议" in md

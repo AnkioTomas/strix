@@ -425,6 +425,37 @@ button, input, select, textarea {
   box-shadow: var(--shadow);
 }
 
+/* Create/import: form scrolls inside the panel; actions stay visible. */
+.create-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.create-panel > h2,
+.create-panel > .field-hint {
+  flex-shrink: 0;
+}
+
+.create-panel > .form-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 0.15rem;
+  margin-right: -0.15rem;
+}
+
+.create-panel > .actions {
+  flex-shrink: 0;
+  margin-bottom: 0;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+}
+
 .panel h2 {
   margin: 0 0 0.85rem;
   font-size: 1.15rem;

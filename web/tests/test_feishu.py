@@ -206,6 +206,113 @@ def test_needs_user_fingerprint(tmp_path: Path):
     assert feishu.needs_user_fingerprint(path) is None
 
 
+def test_question_from_session_items_uses_respond_message():
+    items = [
+        {"role": "assistant", "content": "thinking out loud"},
+        {
+            "type": "function_call",
+            "name": "respond_to_user",
+            "arguments": json.dumps({"message": "请提供管理员账号密码"}),
+        },
+    ]
+    assert feishu.question_from_session_items(items) == "请提供管理员账号密码"
+
+
+def test_question_from_session_items_falls_back_to_assistant_when_empty():
+    items = [
+        {"role": "assistant", "content": "我需要目标的登录凭据才能继续。"},
+        {
+            "type": "function_call",
+            "name": "respond_to_user",
+            "arguments": "{}",
+        },
+    ]
+    assert (
+        feishu.question_from_session_items(items) == "我需要目标的登录凭据才能继续。"
+    )
+
+
+def test_build_card_needs_user_includes_question():
+    card = feishu.build_card(
+        "needs_user",
+        {"id": "t1", "name": "wait"},
+        detail="等待 Agent: root",
+        questions=[
+            {
+                "agent_id": "root",
+                "question": "请确认是否允许对 /admin 做暴力破解？",
+            }
+        ],
+    )
+    body = json.dumps(card, ensure_ascii=False)
+    assert "AI 问题" in body
+    assert "请确认是否允许对 /admin 做暴力破解？" in body
+    assert "等待 Agent: root" in body
+
+
+def test_notify_needs_user_loads_question_from_agents_db(tmp_path: Path):
+    import sqlite3
+
+    run_dir = tmp_path / "strix_runs" / "run_wait"
+    state_dir = run_dir / ".state"
+    state_dir.mkdir(parents=True)
+    (state_dir / "agents.json").write_text(
+        json.dumps({"wait_kinds": {"root": "user"}, "statuses": {"root": "waiting"}}),
+        encoding="utf-8",
+    )
+    conn = sqlite3.connect(state_dir / "agents.db")
+    try:
+        conn.execute(
+            "create table agent_messages (id integer primary key, session_id text, "
+            "message_data text, created_at text)"
+        )
+        conn.execute(
+            "insert into agent_messages (id, session_id, message_data, created_at) "
+            "values (1, ?, ?, ?)",
+            (
+                "root",
+                json.dumps(
+                    {
+                        "type": "function_call",
+                        "name": "respond_to_user",
+                        "arguments": json.dumps(
+                            {"message": "目标需要登录，请提供测试账号。"}
+                        ),
+                    }
+                ),
+                "2026-01-01T00:00:01+00:00",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    settings = Settings(
+        STRIX_API_AUTH_DISABLED=True,
+        STRIX_FEISHU_WEBHOOK="https://example.com/hook",
+        STRIX_FEISHU_EVENTS="needs_user",
+    )
+    task = {
+        "id": "task_wait",
+        "name": "wait-me",
+        "workspace": str(tmp_path),
+        "run_name": "run_wait",
+    }
+    with patch.object(feishu, "post_card", return_value=True) as post:
+        assert (
+            feishu.notify(
+                settings,
+                "needs_user",
+                task,
+                detail="等待 Agent: root",
+                fingerprint="root",
+            )
+            is True
+        )
+        body = json.dumps(post.call_args.args[1], ensure_ascii=False)
+        assert "目标需要登录，请提供测试账号。" in body
+
+
 def test_notify_task_dedupes_across_restart(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("STRIX_FEISHU_WEBHOOK", "https://example.com/hook")
     get_settings.cache_clear()

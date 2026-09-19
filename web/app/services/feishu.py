@@ -49,6 +49,7 @@ _SEVERITY_LABEL = {
 }
 
 _FINDINGS_CARD_LIMIT = 20
+_QUESTION_CARD_LIMIT = 1500
 
 
 class _TaskUpdater(Protocol):
@@ -184,6 +185,116 @@ def load_task_findings(task: dict[str, Any]) -> list[dict[str, Any]]:
     return load_normalized_findings(run_dir, task_id=str(task.get("id") or ""))
 
 
+def _parse_tool_args(raw: object) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
+    return {}
+
+
+def _session_item_text(item: dict[str, Any]) -> str:
+    content = item.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict):
+                text = part.get("text") or part.get("content")
+                if text:
+                    parts.append(str(text))
+        return "".join(parts)
+    return ""
+
+
+def question_from_session_items(items: list[dict[str, Any]]) -> str:
+    """Latest ``respond_to_user`` message; empty arg falls back to prior assistant text."""
+    respond_msg = ""
+    respond_pos: int | None = None
+    for i in range(len(items) - 1, -1, -1):
+        item = items[i]
+        if item.get("type") != "function_call" or item.get("name") != "respond_to_user":
+            continue
+        args = _parse_tool_args(item.get("arguments"))
+        respond_msg = str(args.get("message") or "").strip()
+        respond_pos = i
+        break
+    if respond_msg:
+        return respond_msg
+    end = respond_pos if respond_pos is not None else len(items)
+    for i in range(end - 1, -1, -1):
+        item = items[i]
+        if item.get("role") != "assistant":
+            continue
+        if item.get("type") not in {None, "message"}:
+            continue
+        text = _session_item_text(item).strip()
+        if text:
+            return text
+    return ""
+
+
+def _truncate_question(text: str, *, limit: int = _QUESTION_CARD_LIMIT) -> str:
+    cleaned = text.replace("\r", "\n").strip()
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: limit - 1].rstrip() + "…"
+
+
+def format_user_questions(questions: list[dict[str, Any]] | None) -> str:
+    """Render waiting-agent questions for a Feishu card field."""
+    if not questions:
+        return "—"
+    parts: list[str] = []
+    for item in questions:
+        agent_id = str(item.get("agent_id") or "").strip() or "?"
+        body = _truncate_question(str(item.get("question") or ""))
+        if not body:
+            body = "—"
+        if len(questions) == 1:
+            parts.append(body)
+        else:
+            parts.append(f"**{agent_id}**\n{body}")
+    return "\n\n".join(parts) if parts else "—"
+
+
+def load_task_user_questions(
+    task: dict[str, Any],
+    fingerprint: str | None,
+) -> list[dict[str, Any]]:
+    """Pull AI questions for agents currently waiting on the user."""
+    agent_ids = [aid for aid in str(fingerprint or "").split(",") if aid.strip()]
+    if not agent_ids:
+        return []
+    workspace = task.get("workspace")
+    if not workspace:
+        return []
+    from app.services.results import discover_run_name, workspace_run_dir
+    from strix.interface.tui.history import load_session_history
+
+    run_name = task.get("run_name") or discover_run_name(Path(workspace))
+    run_dir = workspace_run_dir(Path(workspace), run_name)
+    if run_dir is None:
+        return [{"agent_id": aid, "question": ""} for aid in agent_ids]
+
+    by_agent: dict[str, list[dict[str, Any]]] = {aid: [] for aid in agent_ids}
+    for agent_id, item, _ts in load_session_history(run_dir, agent_ids):
+        bucket = by_agent.get(agent_id)
+        if bucket is not None and isinstance(item, dict):
+            bucket.append(item)
+    return [
+        {"agent_id": aid, "question": question_from_session_items(by_agent[aid])}
+        for aid in agent_ids
+    ]
+
+
 def build_card(
     event: str,
     task: dict[str, Any],
@@ -191,6 +302,7 @@ def build_card(
     detail: str | None = None,
     console_url: str | None = None,
     findings: list[dict[str, Any]] | None = None,
+    questions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a Feishu interactive card payload (``msg_type=interactive`` body)."""
     key = event.strip().lower()
@@ -218,6 +330,10 @@ def build_card(
         count = len(items)
         fields.append(
             _field(f"漏洞 ({count})", format_findings_lines(items), is_short=False)
+        )
+    if key == "needs_user":
+        fields.append(
+            _field("AI 问题", format_user_questions(questions), is_short=False)
         )
     if detail:
         fields.append(_field("说明", detail, is_short=False))
@@ -266,6 +382,7 @@ def format_message(
     *,
     detail: str | None = None,
     findings: list[dict[str, Any]] | None = None,
+    questions: list[dict[str, Any]] | None = None,
 ) -> str:
     """Plain-text fallback (tests / logs). Prefer ``build_card`` for delivery."""
     title = _EVENT_TITLES.get(event, event)
@@ -287,6 +404,9 @@ def format_message(
         items = findings if findings is not None else []
         lines.append(f"漏洞 ({len(items)}):")
         lines.append(format_findings_lines(items))
+    if event == "needs_user":
+        lines.append("AI 问题:")
+        lines.append(format_user_questions(questions))
     if detail:
         lines.append(detail)
     return "\n".join(lines)
@@ -381,6 +501,8 @@ def notify(
     *,
     detail: str | None = None,
     findings: list[dict[str, Any]] | None = None,
+    fingerprint: str | None = None,
+    questions: list[dict[str, Any]] | None = None,
 ) -> bool:
     """Send one lifecycle card if webhook + event filter allow it (no dedupe)."""
     webhook = settings.feishu_webhook.strip()
@@ -389,15 +511,19 @@ def notify(
     key = event.strip().lower()
     if key not in settings.feishu_event_set():
         return False
-    resolved = findings
-    if key == "finished" and resolved is None:
-        resolved = load_task_findings(task)
+    resolved_findings = findings
+    if key == "finished" and resolved_findings is None:
+        resolved_findings = load_task_findings(task)
+    resolved_questions = questions
+    if key == "needs_user" and resolved_questions is None:
+        resolved_questions = load_task_user_questions(task, fingerprint)
     card = build_card(
         key,
         task,
         detail=detail,
         console_url=_console_url(settings),
-        findings=resolved,
+        findings=resolved_findings,
+        questions=resolved_questions,
     )
     return post_card(webhook, card, proxy=settings.feishu_proxy.strip() or None)
 
@@ -418,7 +544,7 @@ def notify_task(
         return False
     if not should_send(key, task, fingerprint=fingerprint):
         return False
-    if not notify(settings, key, task, detail=detail):
+    if not notify(settings, key, task, detail=detail, fingerprint=fingerprint):
         return False
     task_id = str(task.get("id") or "")
     if not task_id:

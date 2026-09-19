@@ -39,6 +39,17 @@ _STATUS_TO_EVENT = {
 
 _TERMINAL_EVENTS = frozenset({"finished", "failed", "cancelled"})
 
+_SEVERITY_LABEL = {
+    "critical": "严重",
+    "high": "高危",
+    "medium": "中危",
+    "low": "低危",
+    "info": "信息",
+    "unknown": "未知",
+}
+
+_FINDINGS_CARD_LIMIT = 20
+
 
 class _TaskUpdater(Protocol):
     def update_task(self, task_id: str, **fields: Any) -> dict[str, Any] | None: ...
@@ -131,12 +142,55 @@ def _field(label: str, value: object, *, is_short: bool = True) -> dict[str, Any
     }
 
 
+def _severity_label(severity: object) -> str:
+    key = str(severity or "info").strip().lower()
+    return _SEVERITY_LABEL.get(key, key or "信息")
+
+
+def format_findings_lines(
+    findings: list[dict[str, Any]] | None,
+    *,
+    limit: int = _FINDINGS_CARD_LIMIT,
+) -> str:
+    """One line per finding: ``严重 · 漏洞名``. Empty list → ``无``."""
+    if not findings:
+        return "无"
+    lines: list[str] = []
+    for item in findings[:limit]:
+        sev = _severity_label(item.get("severity"))
+        name = _md_escape(item.get("title") or item.get("id") or "—")
+        lines.append(f"• {sev} · {name}")
+    remaining = len(findings) - limit
+    if remaining > 0:
+        lines.append(f"… 另有 {remaining} 项")
+    return "\n".join(lines)
+
+
+def load_task_findings(task: dict[str, Any]) -> list[dict[str, Any]]:
+    """Read normalized findings from the task run dir (empty if missing)."""
+    workspace = task.get("workspace")
+    if not workspace:
+        return []
+    from app.services.results import (
+        discover_run_name,
+        load_normalized_findings,
+        workspace_run_dir,
+    )
+
+    run_name = task.get("run_name") or discover_run_name(Path(workspace))
+    run_dir = workspace_run_dir(Path(workspace), run_name)
+    if run_dir is None:
+        return []
+    return load_normalized_findings(run_dir, task_id=str(task.get("id") or ""))
+
+
 def build_card(
     event: str,
     task: dict[str, Any],
     *,
     detail: str | None = None,
     console_url: str | None = None,
+    findings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a Feishu interactive card payload (``msg_type=interactive`` body)."""
     key = event.strip().lower()
@@ -159,6 +213,12 @@ def build_card(
         fields.append(_field("类型", task["type"]))
     if key == "failed" and task.get("error"):
         fields.append(_field("错误", task["error"], is_short=False))
+    if key == "finished":
+        items = findings if findings is not None else []
+        count = len(items)
+        fields.append(
+            _field(f"漏洞 ({count})", format_findings_lines(items), is_short=False)
+        )
     if detail:
         fields.append(_field("说明", detail, is_short=False))
 
@@ -205,6 +265,7 @@ def format_message(
     task: dict[str, Any],
     *,
     detail: str | None = None,
+    findings: list[dict[str, Any]] | None = None,
 ) -> str:
     """Plain-text fallback (tests / logs). Prefer ``build_card`` for delivery."""
     title = _EVENT_TITLES.get(event, event)
@@ -222,6 +283,10 @@ def format_message(
         lines.append(f"模式: {task['scan_mode']}")
     if event == "failed" and task.get("error"):
         lines.append(f"错误: {task['error']}")
+    if event == "finished":
+        items = findings if findings is not None else []
+        lines.append(f"漏洞 ({len(items)}):")
+        lines.append(format_findings_lines(items))
     if detail:
         lines.append(detail)
     return "\n".join(lines)
@@ -315,6 +380,7 @@ def notify(
     task: dict[str, Any],
     *,
     detail: str | None = None,
+    findings: list[dict[str, Any]] | None = None,
 ) -> bool:
     """Send one lifecycle card if webhook + event filter allow it (no dedupe)."""
     webhook = settings.feishu_webhook.strip()
@@ -323,11 +389,15 @@ def notify(
     key = event.strip().lower()
     if key not in settings.feishu_event_set():
         return False
+    resolved = findings
+    if key == "finished" and resolved is None:
+        resolved = load_task_findings(task)
     card = build_card(
         key,
         task,
         detail=detail,
         console_url=_console_url(settings),
+        findings=resolved,
     )
     return post_card(webhook, card, proxy=settings.feishu_proxy.strip() or None)
 

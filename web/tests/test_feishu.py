@@ -82,6 +82,67 @@ def test_build_card_structure():
     assert "http://127.0.0.1:8787/" in dumped
 
 
+def test_build_card_finished_includes_findings():
+    card = feishu.build_card(
+        "finished",
+        {"id": "t1", "name": "ok"},
+        findings=[
+            {"title": "SQL Injection", "severity": "critical"},
+            {"title": "XSS Reflect", "severity": "medium"},
+        ],
+    )
+    body = json.dumps(card, ensure_ascii=False)
+    assert "漏洞 (2)" in body
+    assert "严重 · SQL Injection" in body
+    assert "中危 · XSS Reflect" in body
+
+
+def test_build_card_finished_empty_findings():
+    card = feishu.build_card("finished", {"id": "t1", "name": "clean"}, findings=[])
+    body = json.dumps(card, ensure_ascii=False)
+    assert "漏洞 (0)" in body
+    assert "无" in body
+
+
+def test_format_findings_lines_truncates():
+    items = [{"title": f"v{i}", "severity": "low"} for i in range(25)]
+    text = feishu.format_findings_lines(items, limit=3)
+    assert text.count("•") == 3
+    assert "另有 22 项" in text
+
+
+def test_notify_finished_loads_findings_from_workspace(tmp_path: Path):
+    run_dir = tmp_path / "strix_runs" / "run_a"
+    run_dir.mkdir(parents=True)
+    (run_dir / "vulnerabilities.json").write_text(
+        json.dumps(
+            [
+                {"id": "v1", "title": "RCE", "severity": "high"},
+                {"id": "v2", "title": "Info Leak", "severity": "low"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    settings = Settings(
+        STRIX_API_AUTH_DISABLED=True,
+        STRIX_FEISHU_WEBHOOK="https://example.com/hook",
+        STRIX_FEISHU_EVENTS="finished",
+    )
+    task = {
+        "id": "task_x",
+        "name": "demo",
+        "workspace": str(tmp_path),
+        "run_name": "run_a",
+    }
+    with patch.object(feishu, "post_card", return_value=True) as post:
+        assert feishu.notify(settings, "finished", task) is True
+        card = post.call_args.args[1]
+        body = json.dumps(card, ensure_ascii=False)
+        assert "漏洞 (2)" in body
+        assert "高危 · RCE" in body
+        assert "低危 · Info Leak" in body
+
+
 def test_post_card_uses_configured_proxy():
     seen: dict[str, object] = {}
 

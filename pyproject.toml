@@ -278,6 +278,10 @@ ignore = [
 "tests/test_zh_report.py" = ["RUF001"]
 "tests/test_report_writer.py" = ["RUF001"]
 "tests/test_report_language_prompt.py" = ["RUF001"]
+# Web API: fixture tokens; lazy app import after env mutation (same pattern as Feishu tests).
+"web/tests/**/*.py" = ["S105", "S106", "PLC0415"]
+# Outbound Gitea REST: scheme gated to http(s) before urlopen.
+"web/app/services/gitea_issues.py" = ["S310"]
 # Lazy imports of strix.tools.mcp.client avoid a circular import (client imports
 # the session module at module load).
 "strix/tools/mcp/session.py" = ["PLC0415"]

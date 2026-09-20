@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     # Gitea HTTPS clone + issues. Username and token must be set together.
     git_username: str = Field(default="", alias="STRIX_GIT_USERNAME")
     git_token: str = Field(default="", alias="STRIX_GIT_TOKEN")
+    # After a completed audit (git source), open one Issue per finding.
+    gitea_issues_enabled: bool = Field(default=False, alias="STRIX_GITEA_ISSUES")
     host: str = Field(default="127.0.0.1", alias="STRIX_API_HOST")
     port: int = Field(default=8787, alias="STRIX_API_PORT")
 

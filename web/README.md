@@ -87,7 +87,8 @@ PYTHONPATH=. python -m app
 | `STRIX_FEISHU_EVENTS` | `started,finished,failed,cancelled,needs_user` | 启用的推送事件（逗号分隔） |
 | `STRIX_FEISHU_PROXY` | （空） | 仅飞书出站用的 HTTP(S) 代理，如 `http://127.0.0.1:7890`；空=直连（不吃系统 `HTTP_PROXY`） |
 | `STRIX_ALLOW_PRIVATE_TARGETS` | 1 | 是否允许扫私网/localhost |
-| `STRIX_GIT_USERNAME` / `STRIX_GIT_TOKEN` | （空） | Gitea HTTPS 机器人账号；必须成对出现。任务里填完整 `https://gitea…/org/repo.git`，凭证不入库、不进 URL |
+| `STRIX_GIT_USERNAME` / `STRIX_GIT_TOKEN` | （空） | Gitea HTTPS 机器人账号；必须成对出现。任务里填完整 `https://gitea…/org/repo.git`，凭证不入库、不进 URL。开 Issue 时 token 还需 issues 写权限 |
+| `STRIX_GITEA_ISSUES` | `0` | `1` 时：白盒 audit + git 源任务在 **扫描完成并入库后**，按漏洞清单自动在对应仓库创建 Issue（web 侧，不改 Strix 核心；按 finding id 去重） |
 
 浏览器根路径是控制台（`web/static/`：`index.html` + `css/` + `js/`）；静态资源在 `/static/*`。漏洞与报告页用 [Penna Markdown](https://penna.ankio.net/guide/getting-started) 只读渲染器（CDN `penna-markdown@0.2.5`）。OpenAPI 在 `/docs`。`GET /health` 返回 `admission`（当前是否放行、load/内存快照）。
 
@@ -196,7 +197,8 @@ Worker 每秒估算可跑槽位：
 - 漏洞只按 `task_id` 暴露，不做全局汇聚
 - 固定 Bearer Token，不做账号体系
 - 不把 `viewer_token` 下发给浏览器
-- Gitea 私有仓凭证只走 `STRIX_GIT_USERNAME` / `STRIX_GIT_TOKEN`，任务填完整 HTTPS 仓库地址；凭证不进 `source_url` / 数据库 / `git clone` 命令行。clone / checkout **固定忽略 SSL 校验**（内网自签）
+- Gitea 私有仓凭证只走 `STRIX_GIT_USERNAME` / `STRIX_GIT_TOKEN`，任务填完整 HTTPS 仓库地址；凭证不进 `source_url` / 数据库 / `git clone` 命令行。clone / checkout / Issues API **固定忽略 SSL 校验**（内网自签）
+- `STRIX_GITEA_ISSUES=1` 时，仅对 `type=audit` 且 `source_type=git` 的**已完成**任务，在 `ingest_results` 后按 finding 开 Issue；标题含 `[Strix:{id}]`，正文含去重标记；已标无效的 finding 跳过；状态落在任务 workspace 的 `gitea_issues.json`
 
 ## 交互（实话）
 

@@ -1009,6 +1009,16 @@ class TaskManager:
     def _feishu_status(self, task: dict[str, Any], status: str) -> None:
         notify_status(self.settings, self.db, task, status)
 
+    def _gitea_sync_issues(
+        self, task: dict[str, Any], findings: list[dict[str, Any]]
+    ) -> None:
+        """Open Gitea issues for audit findings (web-only; never raises)."""
+        from app.services.findings import invalid_finding_ids
+        from app.services.gitea_issues import sync_findings_as_issues
+
+        skip = invalid_finding_ids(self.db.list_finding_flags(str(task["id"])))
+        sync_findings_as_issues(self.settings, task, findings, skip_ids=skip)
+
     def _stop_task_sandbox(self, task: dict[str, Any]) -> None:
         """Stop the Docker sandbox even if the scan worker skipped cleanup."""
         from strix.runtime.session_manager import stop_sandbox_from_run_dir
@@ -1042,6 +1052,8 @@ class TaskManager:
         from app.services.results import vulnerabilities_mtime
 
         self._findings_disk_mtime[task["id"]] = vulnerabilities_mtime(run_dir)
+        if str(task.get("status") or "") == "completed":
+            self._gitea_sync_issues(task, findings)
 
     def get_results(self, task_id: str) -> list[dict[str, Any]]:
         task = self.get_task(task_id)

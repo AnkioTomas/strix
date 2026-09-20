@@ -54,7 +54,9 @@ class Settings(BaseSettings):
     task_cpu_percent: float = Field(default=30.0, gt=0.0, alias="STRIX_TASK_CPU_PERCENT")
     task_memory_gb: float = Field(default=2.0, gt=0.0, alias="STRIX_TASK_MEMORY_GB")
     cancel_grace_seconds: int = Field(default=15, ge=1, alias="STRIX_CANCEL_GRACE")
-
+    # How often (seconds) to scan Docker and stop sandboxes for finished tasks.
+    # 0 disables the reaper. Default 60.
+    sandbox_reap_interval: int = Field(default=60, ge=0, alias="STRIX_SANDBOX_REAP_INTERVAL")
     strix_bin: str = Field(default="strix", alias="STRIX_BIN")
     default_scan_mode: str = Field(default="deep", alias="STRIX_DEFAULT_SCAN_MODE")
     default_max_budget: float | None = Field(default=None, alias="STRIX_DEFAULT_MAX_BUDGET")

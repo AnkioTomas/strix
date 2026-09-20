@@ -83,6 +83,7 @@ PYTHONPATH=. python -m app
 | `STRIX_MAX_CONCURRENT` | 8 | 同时跑的扫描硬上限 |
 | `STRIX_TASK_CPU_PERCENT` | 30 | 单任务 CPU 估算（top 风格：100%=1 核） |
 | `STRIX_TASK_MEMORY_GB` | 2 | 单任务内存估算（GiB）；用可用内存装箱 |
+| `STRIX_SANDBOX_REAP_INTERVAL` | `60` | 每隔多少秒扫描 Docker，停掉「已结束任务」仍在跑的沙箱容器；`0`=关闭。只动本 Web 任务 `run.json` 里记下的 container_id |
 | `STRIX_FEISHU_WEBHOOK` | （空） | 飞书群机器人 Webhook；空=关闭。web 在跑时推送开始/结束/失败/取消/等人 |
 | `STRIX_FEISHU_EVENTS` | `started,finished,failed,cancelled,needs_user` | 启用的推送事件（逗号分隔） |
 | `STRIX_FEISHU_PROXY` | （空） | 仅飞书出站用的 HTTP(S) 代理，如 `http://127.0.0.1:7890`；空=直连（不吃系统 `HTTP_PROXY`） |
@@ -192,6 +193,7 @@ Worker 每秒估算可跑槽位：
 ## 设计约束
 
 - 扫描在 **detached 子进程**（`python -m app.services.scan_worker`，`start_new_session=True`）；API 重启后通过 PID + `.web_scan_state.json` 重连，Viewer 反代仍指向原 loopback 端口
+- Worker 按 `STRIX_SANDBOX_REAP_INTERVAL`（默认 60s）扫一遍 Docker：只停止 **已结束**（completed/failed/cancelled）任务在 `run.json` 里记录的沙箱；运行中任务与无关 CLI 容器不动
 - 不在 HTTP handler 里同步跑扫描；Worker 只负责排队/认领/收尸
 - 每任务独立 workspace：`web/data/tasks/<task_id>/`
 - 漏洞只按 `task_id` 暴露，不做全局汇聚

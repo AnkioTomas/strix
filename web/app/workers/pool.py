@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -15,6 +16,7 @@ from app.services.feishu import (
     notify_status,
     notify_task,
 )
+from app.services.sandbox_reaper import reap_stopped_task_sandboxes
 from app.services.system_load import effective_concurrency, sample_system
 from app.services.task_manager import TaskError
 
@@ -32,6 +34,7 @@ class WorkerPool:
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._running = False
+        self._last_sandbox_reap = 0.0
         self._last_admission: dict[str, Any] = {
             "allowed_slots": self.settings.max_concurrent,
             "reason": "ok:init",
@@ -90,6 +93,7 @@ class WorkerPool:
             await asyncio.to_thread(self.manager.finish_process, task_id, cancelled=cancelled)
 
         await asyncio.to_thread(self._poll_needs_user)
+        await self._maybe_reap_sandboxes()
 
         snap = sample_system()
         allowed, reason = effective_concurrency(
@@ -127,8 +131,8 @@ class WorkerPool:
         if "needs_user" not in self.settings.feishu_event_set():
             return
 
-        from strix.core.paths import RUNTIME_STATE_DIR_NAME
         from app.services.results import workspace_run_dir
+        from strix.core.paths import RUNTIME_STATE_DIR_NAME
 
         for task_id in list(self.manager._processes.keys()):
             task = self.manager.db.get_task(task_id)
@@ -153,6 +157,25 @@ class WorkerPool:
                 task,
                 detail=f"等待 Agent: {fingerprint}",
                 fingerprint=fingerprint,
+            )
+
+    async def _maybe_reap_sandboxes(self) -> None:
+        """Stop Docker sandboxes for finished tasks (throttled)."""
+        interval = int(self.settings.sandbox_reap_interval)
+        if interval <= 0:
+            return
+        now = time.monotonic()
+        if now - self._last_sandbox_reap < interval:
+            return
+        self._last_sandbox_reap = now
+        result = await asyncio.to_thread(reap_stopped_task_sandboxes, self.manager.db)
+        if result.get("stopped") or result.get("errors"):
+            logger.info(
+                "sandbox reaper checked=%s running=%s stopped=%s errors=%s",
+                result.get("checked"),
+                result.get("running"),
+                result.get("stopped"),
+                result.get("errors"),
             )
 
     async def _launch(self, task: dict) -> None:

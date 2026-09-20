@@ -279,9 +279,12 @@ ignore = [
 "tests/test_report_writer.py" = ["RUF001"]
 "tests/test_report_language_prompt.py" = ["RUF001"]
 # Web API: fixture tokens; lazy app import after env mutation (same pattern as Feishu tests).
-"web/tests/**/*.py" = ["S105", "S106", "PLC0415"]
+"web/tests/**/*.py" = ["S105", "S106", "PLC0415", "TC003"]
 # Outbound Gitea REST: scheme gated to http(s) before urlopen.
 "web/app/services/gitea_issues.py" = ["S310"]
+# Lazy docker / session_manager imports; reaper is a guard-clause sweep.
+"web/app/services/sandbox_reaper.py" = ["PLC0415", "PLR0912"]
+"web/app/workers/pool.py" = ["PLC0415", "TRY400"]
 # Lazy imports of strix.tools.mcp.client avoid a circular import (client imports
 # the session module at module load).
 "strix/tools/mcp/session.py" = ["PLC0415"]

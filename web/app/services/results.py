@@ -321,11 +321,17 @@ def rebuild_delivery_report(
     return read_report_markdown(run_dir)
 
 
-def _build_report_zip(run_dir: Path, md_path: Path) -> Path | None:
+def _build_report_zip(
+    run_dir: Path,
+    md_path: Path,
+    *,
+    md_arcname: str = "penetration_test_report.md",
+) -> Path | None:
     zip_path = run_dir / "penetration_test_report.zip"
+    arcname = Path(md_arcname).name or "penetration_test_report.md"
 
     def _write(zf: zipfile.ZipFile) -> None:
-        zf.write(md_path, arcname="penetration_test_report.md")
+        zf.write(md_path, arcname=arcname)
         images_dir = run_dir / "images"
         if images_dir.is_dir():
             for image in sorted(images_dir.iterdir()):
@@ -335,10 +341,14 @@ def _build_report_zip(run_dir: Path, md_path: Path) -> Path | None:
     return _atomic_zip_write(zip_path, _write)
 
 
-def resolve_report_package(run_dir: Path) -> Path | None:
-    """Return the report zip (md + images). Build it if only markdown exists."""
+def resolve_report_package(run_dir: Path, *, md_arcname: str | None = None) -> Path | None:
+    """Return the report zip (md + images).
+
+    ``md_arcname`` is the name inside the zip. When set, the zip is always
+    rewritten so a renamed task does not keep the previous entry name.
+    """
     zip_path = run_dir / "penetration_test_report.zip"
-    if zip_path.is_file():
+    if md_arcname is None and zip_path.is_file():
         return zip_path
     md_path = run_dir / "penetration_test_report.md"
     if not md_path.is_file():
@@ -346,7 +356,11 @@ def resolve_report_package(run_dir: Path) -> Path | None:
         if not alt.is_file():
             return None
         md_path = alt
-    return _build_report_zip(run_dir, md_path)
+    return _build_report_zip(
+        run_dir,
+        md_path,
+        md_arcname=md_arcname or "penetration_test_report.md",
+    )
 
 
 def summarize_llm_usage(raw: dict[str, Any] | None) -> dict[str, Any] | None:

@@ -79,8 +79,8 @@ def _merge_connectivity_note(existing: str | None, detail: str) -> str:
 _DOWNLOAD_UNSAFE = re.compile(r'[/\\:*?"<>|\x00-\x1f]+')
 
 
-def report_download_filename(task: dict[str, Any]) -> str:
-    """Client-facing zip name: task name, with 「复测-」 when action is retest."""
+def report_download_stem(task: dict[str, Any]) -> str:
+    """Client-facing report basename: task name, with 「复测-」 when action is retest."""
     base = str(
         task.get("name")
         or task.get("target")
@@ -93,7 +93,7 @@ def report_download_filename(task: dict[str, Any]) -> str:
     base = base[:120]
     if str(task.get("action") or "") == "retest" and not base.startswith("复测"):
         base = f"复测-{base}"
-    return f"{base}-报告.zip"
+    return f"{base}-报告"
 
 
 class TaskError(Exception):
@@ -1114,7 +1114,9 @@ class TaskManager:
         # Match the on-screen report (invalid findings filtered) before packaging.
         exclude = invalid_finding_ids(self.db.list_finding_flags(task_id))
         rebuild_delivery_report(run_dir, exclude_ids=exclude, build_zip=False)
-        package = resolve_report_package(run_dir)
+        package = resolve_report_package(
+            run_dir, md_arcname=f"{report_download_stem(task)}.md"
+        )
         if package is None:
             if task["status"] in ACTIVE:
                 raise TaskError("RESULT_NOT_READY", "Report package not ready", status_code=409)

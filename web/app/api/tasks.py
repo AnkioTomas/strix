@@ -38,7 +38,7 @@ from app.schemas import (
 from app.api.viewer_proxy import attach_viewer_proxy_url
 from app.security.auth import require_api_key
 from app.services.results import list_artifacts, resolve_artifact, resolve_task_log, workspace_run_dir
-from app.services.task_manager import TaskError, TaskManager, report_download_filename
+from app.services.task_manager import TaskError, TaskManager, report_download_stem
 
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_key)])
@@ -410,7 +410,7 @@ async def task_report(
         return FileResponse(
             package,
             media_type="application/zip",
-            filename=report_download_filename(task),
+            filename=f"{report_download_stem(task)}.zip",
         )
     try:
         content = await asyncio.to_thread(manager.get_report, task_id)

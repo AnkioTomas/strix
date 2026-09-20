@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import io
 import json
 import urllib.parse
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -458,12 +460,18 @@ def test_ingest_results(client: TestClient):
     disposition = urllib.parse.unquote(zipped.headers.get("content-disposition", ""))
     assert "报告.zip" in disposition
     assert "example.com" in disposition
+    with zipfile.ZipFile(io.BytesIO(zipped.content)) as zf:
+        assert "https_example.com-报告.md" in zf.namelist()
 
     manager.db.update_task(task["id"], name="客户A门户", action="retest")
     renamed = client.get(f"/api/v1/tasks/{task['id']}/report?download=1")
     assert renamed.status_code == 200
     renamed_disp = urllib.parse.unquote(renamed.headers.get("content-disposition", ""))
     assert "复测-客户A门户-报告.zip" in renamed_disp
+    with zipfile.ZipFile(io.BytesIO(renamed.content)) as zf:
+        names = zf.namelist()
+        assert "复测-客户A门户-报告.md" in names
+        assert "penetration_test_report.md" not in names
 
     empty_logs = client.get(f"/api/v1/tasks/{task['id']}/logs")
     assert empty_logs.status_code == 200

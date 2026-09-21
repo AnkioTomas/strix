@@ -72,6 +72,8 @@ class ReportLabels(TypedDict):
     impact_missing: str
     remediation: str
     remediation_missing: str
+    manual_cleanup: str
+    manual_cleanup_missing: str
     appendix: str
     assumptions: str
     counterevidence: str
@@ -137,6 +139,8 @@ _LABELS_ZH: ReportLabels = {
     "impact_missing": "未说明。",
     "remediation": "修复建议",
     "remediation_missing": "未提供。",
+    "manual_cleanup": "测试改动与手动清理",
+    "manual_cleanup_missing": "未说明测试改了哪里，也未说明用户需要手动清理的部分。",
     "appendix": "附录",
     "assumptions": "前提假设：",
     "counterevidence": "反证：",
@@ -204,6 +208,10 @@ _LABELS_EN: ReportLabels = {
     "impact_missing": "Not specified.",
     "remediation": "Remediation",
     "remediation_missing": "Not provided.",
+    "manual_cleanup": "Test changes and manual cleanup",
+    "manual_cleanup_missing": (
+        "Not stated: what the test changed, and what the user must clean up by hand."
+    ),
     "appendix": "Appendix",
     "assumptions": "Assumptions:",
     "counterevidence": "Counterevidence:",

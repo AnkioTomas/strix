@@ -597,6 +597,9 @@ def _finding_flowables(
     if isinstance(remediation, list):
         remediation = "\n".join(str(step) for step in remediation)
     story.extend(_field_block(styles, "Remediation", remediation))
+    story.extend(
+        _field_block(styles, "Test changes and manual cleanup", vuln.get("manual_cleanup"))
+    )
 
     story.append(Spacer(1, 22))
     return story

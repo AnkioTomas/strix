@@ -410,6 +410,13 @@ def render_zh_vulnerability_section(report: dict[str, Any], index: int) -> str:
                 min_level=4,
             ),
             "",
+            f"### {labels['manual_cleanup']}",
+            "",
+            demote_markdown_headings(
+                str(report.get("manual_cleanup") or labels["manual_cleanup_missing"]),
+                min_level=4,
+            ),
+            "",
         ]
     )
 

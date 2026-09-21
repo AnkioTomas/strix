@@ -103,6 +103,10 @@ async def test_create_report_persists_new_fields(report_state: ReportState) -> N
         poc_description="1. open /search?q=<payload>",
         poc_script_code="GET /search?q=<script>alert(1)</script>",
         remediation_steps="Context-encode output.",
+        manual_cleanup=(
+            "Stored a reflected payload only in the HTTP response; nothing was written. "
+            "Nothing for the customer to clean up."
+        ),
         evidence=(
             "Response echoes the payload verbatim.\n"
             "screenshot: /workspace/.agent-browser-screenshots/xss.png — alert shown"
@@ -132,6 +136,7 @@ async def test_create_report_persists_new_fields(report_state: ReportState) -> N
     assert report["counterevidence"] == "No output encoding or CSP observed on this response."
     assert report["confidence"] == "high"
     assert report["severity_change_conditions"] == "A strict CSP would lower the severity."
+    assert "Nothing for the customer to clean up." in report["manual_cleanup"]
 
 
 async def test_create_report_requires_evidence_and_assumptions(
@@ -163,6 +168,13 @@ async def test_create_report_requires_evidence_and_assumptions(
     joined = " ".join(result["errors"])
     assert "Evidence" in joined
     assert "Assumptions" in joined
+    assert not report_state.vulnerability_reports
+
+
+async def test_create_report_rejects_bare_manual_cleanup(report_state: ReportState) -> None:
+    result = await _create_with(report_state, manual_cleanup="无")
+    assert result["success"] is False
+    assert any("manual_cleanup is required" in e for e in result["errors"])
     assert not report_state.vulnerability_reports
 
 
@@ -204,6 +216,9 @@ async def _create_with(report_state: ReportState, **overrides: object) -> dict[s
         "poc_description": "p",
         "poc_script_code": "c",
         "remediation_steps": "r",
+        "manual_cleanup": (
+            "Read-only request. Nothing was modified and nothing needs manual cleanup."
+        ),
         "evidence": "e",
         "assumptions": "a",
         "counterevidence": "No guard found on this path.",
@@ -1282,6 +1297,10 @@ _CONFIRMED_KWARGS: dict[str, Any] = {
     "poc_description": "1. PATCH /files/<uuid> with a multipart body as an anonymous user.",
     "poc_script_code": "PATCH /files/2f1c HTTP/1.1\n\n--x\nowned\n--x--",
     "remediation_steps": "Authorize before the write.",
+    "manual_cleanup": (
+        "PATCH wrote attacker bytes into file 2f1c. Reverted by restoring the "
+        "previous object. Nothing left for the customer to clean up."
+    ),
     "evidence": (
         "The stored file returns the injected payload after the 403 response.\n"
         "screenshot: /workspace/.agent-browser-screenshots/file-write.png — payload served"

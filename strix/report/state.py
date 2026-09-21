@@ -59,6 +59,7 @@ UPDATABLE_REPORT_FIELDS = frozenset(
         "poc_description",
         "poc_script_code",
         "remediation_steps",
+        "manual_cleanup",
         "evidence",
         "assumptions",
         "counterevidence",
@@ -311,6 +312,7 @@ class ReportState:
         poc_description: str | None = None,
         poc_script_code: str | None = None,
         remediation_steps: str | None = None,
+        manual_cleanup: str | None = None,
         evidence: str | None = None,
         assumptions: str | None = None,
         counterevidence: str | None = None,
@@ -356,6 +358,8 @@ class ReportState:
             report["poc_script_code"] = poc_script_code.strip()
         if remediation_steps:
             report["remediation_steps"] = remediation_steps.strip()
+        if manual_cleanup:
+            report["manual_cleanup"] = manual_cleanup.strip()
         if evidence:
             report["evidence"] = evidence.strip()
         if assumptions:

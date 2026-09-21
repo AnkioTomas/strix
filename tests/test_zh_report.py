@@ -65,6 +65,9 @@ def test_write_zh_delivery_bundle_embeds_relative_images(tmp_path: Path) -> None
                 "```"
             ),
             "remediation_steps": "按会话主体做对象级授权。",
+            "manual_cleanup": (
+                "只读请求，未创建账号、未写入订单。用户无需手动清理。"
+            ),
             "evidence": (
                 "screenshot: /workspace/.agent-browser-screenshots/idor.png "
                 "— 攻击者会话看到受害者邮箱"
@@ -103,6 +106,8 @@ def test_write_zh_delivery_bundle_embeds_relative_images(tmp_path: Path) -> None
     assert "### 复现步骤" in md
     assert "### 影响" in md
     assert "### 修复建议" in md
+    assert "### 测试改动与手动清理" in md
+    assert "用户无需手动清理" in md
     assert "![漏洞截图 1](images/vuln-0001-1.png)" in md
     assert (tmp_path / "images" / "vuln-0001-1.png").read_bytes() == shot.read_bytes()
 

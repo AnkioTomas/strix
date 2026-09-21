@@ -593,6 +593,9 @@ def _read_revision(
         }
 
     changes, errors = _collect_update_changes(fields)
+    cleanup = changes.get("manual_cleanup")
+    if isinstance(cleanup, str):
+        errors.extend(_validate_manual_cleanup(cleanup))
     if errors:
         return {}, {"success": False, "error": "Validation failed", "errors": errors}
     if not changes:
@@ -678,7 +681,7 @@ async def _do_create(
     poc_description: str,
     poc_script_code: str,
     remediation_steps: str,
-    manual_cleanup: str,
+    manual_cleanup: str = "",
     evidence: str,
     assumptions: str,
     counterevidence: str,

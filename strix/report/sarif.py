@@ -546,6 +546,7 @@ def _result_properties(
         "impact",
         "technical_analysis",
         "remediation_steps",
+        "manual_cleanup",
         "counterevidence",
         "confidence",
         "confidence_rationale",
@@ -1142,6 +1143,7 @@ def _help_text(report: dict[str, Any], fallback: str) -> str:
         _string_value(report.get("description")),
         _string_value(report.get("impact")),
         _string_value(report.get("remediation_steps")),
+        _string_value(report.get("manual_cleanup")),
     ]
     help_text = "\n\n".join(section for section in sections if section)
     return help_text or fallback

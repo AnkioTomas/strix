@@ -344,6 +344,7 @@
     $("resumeBtn").disabled = !terminal;
     $("refreshReportBtn").disabled = !(terminal || active);
     $("cancelBtn").disabled = !active;
+    $("completeBtn").disabled = !(t && t.status !== "completed");
     $("holdBtn").disabled = !queued;
     $("releaseBtn").disabled = !held;
     $("renameBtn").disabled = !t;
@@ -1389,6 +1390,23 @@
       await refresh();
       selectTask(updated.id);
       setTab("viewer");
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
+  $("completeBtn").onclick = async () => {
+    if (!selected) return;
+    const t = currentTask();
+    if (!t || t.status === "completed") return;
+    const live = ACTIVE.has(t.status);
+    const hint = live
+      ? "将停止正在运行的扫描，并把任务标为已完成。继续？"
+      : "将任务标为已完成。继续？";
+    if (!confirm(hint)) return;
+    try {
+      await api.api(`/api/v1/tasks/${selected}/complete`, { method: "POST" });
+      await refresh();
     } catch (e) {
       alert(e.message);
     }

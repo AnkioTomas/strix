@@ -187,6 +187,29 @@ def test_create_task_with_attachments(client: TestClient):
         assert Path(item["source_path"]).is_file()
 
 
+def test_complete_task_marks_finished_and_sticks(client: TestClient):
+    res = client.post(
+        "/api/v1/tasks",
+        json={"type": "pentest", "target": "https://example.com", "scan_mode": "quick"},
+    )
+    task_id = res.json()["id"]
+    done = client.post(f"/api/v1/tasks/{task_id}/complete")
+    assert done.status_code == 200
+    body = done.json()
+    assert body["status"] == "completed"
+    assert body["finished_at"]
+
+    again = client.post(f"/api/v1/tasks/{task_id}/complete")
+    assert again.status_code == 409
+
+    manager = client.app.state.manager
+    kept = manager.finish_process(task_id)
+    assert kept["status"] == "completed"
+    fetched = client.get(f"/api/v1/tasks/{task_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["status"] == "completed"
+
+
 def test_cancel_queued(client: TestClient):
     res = client.post(
         "/api/v1/tasks",

@@ -242,6 +242,43 @@ class TaskManager:
 
     # --- cancel / retry / retest ---
 
+    def complete_task(self, task_id: str) -> dict[str, Any]:
+        """Operator close. Stop a live scan if there is one, then mark completed.
+
+        ``finish_process`` must not overwrite this: a manual complete is the
+        status, even when the worker exits with a non-zero code afterwards.
+        """
+        task = self.get_task(task_id)
+        if task["status"] == "completed":
+            raise TaskError(
+                "TASK_ALREADY_COMPLETED",
+                "Task is already completed",
+                status_code=409,
+            )
+
+        updated = (
+            self.db.update_task(
+                task_id,
+                status="completed",
+                finished_at=utc_now(),
+                pid=None,
+                error=None,
+                viewer_url=None,
+                viewer_token=None,
+            )
+            or task
+        )
+        process = self._processes.pop(task_id, None)
+        if process is not None:
+            code = process.terminate(self.settings.cancel_grace_seconds)
+            close_process_logs(process)
+            updated = self.db.update_task(task_id, exit_code=code) or updated
+
+        self.ingest_results(updated)
+        self._stop_task_sandbox(updated)
+        self._feishu_status(updated, "completed")
+        return self.get_task(task_id)
+
     def cancel_task(self, task_id: str) -> dict[str, Any]:
         task = self.get_task(task_id)
         if task["status"] not in CANCELLABLE:
@@ -834,6 +871,15 @@ class TaskManager:
         self._processes[task_id] = process
         if process._error and process.poll() is not None:
             raise TaskError("STRIX_START_FAILED", process._error)
+        current = self.get_task(task_id)
+        if current["status"] == "completed":
+            self._processes.pop(task_id, None)
+            if process.poll() is None:
+                code = process.terminate(self.settings.cancel_grace_seconds)
+                self.db.update_task(task_id, exit_code=code)
+            close_process_logs(process)
+            self._stop_task_sandbox(current)
+            return process
         self.db.update_task(
             task_id,
             status="running",
@@ -963,6 +1009,12 @@ class TaskManager:
     def finish_process(self, task_id: str, *, cancelled: bool = False) -> dict[str, Any]:
         process = self._processes.pop(task_id, None)
         task = self.get_task(task_id)
+        if task["status"] == "completed":
+            if process is not None:
+                if process.poll() is None:
+                    process.terminate(self.settings.cancel_grace_seconds)
+                close_process_logs(process)
+            return task
         exit_code = None
         run_name = task.get("run_name")
         detail_error: str | None = None

@@ -178,6 +178,8 @@ class WorkerPool:
             process = await asyncio.to_thread(self.manager.start_process, task, target)
             logger.info("task %s running pid=%s", task_id, process.pid)
         except TaskError as exc:
+            if self.manager.get_task(task_id)["status"] == "completed":
+                return
             logger.error("task %s failed to start: %s", task_id, exc.message)
             failed = self.manager.db.update_task(
                 task_id,
@@ -190,6 +192,8 @@ class WorkerPool:
                     notify_status, self.settings, self.manager.db, failed, "failed"
                 )
         except Exception as exc:
+            if self.manager.get_task(task_id)["status"] == "completed":
+                return
             logger.exception("task %s crashed during start", task_id)
             failed = self.manager.db.update_task(
                 task_id,

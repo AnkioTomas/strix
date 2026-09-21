@@ -244,6 +244,15 @@ async def release_task(task_id: str, manager: TaskManager = Depends(get_manager)
     return _summary(task)
 
 
+@router.post("/tasks/{task_id}/complete", response_model=TaskSummary)
+async def complete_task(task_id: str, manager: TaskManager = Depends(get_manager)):
+    try:
+        task = await asyncio.to_thread(manager.complete_task, task_id)
+    except TaskError as exc:
+        return _error(exc)
+    return _summary(task)
+
+
 @router.post("/tasks/{task_id}/cancel", response_model=TaskSummary)
 async def cancel_task(task_id: str, manager: TaskManager = Depends(get_manager)):
     try:

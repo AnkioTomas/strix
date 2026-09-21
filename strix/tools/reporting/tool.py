@@ -211,9 +211,11 @@ def _validate_manual_cleanup(text: str) -> list[str]:
         return [
             "manual_cleanup is required. State every change this test made on the "
             "target (location + what changed), then which of those the user must "
-            "clean up by hand. If you already reverted a change, say so. If the "
-            "test was read-only, say that nothing was modified and nothing needs "
-            "manual cleanup. A bare none/N/A/无 is not enough."
+            "clean up by hand. Objects you created must already be removed "
+            "(say reverted). Do not record a delete or drop of data that "
+            "existed before the test. If the test was read-only, say that "
+            "nothing was modified and nothing needs manual cleanup. A bare "
+            "none/N/A/无 is not enough."
         ]
     return []
 
@@ -1123,12 +1125,14 @@ async def create_vulnerability_report(
         manual_cleanup: REQUIRED. Two parts, in the report language.
             (1) Every change this test made on the target: location
             (URL, path, account, object id, file, table/row, config key)
-            and what changed. If you already reverted it, say reverted.
+            and what changed. Objects you created must already be
+            removed; say reverted. Never record a delete or drop of
+            data that existed before the test.
             (2) What the customer must still clean up by hand — only
-            residue you did not revert, with the exact object to delete
-            or restore. If the test was read-only, say that nothing was
-            modified and nothing needs manual cleanup. A bare
-            ``none`` / ``N/A`` / ``无`` is rejected.
+            residue you created and could not remove, with the exact
+            object to delete or restore. If the test was read-only, say
+            that nothing was modified and nothing needs manual cleanup.
+            A bare ``none`` / ``N/A`` / ``无`` is rejected.
         evidence: Irrefutable proof the issue is real and exploitable.
             Include request/response excerpts **and** screenshot path(s)
             with captions that match the claim (IDOR → victim data under

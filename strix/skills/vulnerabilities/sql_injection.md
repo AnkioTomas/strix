@@ -172,6 +172,10 @@ SQLi remains one of the most durable and impactful vulnerability classes. Modern
 - Server-side file access or command execution (platform/privilege dependent)
 - Persistent supply-chain impact via modified data, jobs, or procedures
 
+## Non-destructive proof
+
+Prove injection by reading schema or rows, or by `CREATE` of a table you own followed by `DROP` of only that table. Do not `DROP`, `TRUNCATE`, `DELETE`, or `UPDATE` objects or rows that existed before the test. When the proof is done, drop the table you created and delete the rows you inserted. Anything you could not remove goes in the finding's `manual_cleanup`.
+
 ## Pro Tips
 
 1. Pick the quietest reliable oracle first; avoid noisy long sleeps

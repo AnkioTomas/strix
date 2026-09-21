@@ -52,6 +52,7 @@ Critical correctness rules:
 - Keep target parameter explicit with `-p` when possible.
 - Use `--flush-session` when retesting after request/profile changes.
 - Start conservative (`--level 1-2`, `--risk 1`) and escalate only when needed.
+- Do not use sqlmap to `DROP`, `DELETE`, `UPDATE`, or `TRUNCATE` objects that existed before the test. A write proof is a table or row you created, then removed. `--os-shell` / `--os-pwn` are out.
 
 Usage rules:
 - Keep authenticated context (`--cookie`/`--headers`) aligned with manual validation state.

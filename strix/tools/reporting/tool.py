@@ -173,6 +173,24 @@ _REQUIRED_FIELDS = {
     "assumptions": "Assumptions cannot be empty - state exploitability prerequisites",
 }
 
+# Whole-field tokens that dodge the residue requirement. A real answer names
+# locations, or states in a sentence that the test changed nothing.
+_USELESS_CLEANUP = frozenset(
+    {
+        "n/a",
+        "na",
+        "none",
+        "null",
+        "nil",
+        "无",
+        "没有",
+        "无残留",
+        "无需清理",
+        "-",
+        "—",
+    }
+)
+
 _VALID_FIX_EFFORT = frozenset({"trivial", "low", "medium", "high"})
 _VALID_CONFIDENCE = frozenset({"high", "medium", "low"})
 _VALID_RETEST_STATUS = frozenset({"fixed", "not_fixed", "partial", "regressed"})
@@ -183,6 +201,21 @@ def _validate_required_text(fields: dict[str, str]) -> list[str]:
     return [
         msg for name, msg in _REQUIRED_FIELDS.items() if not str(fields.get(name) or "").strip()
     ]
+
+
+def _validate_manual_cleanup(text: str) -> list[str]:
+    """Require a residue statement, not a bare none/N/A/无."""
+    cleaned = " ".join(str(text or "").split())
+    token = cleaned.strip("。.").lower()
+    if not cleaned or token in _USELESS_CLEANUP:
+        return [
+            "manual_cleanup is required. State every change this test made on the "
+            "target (location + what changed), then which of those the user must "
+            "clean up by hand. If you already reverted a change, say so. If the "
+            "test was read-only, say that nothing was modified and nothing needs "
+            "manual cleanup. A bare none/N/A/无 is not enough."
+        ]
+    return []
 
 
 def _validate_cvss_breakdown(breakdown: Any) -> list[str]:
@@ -294,6 +327,7 @@ _UPDATE_TEXT_FIELDS = (
     "poc_description",
     "poc_script_code",
     "remediation_steps",
+    "manual_cleanup",
     "evidence",
     "assumptions",
     "counterevidence",
@@ -644,6 +678,7 @@ async def _do_create(
     poc_description: str,
     poc_script_code: str,
     remediation_steps: str,
+    manual_cleanup: str,
     evidence: str,
     assumptions: str,
     counterevidence: str,
@@ -677,6 +712,7 @@ async def _do_create(
             "assumptions": assumptions,
         }
     )
+    errors.extend(_validate_manual_cleanup(manual_cleanup))
 
     cleaned_shots = [str(p).strip() for p in (screenshots or []) if str(p).strip()]
     cited = extract_screenshot_paths(evidence, poc_description, *cleaned_shots)
@@ -756,6 +792,7 @@ async def _do_create(
             "poc_description": poc_description,
             "poc_script_code": poc_script_code,
             "remediation_steps": remediation_steps,
+            "manual_cleanup": manual_cleanup,
             "evidence": evidence,
             "assumptions": assumptions,
             "counterevidence": counterevidence,
@@ -845,6 +882,7 @@ async def create_vulnerability_report(
     poc_description: str,
     poc_script_code: str,
     remediation_steps: str,
+    manual_cleanup: str,
     evidence: str,
     assumptions: str,
     counterevidence: str,
@@ -951,8 +989,10 @@ async def create_vulnerability_report(
       (``cvss_breakdown``), (3) affected asset(s) (``target`` /
       ``endpoint``), (4) technical details (``technical_analysis``),
       (5) proof of concept (``poc_description`` + ``poc_script_code``),
-      (6) impact (``impact``), (7) evidence (``evidence``), and
-      (8) remediation (``remediation_steps``).
+      (6) impact (``impact``), (7) evidence (``evidence``),
+      (8) remediation (``remediation_steps``), and (9) test residue
+      (``manual_cleanup``): every change this test made on the target,
+      and which of those the customer must undo by hand.
 
     **White-box requirement**: when source is available, you MUST
     populate ``code_locations``. See the ``code_locations`` arg below
@@ -1077,6 +1117,15 @@ async def create_vulnerability_report(
             Do not default to Python for ordinary HTTP findings. Never
             file a conceptual-only write-up.
         remediation_steps: Specific, actionable fix (prose, no code).
+        manual_cleanup: REQUIRED. Two parts, in the report language.
+            (1) Every change this test made on the target: location
+            (URL, path, account, object id, file, table/row, config key)
+            and what changed. If you already reverted it, say reverted.
+            (2) What the customer must still clean up by hand — only
+            residue you did not revert, with the exact object to delete
+            or restore. If the test was read-only, say that nothing was
+            modified and nothing needs manual cleanup. A bare
+            ``none`` / ``N/A`` / ``无`` is rejected.
         evidence: Irrefutable proof the issue is real and exploitable.
             Include request/response excerpts **and** screenshot path(s)
             with captions that match the claim (IDOR → victim data under
@@ -1283,6 +1332,10 @@ async def create_vulnerability_report(
             A restrictive CSP that blocks inline script execution would
             reduce impact and lower the severity.
         fix_effort: "low"
+        manual_cleanup:
+            Read-only. The search request did not create an account,
+            write a file, or store a payload. Nothing for the customer
+            to clean up.
         screenshots:
             ["/workspace/.agent-browser-screenshots/xss-search-alert.png"]
     """
@@ -1297,6 +1350,7 @@ async def create_vulnerability_report(
         poc_description=poc_description,
         poc_script_code=poc_script_code,
         remediation_steps=remediation_steps,
+        manual_cleanup=manual_cleanup,
         evidence=evidence,
         assumptions=assumptions,
         counterevidence=counterevidence,
@@ -1332,6 +1386,7 @@ async def update_vulnerability_report(
     poc_description: str | None = None,
     poc_script_code: str | None = None,
     remediation_steps: str | None = None,
+    manual_cleanup: str | None = None,
     evidence: str | None = None,
     assumptions: str | None = None,
     counterevidence: str | None = None,
@@ -1406,6 +1461,8 @@ async def update_vulnerability_report(
         poc_script_code: Replacement PoC artifact (full URL, curl, or
             script only when necessary).
         remediation_steps: Replacement remediation prose (no code).
+        manual_cleanup: Replacement residue statement (what changed,
+            and what the customer must still clean up).
         evidence: Replacement evidence.
         assumptions: Replacement exploitability prerequisites.
         counterevidence: Replacement case against the finding.
@@ -1445,6 +1502,7 @@ async def update_vulnerability_report(
             "poc_description": poc_description,
             "poc_script_code": poc_script_code,
             "remediation_steps": remediation_steps,
+            "manual_cleanup": manual_cleanup,
             "evidence": evidence,
             "assumptions": assumptions,
             "counterevidence": counterevidence,

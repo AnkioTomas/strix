@@ -15,8 +15,10 @@ Pre-installed in the sandbox image. Always invoke via the
 ``exec_command`` shell tool. The Caido HTTP/HTTPS proxy is already
 wired via ``http_proxy`` / ``https_proxy`` env vars — **do not pass
 ``--proxy``**; agent-browser picks it up automatically and Caido
-captures all page traffic. Localhost (CDP) traffic is excluded via
-``NO_PROXY=localhost,127.0.0.1``.
+captures all page traffic. Never disable that proxy (``--proxy``
+empty, ``--noproxy``, unsetting ``http_proxy`` / ``HTTP_PROXY``).
+Localhost (CDP) traffic is excluded via
+``NO_PROXY=localhost,127.0.0.1`` — do not add the target to ``NO_PROXY``.
 
 Default viewport is 1280×720. For sites that gate behavior on real
 desktop dimensions (responsive breakpoints, bot fingerprinting), run

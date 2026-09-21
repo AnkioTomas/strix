@@ -239,7 +239,11 @@ async def finish_scan(
           Copied into the delivery report **appendix**.
         - ``recommendations`` — prioritized actions grouped by urgency
           (Immediate / Short-term / Medium-term), each with concrete
-          remediation steps. One short retest line is enough.
+          remediation steps. One short retest line is enough. End with
+          a **manual cleanup** rollup: every target change still left
+          for the customer, taken from each finding's ``manual_cleanup``
+          (location + what to undo). If nothing remains, say the test
+          left no residue.
           Copied into the delivery report **appendix**.
 
         Do **not** invent a metadata table (system name / tech stack /

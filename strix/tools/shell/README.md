@@ -27,6 +27,7 @@ a process that has already exited, fails with
 - **Wired in:** `strix/agents/factory.py` — added per-run via the SDK
   `Shell` capability; `write_stdin` is wrapped to drop the SDK's `pid`
   arg from the function schema.
-- **Sandbox env:** `http_proxy` / `https_proxy` route every shell child
-  through Caido; `AGENT_BROWSER_*`, `REQUESTS_CA_BUNDLE` etc. come from
-  `containers/Dockerfile`.
+- **Sandbox env:** `http_proxy` / `https_proxy` / `HTTP_PROXY` /
+  `HTTPS_PROXY` / `ALL_PROXY` route every shell child through Caido.
+  Do not unset them or pass `--noproxy`. `AGENT_BROWSER_*`,
+  `REQUESTS_CA_BUNDLE` etc. come from `containers/Dockerfile`.

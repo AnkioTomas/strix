@@ -25,16 +25,21 @@ def _seed_task(
     *,
     task_id: str,
     status: str,
-    container_id: str | None,
+    runs: list[tuple[str, str | None]],
+    run_name: str | None = None,
+    workspace: Path | None = None,
 ) -> Path:
-    workspace = tmp_path / "tasks" / task_id
-    run_name = f"{task_id}_run"
-    run_dir = workspace / "strix_runs" / run_name
-    run_dir.mkdir(parents=True)
-    record: dict = {"run_name": run_name, "status": "completed"}
-    if container_id:
-        record["sandbox"] = {"container_id": container_id}
-    (run_dir / "run.json").write_text(json.dumps(record), encoding="utf-8")
+    """``runs`` is ``[(run_dir_name, container_id_or_None), ...]``."""
+    ws = workspace or (tmp_path / "tasks" / task_id)
+    ws.mkdir(parents=True, exist_ok=True)
+    primary = run_name or (runs[0][0] if runs else None)
+    for name, container_id in runs:
+        run_dir = ws / "strix_runs" / name
+        run_dir.mkdir(parents=True, exist_ok=True)
+        record: dict = {"run_name": name, "status": "completed"}
+        if container_id:
+            record["sandbox"] = {"container_id": container_id}
+        (run_dir / "run.json").write_text(json.dumps(record), encoding="utf-8")
     now = "2026-01-01T00:00:00Z"
     db.insert_task(
         {
@@ -42,23 +47,29 @@ def _seed_task(
             "type": "pentest",
             "status": status,
             "target": "https://example.com",
-            "workspace": str(workspace),
-            "run_name": run_name,
+            "workspace": str(ws),
+            "run_name": primary,
             "created_at": now,
             "updated_at": now,
         }
     )
-    return run_dir
+    return ws
 
 
-def test_reap_stops_running_container_for_completed_task(db: Database, tmp_path: Path):
-    run_dir = _seed_task(
-        db, tmp_path, task_id="t_done", status="completed", container_id="abc123deadbeef"
+def test_reap_stops_sibling_run_not_just_current_run_name(db: Database, tmp_path: Path):
+    """Finished task's DB run_name has no sandbox; older sibling still does."""
+    ws = _seed_task(
+        db,
+        tmp_path,
+        task_id="t_done",
+        status="completed",
+        run_name="run_latest",
+        runs=[
+            ("run_old", "abc123deadbeef"),
+            ("run_latest", None),
+        ],
     )
-    _seed_task(
-        db, tmp_path, task_id="t_live", status="running", container_id="live999deadbeef"
-    )
-
+    old_dir = ws / "strix_runs" / "run_old"
     stopped: list[Path | None] = []
 
     def stop(path: Path | None) -> bool:
@@ -67,39 +78,27 @@ def test_reap_stops_running_container_for_completed_task(db: Database, tmp_path:
 
     result = sandbox_reaper.reap_stopped_task_sandboxes(
         db,
-        list_running=lambda: ["abc123deadbeef00", "live999deadbeef00"],
+        list_labeled=list,
         stop_run_dir=stop,
+        stop_container=lambda _cid: False,
     )
     assert result["stopped"] == 1
-    assert result["running"] == 1
-    assert result["skipped_active"] == 0
-    assert stopped == [run_dir]
-
-
-def test_reap_skips_already_stopped_containers(db: Database, tmp_path: Path):
-    _seed_task(
-        db, tmp_path, task_id="t_done", status="completed", container_id="abc123deadbeef"
-    )
-    stop = MagicMock(return_value=True)
-    result = sandbox_reaper.reap_stopped_task_sandboxes(
-        db,
-        list_running=list,
-        stop_run_dir=stop,
-    )
     assert result["checked"] == 1
-    assert result["running"] == 0
-    assert result["stopped"] == 0
-    stop.assert_not_called()
+    assert stopped == [old_dir]
 
 
-def test_reap_does_not_stop_active_task_container(db: Database, tmp_path: Path):
+def test_reap_skips_active_task_container(db: Database, tmp_path: Path):
     _seed_task(
-        db, tmp_path, task_id="t_run", status="running", container_id="abc123deadbeef"
+        db,
+        tmp_path,
+        task_id="t_run",
+        status="running",
+        runs=[("run_a", "abc123deadbeef")],
     )
     stop = MagicMock(return_value=True)
     result = sandbox_reaper.reap_stopped_task_sandboxes(
         db,
-        list_running=lambda: ["abc123deadbeef00"],
+        list_labeled=list,
         stop_run_dir=stop,
     )
     assert result["checked"] == 0
@@ -107,13 +106,43 @@ def test_reap_does_not_stop_active_task_container(db: Database, tmp_path: Path):
     stop.assert_not_called()
 
 
-def test_reap_noop_without_sandbox_record(db: Database, tmp_path: Path):
-    _seed_task(db, tmp_path, task_id="t_bare", status="failed", container_id=None)
-    stop = MagicMock(return_value=True)
+def test_reap_stops_by_label_when_sandbox_record_missing(db: Database, tmp_path: Path):
+    _seed_task(
+        db,
+        tmp_path,
+        task_id="t_done",
+        status="completed",
+        runs=[("run_orphan", None)],
+    )
+    stop_dir = MagicMock(return_value=True)
+    stop_cid = MagicMock(return_value=True)
     result = sandbox_reaper.reap_stopped_task_sandboxes(
         db,
-        list_running=lambda: ["whatever"],
-        stop_run_dir=stop,
+        list_labeled=lambda: [("ffffaaaabbbbcccc", "run_orphan")],
+        stop_run_dir=stop_dir,
+        stop_container=stop_cid,
     )
     assert result["checked"] == 0
-    stop.assert_not_called()
+    assert result["label_stopped"] == 1
+    assert result["stopped"] == 1
+    stop_cid.assert_called_once_with("ffffaaaabbbbcccc")
+    stop_dir.assert_not_called()
+
+
+def test_reap_does_not_stop_unrelated_labeled_container(db: Database, tmp_path: Path):
+    _seed_task(
+        db,
+        tmp_path,
+        task_id="t_done",
+        status="completed",
+        runs=[("run_a", None)],
+    )
+    stop_cid = MagicMock(return_value=True)
+    result = sandbox_reaper.reap_stopped_task_sandboxes(
+        db,
+        list_labeled=lambda: [("ffffaaaabbbbcccc", "someone_elses_run")],
+        stop_run_dir=MagicMock(return_value=True),
+        stop_container=stop_cid,
+    )
+    assert result["stopped"] == 0
+    stop_cid.assert_not_called()

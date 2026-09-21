@@ -1020,16 +1020,27 @@ class TaskManager:
         sync_findings_as_issues(self.settings, task, findings, skip_ids=skip)
 
     def _stop_task_sandbox(self, task: dict[str, Any]) -> None:
-        """Stop the Docker sandbox even if the scan worker skipped cleanup."""
+        """Stop Docker sandboxes for every run under this task workspace."""
         from strix.runtime.session_manager import stop_sandbox_from_run_dir
 
-        run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
-        if run_dir is None:
+        workspace = Path(task["workspace"])
+        runs_root = workspace / "strix_runs"
+        run_dirs: list[Path] = []
+        if runs_root.is_dir():
+            run_dirs.extend(
+                p for p in runs_root.iterdir() if p.is_dir() and (p / "run.json").is_file()
+            )
+        named = workspace_run_dir(workspace, task.get("run_name"))
+        if named is not None and named not in run_dirs:
+            run_dirs.append(named)
+        if not run_dirs:
             from app.services.results import discover_run_name
 
-            name = discover_run_name(Path(task["workspace"]))
-            run_dir = workspace_run_dir(Path(task["workspace"]), name)
-        stop_sandbox_from_run_dir(run_dir)
+            discovered = workspace_run_dir(workspace, discover_run_name(workspace))
+            if discovered is not None:
+                run_dirs.append(discovered)
+        for run_dir in run_dirs:
+            stop_sandbox_from_run_dir(run_dir)
 
     def ingest_results(self, task: dict[str, Any]) -> None:
         run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))

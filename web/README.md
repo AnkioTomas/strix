@@ -193,7 +193,7 @@ Worker 每秒估算可跑槽位：
 ## 设计约束
 
 - 扫描在 **detached 子进程**（`python -m app.services.scan_worker`，`start_new_session=True`）；API 重启后通过 PID + `.web_scan_state.json` 重连，Viewer 反代仍指向原 loopback 端口
-- Worker 按 `STRIX_SANDBOX_REAP_INTERVAL`（默认 60s）扫一遍 Docker：只停止 **已结束**（completed/failed/cancelled）任务在 `run.json` 里记录的沙箱；运行中任务与无关 CLI 容器不动
+- Worker 按 `STRIX_SANDBOX_REAP_INTERVAL`（默认 60s）扫一遍：已结束任务 workspace 下**所有** `strix_runs/*` 的沙箱 + 带 `strix-run-id` 标签且属于这些 run 的 running 容器；运行中任务与无关 CLI 容器不动
 - 不在 HTTP handler 里同步跑扫描；Worker 只负责排队/认领/收尸
 - 每任务独立 workspace：`web/data/tasks/<task_id>/`
 - 漏洞只按 `task_id` 暴露，不做全局汇聚

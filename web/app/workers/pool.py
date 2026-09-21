@@ -168,15 +168,7 @@ class WorkerPool:
         if now - self._last_sandbox_reap < interval:
             return
         self._last_sandbox_reap = now
-        result = await asyncio.to_thread(reap_stopped_task_sandboxes, self.manager.db)
-        if result.get("stopped") or result.get("errors"):
-            logger.info(
-                "sandbox reaper checked=%s running=%s stopped=%s errors=%s",
-                result.get("checked"),
-                result.get("running"),
-                result.get("stopped"),
-                result.get("errors"),
-            )
+        await asyncio.to_thread(reap_stopped_task_sandboxes, self.manager.db)
 
     async def _launch(self, task: dict) -> None:
         task_id = task["id"]

@@ -33,6 +33,7 @@ from app.schemas import (
     TaskSummary,
     UpdateFindingRequest,
     UpdateTaskRequest,
+    normalize_earliest_start,
     summarize_finding,
 )
 from app.api.viewer_proxy import attach_viewer_proxy_url
@@ -47,6 +48,42 @@ router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_key)])
 
 def get_manager(request: Request) -> TaskManager:
     return request.app.state.manager
+
+
+_LIST_STATUSES = {
+    "held",
+    "queued",
+    "starting",
+    "running",
+    "cancelling",
+    "completed",
+    "failed",
+    "cancelled",
+}
+_LIST_TYPES = {"pentest", "audit"}
+_LIST_ACTIONS = {"retest", "retry", "resume", "import"}
+_LIST_MODES = {"quick", "standard", "deep"}
+_LIST_SORTS = {"created_at", "updated_at", "started_at", "finished_at"}
+_LIST_ORDERS = {"asc", "desc"}
+
+
+def _csv_allowlist(name: str, raw: str | None, allowed: set[str]) -> str | None:
+    values = [part.strip() for part in (raw or "").split(",") if part.strip()]
+    if not values:
+        return None
+    unknown = [value for value in values if value not in allowed]
+    if unknown:
+        raise TaskError("INVALID_REQUEST", f"invalid {name}: {', '.join(unknown)}")
+    return ",".join(values)
+
+
+def _parse_list_time(name: str, raw: str | None) -> str | None:
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        return normalize_earliest_start(str(raw))
+    except ValueError as exc:
+        raise TaskError("INVALID_REQUEST", f"invalid {name}: {exc}") from exc
 
 
 def _error(exc: TaskError) -> JSONResponse:
@@ -200,21 +237,70 @@ async def import_tasks(
 
 @router.get("/tasks", response_model=TaskListResponse)
 async def list_tasks(
-    status: str | None = None,
+    status: str | None = Query(default=None, description="Comma-separated statuses"),
     type: str | None = Query(default=None, alias="type"),
+    action: str | None = Query(default=None, description="Comma-separated actions"),
+    parent_task_id: str | None = None,
+    scan_mode: str | None = Query(default=None, description="Comma-separated scan modes"),
+    q: str | None = Query(default=None, description="Search id / name / target / source_url"),
+    created_after: str | None = Query(default=None, description="ISO-8601 inclusive"),
+    created_before: str | None = Query(default=None, description="ISO-8601 inclusive"),
+    sort: str = Query(default="created_at"),
+    order: str = Query(default="desc"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     include_findings_summary: bool = Query(default=True),
     manager: TaskManager = Depends(get_manager),
 ):
-    def _load() -> list[dict[str, Any]]:
-        rows = manager.list_tasks(status=status, task_type=type, limit=limit, offset=offset)
-        return manager.attach_task_overlays(rows, include_findings=include_findings_summary)
+    try:
+        status = _csv_allowlist("status", status, _LIST_STATUSES)
+        task_type = _csv_allowlist("type", type, _LIST_TYPES)
+        action = _csv_allowlist("action", action, _LIST_ACTIONS)
+        scan_mode = _csv_allowlist("scan_mode", scan_mode, _LIST_MODES)
+        created_after = _parse_list_time("created_after", created_after)
+        created_before = _parse_list_time("created_before", created_before)
+        if sort not in _LIST_SORTS:
+            raise TaskError("INVALID_REQUEST", f"invalid sort: {sort}")
+        if order not in _LIST_ORDERS:
+            raise TaskError("INVALID_REQUEST", f"invalid order: {order}")
+        query = (q or "").strip() or None
+        if query and len(query) > 200:
+            raise TaskError("INVALID_REQUEST", "q must be at most 200 characters")
+        parent = (parent_task_id or "").strip() or None
+    except TaskError as exc:
+        return _error(exc)
 
-    tasks = await asyncio.to_thread(_load)
+    filters = {
+        "status": status,
+        "task_type": task_type,
+        "action": action,
+        "parent_task_id": parent,
+        "scan_mode": scan_mode,
+        "q": query,
+        "created_after": created_after,
+        "created_before": created_before,
+    }
+
+    def _load() -> tuple[list[dict[str, Any]], int]:
+        rows = manager.list_tasks(
+            **filters,
+            sort=sort,
+            order=order,
+            limit=limit,
+            offset=offset,
+        )
+        total = manager.count_tasks(**filters)
+        return manager.attach_task_overlays(rows, include_findings=include_findings_summary), total
+
+    try:
+        tasks, total = await asyncio.to_thread(_load)
+    except ValueError as exc:
+        return _error(TaskError("INVALID_REQUEST", str(exc)))
     return TaskListResponse(
         tasks=[_summary(t, include_findings=include_findings_summary) for t in tasks],
-        total=len(tasks),
+        total=total,
+        limit=limit,
+        offset=offset,
     )
 
 

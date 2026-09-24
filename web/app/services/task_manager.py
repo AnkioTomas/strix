@@ -232,11 +232,53 @@ class TaskManager:
         *,
         status: str | None = None,
         task_type: str | None = None,
+        action: str | None = None,
+        parent_task_id: str | None = None,
+        scan_mode: str | None = None,
+        q: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        sort: str = "created_at",
+        order: str = "desc",
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         return self.db.list_tasks(
-            status=status, task_type=task_type, limit=limit, offset=offset
+            status=status,
+            task_type=task_type,
+            action=action,
+            parent_task_id=parent_task_id,
+            scan_mode=scan_mode,
+            q=q,
+            created_after=created_after,
+            created_before=created_before,
+            sort=sort,
+            order=order,
+            limit=limit,
+            offset=offset,
+        )
+
+    def count_tasks(
+        self,
+        *,
+        status: str | None = None,
+        task_type: str | None = None,
+        action: str | None = None,
+        parent_task_id: str | None = None,
+        scan_mode: str | None = None,
+        q: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+    ) -> int:
+        return self.db.count_tasks(
+            status=status,
+            task_type=task_type,
+            action=action,
+            parent_task_id=parent_task_id,
+            scan_mode=scan_mode,
+            q=q,
+            created_after=created_after,
+            created_before=created_before,
         )
 
     def attach_task_overlays(

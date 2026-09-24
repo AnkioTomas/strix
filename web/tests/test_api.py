@@ -89,6 +89,78 @@ def test_create_and_list_pentest(client: TestClient):
     row = next(t for t in listed.json()["tasks"] if t["id"] == task["id"])
     assert row["finding_counts"] == created_counts
     assert row["has_report"] is False
+    assert listed.json()["total"] >= 1
+    assert listed.json()["limit"] == 100
+    assert listed.json()["offset"] == 0
+
+
+def test_list_tasks_filters_and_pagination(client: TestClient):
+    manager = client.app.state.manager
+    first_res = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com",
+            "scan_mode": "quick",
+            "name": "门户A",
+            "held": True,
+        },
+    )
+    assert first_res.status_code == 202, first_res.text
+    first = first_res.json()
+    second_res = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com",
+            "scan_mode": "deep",
+            "name": "源码B",
+            "held": True,
+        },
+    )
+    assert second_res.status_code == 202, second_res.text
+    second = second_res.json()
+    manager.db.update_task(second["id"], type="audit", action="retest")
+
+    page = client.get("/api/v1/tasks?limit=1&offset=0&sort=created_at&order=desc")
+    assert page.status_code == 200, page.text
+    body = page.json()
+    assert body["limit"] == 1
+    assert body["offset"] == 0
+    assert body["total"] >= 2
+    assert len(body["tasks"]) == 1
+
+    rest = client.get("/api/v1/tasks?limit=1&offset=1&sort=created_at&order=desc")
+    assert rest.status_code == 200
+    assert rest.json()["total"] == body["total"]
+    assert rest.json()["tasks"][0]["id"] != body["tasks"][0]["id"]
+
+    by_type = client.get("/api/v1/tasks?type=pentest").json()
+    assert all(item["type"] == "pentest" for item in by_type["tasks"])
+    assert any(item["id"] == first["id"] for item in by_type["tasks"])
+    assert all(item["id"] != second["id"] for item in by_type["tasks"])
+
+    by_action = client.get("/api/v1/tasks?action=retest").json()
+    assert by_action["total"] >= 1
+    assert all(item["action"] == "retest" for item in by_action["tasks"])
+    assert any(item["id"] == second["id"] for item in by_action["tasks"])
+
+    by_q = client.get("/api/v1/tasks?q=门户").json()
+    assert any(item["id"] == first["id"] for item in by_q["tasks"])
+    assert all(item["id"] != second["id"] for item in by_q["tasks"])
+
+    by_mode = client.get("/api/v1/tasks?scan_mode=quick,deep").json()
+    ids = {item["id"] for item in by_mode["tasks"]}
+    assert first["id"] in ids
+    assert second["id"] in ids
+
+    future = client.get("/api/v1/tasks?created_after=2099-01-01T00:00:00Z").json()
+    assert future["total"] == 0
+    assert future["tasks"] == []
+
+    bad = client.get("/api/v1/tasks?status=exploded")
+    assert bad.status_code == 400
+    assert bad.json()["error"]["code"] == "INVALID_REQUEST"
 
 
 def test_create_task_with_agent_proxy_and_headers(client: TestClient):

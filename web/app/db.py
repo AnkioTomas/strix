@@ -96,6 +96,73 @@ def utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+_TASK_SORT = {
+    "created_at": "created_at",
+    "updated_at": "updated_at",
+    "started_at": "started_at",
+    "finished_at": "finished_at",
+}
+
+
+def _csv_values(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _task_where(
+    *,
+    status: str | None = None,
+    task_type: str | None = None,
+    action: str | None = None,
+    parent_task_id: str | None = None,
+    scan_mode: str | None = None,
+    q: str | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
+) -> tuple[str, list[Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    statuses = _csv_values(status)
+    if statuses:
+        clauses.append(f"status IN ({','.join('?' * len(statuses))})")
+        params.extend(statuses)
+    types = _csv_values(task_type)
+    if types:
+        clauses.append(f"type IN ({','.join('?' * len(types))})")
+        params.extend(types)
+    actions = _csv_values(action)
+    if actions:
+        clauses.append(f"action IN ({','.join('?' * len(actions))})")
+        params.extend(actions)
+    modes = _csv_values(scan_mode)
+    if modes:
+        clauses.append(f"scan_mode IN ({','.join('?' * len(modes))})")
+        params.extend(modes)
+    if parent_task_id:
+        clauses.append("parent_task_id = ?")
+        params.append(parent_task_id)
+    needle = (q or "").strip().lower()
+    if needle:
+        clauses.append(
+            "("
+            "instr(lower(id), ?) > 0 OR "
+            "instr(lower(coalesce(name, '')), ?) > 0 OR "
+            "instr(lower(coalesce(target, '')), ?) > 0 OR "
+            "instr(lower(coalesce(source_url, '')), ?) > 0"
+            ")"
+        )
+        params.extend([needle, needle, needle, needle])
+    if created_after:
+        clauses.append("created_at >= ?")
+        params.append(created_after)
+    if created_before:
+        clauses.append("created_at <= ?")
+        params.append(created_before)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    return where, params
+
+
 def _flag_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     item = dict(row)
     item["request_test"] = bool(item.get("request_test"))
@@ -178,25 +245,71 @@ class Database:
         *,
         status: str | None = None,
         task_type: str | None = None,
+        action: str | None = None,
+        parent_task_id: str | None = None,
+        scan_mode: str | None = None,
+        q: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        sort: str = "created_at",
+        order: str = "desc",
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        clauses: list[str] = []
-        params: list[Any] = []
-        if status:
-            clauses.append("status = ?")
-            params.append(status)
-        if task_type:
-            clauses.append("type = ?")
-            params.append(task_type)
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        where, params = _task_where(
+            status=status,
+            task_type=task_type,
+            action=action,
+            parent_task_id=parent_task_id,
+            scan_mode=scan_mode,
+            q=q,
+            created_after=created_after,
+            created_before=created_before,
+        )
+        sort_col = _TASK_SORT.get(sort or "created_at")
+        if sort_col is None:
+            raise ValueError(f"invalid sort: {sort}")
+        raw_order = str(order or "desc").lower()
+        if raw_order not in {"asc", "desc"}:
+            raise ValueError(f"invalid order: {order}")
+        direction = "ASC" if raw_order == "asc" else "DESC"
         params.extend([limit, offset])
         with self.connect() as conn:
             rows = conn.execute(
-                f"SELECT * FROM tasks {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                f"SELECT * FROM tasks {where} ORDER BY {sort_col} {direction} "
+                "LIMIT ? OFFSET ?",
                 params,
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def count_tasks(
+        self,
+        *,
+        status: str | None = None,
+        task_type: str | None = None,
+        action: str | None = None,
+        parent_task_id: str | None = None,
+        scan_mode: str | None = None,
+        q: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+    ) -> int:
+        where, params = _task_where(
+            status=status,
+            task_type=task_type,
+            action=action,
+            parent_task_id=parent_task_id,
+            scan_mode=scan_mode,
+            q=q,
+            created_after=created_after,
+            created_before=created_before,
+        )
+        with self.connect() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS c FROM tasks {where}",
+                params,
+            ).fetchone()
+        return int(row["c"] if row else 0)
 
     def count_by_status(self, status: str) -> int:
         with self.connect() as conn:

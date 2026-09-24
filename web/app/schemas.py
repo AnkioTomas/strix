@@ -230,6 +230,8 @@ class TaskSummary(BaseModel):
 class TaskListResponse(BaseModel):
     tasks: list[TaskSummary]
     total: int
+    limit: int = 100
+    offset: int = 0
 
 
 class FindingLocation(BaseModel):

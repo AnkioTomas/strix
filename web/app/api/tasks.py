@@ -321,14 +321,7 @@ async def update_task(
 ):
     fields = payload.model_dump(exclude_unset=True)
     try:
-        task = await asyncio.to_thread(
-            manager.update_task_meta,
-            task_id,
-            name=fields.get("name"),
-            notes=fields.get("notes"),
-            has_name="name" in fields,
-            has_notes="notes" in fields,
-        )
+        task = await asyncio.to_thread(manager.update_task_meta, task_id, fields)
     except TaskError as exc:
         return _error(exc)
     return _summarize(task, manager)

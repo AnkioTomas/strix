@@ -1387,6 +1387,39 @@ def test_task_name_notes_hold_release(client: TestClient):
     assert held.status_code == 200
     assert held.json()["status"] == "held"
 
+    edited = client.patch(
+        f"/api/v1/tasks/{task['id']}",
+        json={
+            "instruction": "改指令",
+            "scan_mode": "standard",
+            "target": "https://example.com/login",
+            "use_proxy": True,
+            "proxy_url": "http://127.0.0.1:7890",
+            "earliest_start": "2099-01-01T00:00:00Z",
+        },
+    )
+    assert edited.status_code == 200, edited.text
+    body = edited.json()
+    assert body["status"] == "held"
+    assert body["instruction"] == "改指令"
+    assert body["scan_mode"] == "standard"
+    assert body["target"] == "https://example.com/login"
+    assert body["proxy_url"] == "http://127.0.0.1:7890"
+    assert body["earliest_start"] == "2099-01-01T00:00:00Z"
+
+    cleared_proxy = client.patch(
+        f"/api/v1/tasks/{task['id']}",
+        json={"use_proxy": False},
+    )
+    assert cleared_proxy.status_code == 200, cleared_proxy.text
+    assert cleared_proxy.json().get("proxy_url") in (None, "")
+
+    bad_proxy = client.patch(
+        f"/api/v1/tasks/{task['id']}",
+        json={"use_proxy": True, "proxy_url": "ftp://bad"},
+    )
+    assert bad_proxy.status_code == 422
+
     deleted = client.delete(f"/api/v1/tasks/{task['id']}")
     assert deleted.status_code == 204
 
@@ -1412,6 +1445,29 @@ def test_task_name_notes_hold_release(client: TestClient):
     assert deleted.status_code == 204
     assert client.get(f"/api/v1/tasks/{created['id']}").status_code == 404
     assert not workspace.exists()
+
+
+def test_patch_scan_settings_rejected_unless_held(client: TestClient):
+    created = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com",
+            "scan_mode": "quick",
+        },
+    )
+    assert created.status_code == 202, created.text
+    task_id = created.json()["id"]
+    blocked = client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json={"instruction": "不该改"},
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "TASK_NOT_EDITABLE"
+    renamed = client.patch(f"/api/v1/tasks/{task_id}", json={"name": "仍可改名"})
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "仍可改名"
+    assert renamed.json()["instruction"] != "不该改"
 
 
 def test_import_cli_runs(client: TestClient, tmp_path: Path):

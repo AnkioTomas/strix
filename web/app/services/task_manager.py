@@ -10,6 +10,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from app.config import Settings
 from app.db import Database, utc_now
 from app.schemas import CreateTaskRequest, GitSource, LocalSource
@@ -79,6 +81,31 @@ def _merge_connectivity_note(existing: str | None, detail: str) -> str:
     else:
         merged = f"{base}\n{line}"
     return merged[:_NOTES_MAX_LEN]
+
+
+def _strip_connectivity_notes(existing: str | None) -> str | None:
+    if not existing:
+        return None
+    cleaned = "\n".join(
+        line for line in existing.splitlines() if not line.startswith("[连通性]")
+    ).strip()
+    return cleaned or None
+
+
+_HELD_ONLY_FIELDS = frozenset(
+    {
+        "instruction",
+        "scan_mode",
+        "max_budget",
+        "earliest_start",
+        "target",
+        "source",
+        "proxy_url",
+        "use_proxy",
+        "request_headers",
+        "use_headers",
+    }
+)
 
 
 _DOWNLOAD_UNSAFE = re.compile(r'[/\\:*?"<>|\x00-\x1f]+')
@@ -440,25 +467,115 @@ class TaskManager:
         if workspace.exists():
             shutil.rmtree(workspace, ignore_errors=True)
 
-    def update_task_meta(
-        self,
-        task_id: str,
-        *,
-        name: str | None = None,
-        notes: str | None = None,
-        has_name: bool = False,
-        has_notes: bool = False,
-    ) -> dict[str, Any]:
-        """Update display name and/or notes. Pass has_* when the field was provided."""
-        self.get_task(task_id)
-        fields: dict[str, Any] = {}
-        if has_name:
-            fields["name"] = (name or "").strip() or None
-        if has_notes:
-            fields["notes"] = (notes or "").strip() or None
+    def update_task_meta(self, task_id: str, fields: dict[str, Any]) -> dict[str, Any]:
+        """Patch display fields always; scan settings only while ``held``."""
+        task = self.get_task(task_id)
         if not fields:
             raise TaskError("INVALID_REQUEST", "No fields to update")
-        updated = self.db.update_task(task_id, **fields)
+        if _HELD_ONLY_FIELDS & fields.keys() and task["status"] != "held":
+            raise TaskError(
+                "TASK_NOT_EDITABLE",
+                f"Scan settings can only be changed while held (status={task['status']})",
+                status_code=409,
+            )
+
+        patch: dict[str, Any] = {}
+        if "name" in fields:
+            patch["name"] = (fields.get("name") or "").strip() or None
+        if "notes" in fields:
+            patch["notes"] = (fields.get("notes") or "").strip() or None
+        if "instruction" in fields:
+            text = fields.get("instruction")
+            patch["instruction"] = (text or "").strip() or None
+        if "scan_mode" in fields and fields["scan_mode"] is not None:
+            patch["scan_mode"] = fields["scan_mode"]
+        if "max_budget" in fields:
+            patch["max_budget"] = fields["max_budget"]
+        if "earliest_start" in fields:
+            patch["earliest_start"] = fields["earliest_start"]
+        if "use_proxy" in fields or "proxy_url" in fields:
+            if fields.get("use_proxy") is False:
+                patch["proxy_url"] = None
+            elif "proxy_url" in fields:
+                patch["proxy_url"] = fields["proxy_url"]
+        if "use_headers" in fields or "request_headers" in fields:
+            if fields.get("use_headers") is False:
+                patch["request_headers"] = None
+            elif "request_headers" in fields:
+                patch["request_headers"] = fields["request_headers"]
+
+        if "target" in fields:
+            if task["type"] != "pentest":
+                raise TaskError("INVALID_REQUEST", "target is only valid for pentest tasks")
+            raw = (fields.get("target") or "").strip()
+            if not raw:
+                raise TaskError("INVALID_REQUEST", "pentest tasks require target")
+            try:
+                patch["target"] = validate_pentest_target(raw, self.settings)
+            except TargetValidationError as exc:
+                raise TaskError(exc.code, exc.message) from exc
+
+        if "source" in fields:
+            if task["type"] != "audit":
+                raise TaskError("INVALID_REQUEST", "source is only valid for audit tasks")
+            raw_source = fields["source"]
+            if raw_source is None:
+                raise TaskError("INVALID_REQUEST", "audit tasks require source")
+            try:
+                source = raw_source
+                if not isinstance(source, (GitSource, LocalSource)):
+                    source = (
+                        GitSource.model_validate(source)
+                        if str(source.get("type") or "git") == "git"
+                        else LocalSource.model_validate(source)
+                    )
+                source = validate_source(source, self.settings)
+            except (SourceValidationError, ValidationError) as exc:
+                if isinstance(exc, SourceValidationError):
+                    raise TaskError(exc.code, exc.message) from exc
+                raise TaskError("INVALID_REQUEST", str(exc)) from exc
+            if isinstance(source, GitSource):
+                patch.update(
+                    {
+                        "source_type": "git",
+                        "source_url": source.url,
+                        "source_branch": source.branch,
+                        "source_commit": source.commit,
+                        "source_path": None,
+                        "target": source.url,
+                    }
+                )
+            else:
+                patch.update(
+                    {
+                        "source_type": "local",
+                        "source_path": source.path,
+                        "source_url": None,
+                        "source_branch": None,
+                        "source_commit": None,
+                        "target": source.path,
+                    }
+                )
+
+        notes = patch["notes"] if "notes" in patch else task.get("notes")
+        target = patch.get("target", task.get("target"))
+        proxy_url = patch["proxy_url"] if "proxy_url" in patch else task.get("proxy_url")
+        if task["type"] == "pentest" and target and (
+            "target" in patch or "proxy_url" in patch
+        ):
+            try:
+                check_tcp_reachable(str(target), proxy_url=proxy_url)
+            except TargetValidationError as exc:
+                if exc.code != "TARGET_UNREACHABLE":
+                    raise TaskError(exc.code, exc.message) from exc
+                notes = _merge_connectivity_note(notes, exc.message)
+            else:
+                notes = _strip_connectivity_notes(notes)
+            patch["notes"] = notes
+
+        if not patch:
+            raise TaskError("INVALID_REQUEST", "No fields to update")
+        updated = self.db.update_task(task_id, **patch)
         assert updated is not None
         return updated
 

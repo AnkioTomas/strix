@@ -127,10 +127,77 @@ class CreateTaskRequest(BaseModel):
 
 
 class UpdateTaskRequest(BaseModel):
-    """Rename and/or update notes. Omitted fields are left unchanged."""
+    """Patch a task. Name/notes work in any status; scan settings only while held."""
 
     name: str | None = Field(default=None, max_length=200)
     notes: str | None = Field(default=None, max_length=4000)
+    instruction: str | None = None
+    scan_mode: ScanMode | None = None
+    max_budget: float | None = Field(default=None, gt=0)
+    earliest_start: str | None = None
+    target: str | None = None
+    source: Source | None = None
+    proxy_url: str | None = Field(default=None, max_length=500)
+    use_proxy: bool | None = None
+    request_headers: str | None = Field(default=None, max_length=8000)
+    use_headers: bool | None = None
+
+    @field_validator("earliest_start", mode="before")
+    @classmethod
+    def _normalize_earliest_start(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return normalize_earliest_start(str(value))
+
+    @model_validator(mode="after")
+    def validate_optional_http(self) -> UpdateTaskRequest:
+        if self.use_proxy is True:
+            from app.services.proxy_config import ProxyValidationError, normalize_proxy_url
+
+            try:
+                normalized = normalize_proxy_url(self.proxy_url)
+            except ProxyValidationError as exc:
+                raise ValueError(exc.message) from exc
+            if not normalized:
+                raise ValueError("use_proxy requires proxy_url")
+            self.proxy_url = normalized
+        elif self.use_proxy is False:
+            self.proxy_url = None
+        elif self.proxy_url is not None:
+            from app.services.proxy_config import ProxyValidationError, normalize_proxy_url
+
+            try:
+                self.proxy_url = normalize_proxy_url(self.proxy_url)
+            except ProxyValidationError as exc:
+                raise ValueError(exc.message) from exc
+        if self.use_headers is True:
+            from app.services.proxy_config import (
+                HeadersValidationError,
+                normalize_request_headers,
+            )
+
+            try:
+                normalized_headers = normalize_request_headers(self.request_headers)
+            except HeadersValidationError as exc:
+                raise ValueError(exc.message) from exc
+            if not normalized_headers:
+                raise ValueError("use_headers requires request_headers")
+            self.request_headers = normalized_headers
+        elif self.use_headers is False:
+            self.request_headers = None
+        elif self.request_headers is not None:
+            from app.services.proxy_config import (
+                HeadersValidationError,
+                normalize_request_headers,
+            )
+
+            try:
+                self.request_headers = normalize_request_headers(self.request_headers)
+            except HeadersValidationError as exc:
+                raise ValueError(exc.message) from exc
+        return self
 
 
 class ResumeTaskRequest(BaseModel):

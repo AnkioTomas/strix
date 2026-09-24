@@ -263,6 +263,9 @@
     const title = $("createPanel").querySelector("h2");
     if (title) title.textContent = "新建任务";
     $("createTask").textContent = "创建";
+    $("taskType").disabled = false;
+    $("attachments").disabled = false;
+    $("taskHeld").disabled = false;
     $("taskName").value = "";
     $("taskNotes").value = "";
     $("taskHeld").checked = false;
@@ -347,6 +350,7 @@
     $("completeBtn").disabled = !(t && t.status !== "completed");
     $("holdBtn").disabled = !queued;
     $("releaseBtn").disabled = !held;
+    $("editBtn").disabled = !held;
     $("renameBtn").disabled = !t;
     $("saveNotesBtn").disabled = !t;
   }
@@ -471,6 +475,14 @@
     const d = new Date(text);
     if (Number.isNaN(d.getTime())) return null;
     return d.toISOString().replace(/\.\d{3}Z$/, "Z");
+  }
+
+  function utcZToLocalDatetime(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
 
   function formatDuration(seconds) {
@@ -1047,9 +1059,11 @@
     if (!input || !hint) return;
     const files = Array.from(input.files || []);
     if (!files.length) {
-      hint.textContent = createDraft
-        ? "父任务附件会自动复制；也可另加新附件。"
-        : "可选。例如 PoC、wordlist、凭证说明。";
+      hint.textContent = createDraft?.editId
+        ? "编辑挂起任务不改附件。"
+        : createDraft
+          ? "父任务附件会自动复制；也可另加新附件。"
+          : "可选。例如 PoC、wordlist、凭证说明。";
       return;
     }
     hint.textContent = `已选 ${files.length} 个：${files.map((f) => f.name).join(", ")}`;
@@ -1168,7 +1182,59 @@
     tab.onclick = () => setTab(tab.dataset.tab);
   });
 
+  function fillCreateFormForEdit(t) {
+    fillCreateFormFromTask(t, "retry");
+    createDraft = { editId: t.id };
+    const title = $("createPanel").querySelector("h2");
+    if (title) title.textContent = "编辑挂起任务";
+    $("createTask").textContent = "保存";
+    $("taskType").disabled = true;
+    $("attachments").disabled = true;
+    $("attachments").value = "";
+    $("taskHeld").checked = true;
+    $("taskHeld").disabled = true;
+    $("earliestStart").value = utcZToLocalDatetime(t.earliest_start);
+    updateAttachmentsHint();
+  }
+
   $("createTask").onclick = async () => {
+    if (createDraft?.editId) {
+      const type = $("taskType").value;
+      const body = {
+        name: $("taskName").value.trim() || null,
+        notes: $("taskNotes").value.trim() || null,
+        instruction: $("instruction").value.trim() || null,
+        scan_mode: $("scanMode").value,
+        earliest_start: localDatetimeToUtcZ($("earliestStart").value),
+        use_proxy: $("useProxy").checked,
+        proxy_url: $("useProxy").checked ? $("proxyUrl").value.trim() : null,
+        use_headers: $("useHeaders").checked,
+        request_headers: $("useHeaders").checked ? $("requestHeaders").value : null,
+      };
+      if (type === "pentest") {
+        body.target = $("target").value.trim();
+      } else {
+        body.source = {
+          type: "git",
+          url: $("gitUrl").value.trim(),
+          branch: $("gitBranch").value.trim() || null,
+        };
+      }
+      try {
+        await api.ensureSession();
+        const task = await api.api(`/api/v1/tasks/${createDraft.editId}`, {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        });
+        resetCreateForm();
+        showCreate(false);
+        await refresh();
+        selectTask(task.id);
+      } catch (e) {
+        alert(e.message);
+      }
+      return;
+    }
     const type = $("taskType").value;
     const files = Array.from($("attachments").files || []);
     const form = new FormData();
@@ -1221,6 +1287,14 @@
     } catch (e) {
       alert(e.message);
     }
+  };
+
+  $("editBtn").onclick = () => {
+    const t = currentTask();
+    if (!t || t.status !== "held") return;
+    showImport(false);
+    fillCreateFormForEdit(t);
+    showCreate(true);
   };
 
   $("renameBtn").onclick = async () => {

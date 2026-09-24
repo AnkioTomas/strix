@@ -152,7 +152,7 @@ class TaskManager:
                 assert req.target is not None
                 target = validate_pentest_target(req.target, self.settings)
                 try:
-                    check_tcp_reachable(target)
+                    check_tcp_reachable(target, proxy_url=req.proxy_url)
                 except TargetValidationError as exc:
                     if exc.code != "TARGET_UNREACHABLE":
                         raise
@@ -486,7 +486,10 @@ class TaskManager:
             )
         if task.get("type") == "pentest" and task.get("target"):
             try:
-                check_tcp_reachable(str(task["target"]))
+                check_tcp_reachable(
+                    str(task["target"]),
+                    proxy_url=task.get("proxy_url"),
+                )
             except TargetValidationError as exc:
                 if exc.code == "TARGET_UNREACHABLE":
                     notes = _merge_connectivity_note(task.get("notes"), exc.message)
@@ -787,7 +790,10 @@ class TaskManager:
             raise TaskError("TASK_ALREADY_RUNNING", "Only finished tasks can be resumed")
         if task.get("type") == "pentest" and task.get("target"):
             try:
-                check_tcp_reachable(str(task["target"]))
+                check_tcp_reachable(
+                    str(task["target"]),
+                    proxy_url=task.get("proxy_url"),
+                )
             except TargetValidationError as exc:
                 if exc.code == "TARGET_UNREACHABLE":
                     notes = _merge_connectivity_note(task.get("notes"), exc.message)

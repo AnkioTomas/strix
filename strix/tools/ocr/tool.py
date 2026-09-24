@@ -130,9 +130,13 @@ def _run_ocr(image_bytes: bytes) -> list[dict[str, Any]]:
 async def ocr_image(ctx: RunContextWrapper, path: str) -> str:
     """Extract text from a sandbox image with local OCR (no vision model).
 
-    Use when you need readable strings from a screenshot — URLs, error
-    messages, form labels, status codes — especially if ``view_image`` is
-    unavailable or you only need text, not pixels in context.
+    Required for image captchas / verification codes: snapshot and DOM
+    text cannot read them. Screenshot first, call this with the printed
+    path, then fill the result. Do not ask the user to read the image
+    and do not skip the flow because you lack a vision model.
+
+    Also use for URLs, error banners, form labels, and status text when
+    ``view_image`` is unavailable or you only need strings.
 
     Typical flow: ``agent-browser screenshot`` → pass the printed path here.
 

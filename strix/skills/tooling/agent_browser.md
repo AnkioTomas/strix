@@ -264,14 +264,14 @@ only for simple expressions.
 
 `agent-browser screenshot` writes a PNG to disk in the sandbox. The
 shell command alone does **not** put the image into your context —
-chain it with the SDK ``view_image`` tool to actually see it, or
-``ocr_image`` to extract text locally without a vision model:
+chain it with ``ocr_image`` (text, no vision model) or ``view_image``
+(pixels, needs a vision model):
 
 ```bash
 exec_command:  agent-browser screenshot
-view_image:    {"path": "<path printed on stdout>"}
-# or, when you only need strings (URL / error text / labels):
 ocr_image:     {"path": "<path printed on stdout>"}
+# optional extra on vision models:
+view_image:    {"path": "<path printed on stdout>"}
 ```
 
 Default output directory is ``/workspace/.agent-browser-screenshots/``,
@@ -294,15 +294,26 @@ and you can correlate visual layout with snapshot refs.
 
 Snapshots (`snapshot -i`) give you a compact text view that costs ~200-400
 tokens; screenshots cost more. Use `snapshot` first; reach for
-`screenshot + view_image` only when you actually need pixels (visual
-layout questions, captchas, custom widgets where the accessibility
-tree is incomplete).
+`screenshot` when the accessibility tree is incomplete (visual layout,
+custom widgets, **image captchas / verification codes**).
 
-If ``view_image`` errors back at you (rejected image, "vision not
-supported", or similar), you are running on a text-only model — stop
-calling it and stop taking screenshots. Drive the page entirely from
-`snapshot -i` refs, `eval` for any DOM/JS state you need to read, and
-`text @ref` / `get text` for content extraction.
+Image captcha / 验证码: snapshot and `text @ref` cannot read it. Always:
+
+```bash
+exec_command:  agent-browser screenshot
+ocr_image:     {"path": "<path printed on stdout>"}
+```
+
+Then fill the extracted string. Do **not** ask the user to read the
+image. Do **not** declare the captcha unreadable, skip login, or wait
+for credentials just because you lack a vision model. ``ocr_image`` is
+the default path and works on text-only models. ``view_image`` is an
+optional extra on vision models — it is not required to solve a captcha.
+
+If ``view_image`` errors (rejected image, "vision not supported", or
+similar), stop calling ``view_image``. Keep taking screenshots when you
+need text from pixels and run ``ocr_image``. For everything else, drive
+the page from `snapshot -i` refs, `eval`, and `text @ref` / `get text`.
 
 ### Handle multiple pages via tabs
 

@@ -169,6 +169,15 @@ def test_system_prompt_renders_skill_descriptions() -> None:
     assert "- technologies/firebase: Firebase security testing covering" in prompt
 
 
+def test_child_prompt_routes_captcha_to_ocr_not_vision() -> None:
+    """Text-only children must not treat image captchas as unreadable."""
+    prompt = render_system_prompt(scan_mode="quick", is_root=False)
+
+    assert "ocr_image" in prompt
+    assert "stop taking screenshots" not in prompt
+    assert "Do **not** declare the captcha unreadable" in prompt
+
+
 def test_system_prompt_omits_empty_skill_description(tmp_path: Path) -> None:
     _write_skill(tmp_path, "extra", "widget", "---\nname: widget\ndescription:\n---\nwidget body")
     register_skill_dir(tmp_path)

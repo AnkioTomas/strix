@@ -418,6 +418,50 @@ class Database:
             ).fetchall()
         return {str(item["finding_id"]): item for item in (_flag_row(row) for row in rows)}
 
+    def count_active_findings(self, task_ids: list[str]) -> dict[str, dict[str, int]]:
+        """Active (non-invalid) finding counts by task, grouped by severity."""
+        from app.services.findings import bucket_severity, empty_finding_counts
+
+        if not task_ids:
+            return {}
+        placeholders = ",".join("?" * len(task_ids))
+        sql = f"""
+            SELECT f.task_id AS task_id,
+                   f.severity AS severity,
+                   COUNT(*) AS n
+            FROM findings f
+            LEFT JOIN finding_flags ff
+              ON ff.task_id = f.task_id AND ff.finding_id = f.id
+            WHERE f.task_id IN ({placeholders})
+              AND COALESCE(ff.review_status, 'active') != 'invalid'
+            GROUP BY f.task_id, f.severity
+        """
+        out: dict[str, dict[str, int]] = {}
+        with self.connect() as conn:
+            rows = conn.execute(sql, task_ids).fetchall()
+        for row in rows:
+            tid = str(row["task_id"])
+            counts = out.setdefault(tid, empty_finding_counts())
+            n = int(row["n"])
+            counts[bucket_severity(row["severity"])] += n
+            counts["total"] += n
+        return out
+
+    def invalid_finding_ids_for_tasks(self, task_ids: list[str]) -> dict[str, set[str]]:
+        if not task_ids:
+            return {}
+        placeholders = ",".join("?" * len(task_ids))
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"SELECT task_id, finding_id FROM finding_flags "
+                f"WHERE task_id IN ({placeholders}) AND review_status = 'invalid'",
+                task_ids,
+            ).fetchall()
+        out: dict[str, set[str]] = {}
+        for row in rows:
+            out.setdefault(str(row["task_id"]), set()).add(str(row["finding_id"]))
+        return out
+
     def clear_finding_request_test(self, task_id: str, finding_ids: list[str]) -> None:
         if not finding_ids:
             return

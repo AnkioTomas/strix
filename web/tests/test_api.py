@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from app.config import get_settings
 from app.main import app
 from app.schemas import CreateTaskRequest
-from app.services.findings import normalize_finding
+from app.services.findings import normalize_finding, tally_finding_counts
 
 
 @pytest.fixture()
@@ -76,6 +76,19 @@ def test_create_and_list_pentest(client: TestClient):
     listed = client.get("/api/v1/tasks")
     assert listed.status_code == 200
     assert any(t["id"] == task["id"] for t in listed.json()["tasks"])
+    created_counts = {
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "info": 0,
+        "total": 0,
+    }
+    assert task["finding_counts"] == created_counts
+    assert task["has_report"] is False
+    row = next(t for t in listed.json()["tasks"] if t["id"] == task["id"])
+    assert row["finding_counts"] == created_counts
+    assert row["has_report"] is False
 
 
 def test_create_task_with_agent_proxy_and_headers(client: TestClient):
@@ -283,6 +296,29 @@ def test_normalize_finding():
     assert finding["screenshots"] == ["images/abc-1.png"]
 
 
+def test_tally_finding_counts_skips_invalid_and_folds_unknown():
+    counts = tally_finding_counts(
+        [
+            {"id": "a", "severity": "critical"},
+            {"id": "b", "severity": "HIGH"},
+            {"id": "c", "severity": "unknown"},
+            {"id": "d", "severity": "medium"},
+            {"id": "e", "severity": "low"},
+            {"report_id": "f", "severity": "info"},
+            {"id": "drop", "severity": "critical"},
+        ],
+        invalid_ids={"drop"},
+    )
+    assert counts == {
+        "critical": 1,
+        "high": 1,
+        "medium": 1,
+        "low": 1,
+        "info": 2,
+        "total": 6,
+    }
+
+
 def test_get_results_refreshes_stale_cache(client: TestClient):
     manager = client.app.state.manager
     task = manager.create_task(
@@ -353,6 +389,88 @@ def test_get_results_refreshes_stale_cache(client: TestClient):
     detail = client.get(f"/api/v1/tasks/{task['id']}/findings/v2").json()
     assert "click" in (detail.get("poc") or "")
     assert detail.get("screenshots") == ["images/v2-1.png"]
+
+
+def test_running_task_finding_counts_read_disk_without_results(client: TestClient):
+    manager = client.app.state.manager
+    task = manager.create_task(
+        CreateTaskRequest(type="pentest", target="https://example.com", scan_mode="quick")
+    )
+    run_name = "live-counts"
+    run_dir = Path(task["workspace"]) / "strix_runs" / run_name
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text(json.dumps({"run_name": run_name, "status": "running"}))
+    (run_dir / "vulnerabilities.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "v-crit",
+                    "title": "RCE",
+                    "severity": "critical",
+                    "target": "https://example.com",
+                },
+                {
+                    "id": "v-low",
+                    "title": "Info",
+                    "severity": "low",
+                    "target": "https://example.com",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    manager.db.update_task(task["id"], run_name=run_name, status="running")
+
+    listed = client.get("/api/v1/tasks").json()["tasks"]
+    row = next(item for item in listed if item["id"] == task["id"])
+    assert row["finding_counts"] == {
+        "critical": 1,
+        "high": 0,
+        "medium": 0,
+        "low": 1,
+        "info": 0,
+        "total": 2,
+    }
+    assert row["has_report"] is False
+    assert manager.db.list_findings(task_id=task["id"], limit=10) == []
+
+    (run_dir / "penetration_test_report.md").write_text("# Draft\n", encoding="utf-8")
+    (run_dir / "vulnerabilities.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "v-crit",
+                    "title": "RCE",
+                    "severity": "critical",
+                    "target": "https://example.com",
+                },
+                {
+                    "id": "v-low",
+                    "title": "Info",
+                    "severity": "low",
+                    "target": "https://example.com",
+                },
+                {
+                    "id": "v-info",
+                    "title": "Banner",
+                    "severity": "info",
+                    "target": "https://example.com",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    manager.db.upsert_finding_flag(task["id"], "v-low", review_status="invalid")
+    refreshed = client.get(f"/api/v1/tasks/{task['id']}").json()
+    assert refreshed["finding_counts"] == {
+        "critical": 1,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "info": 1,
+        "total": 2,
+    }
+    assert refreshed["has_report"] is True
 
 
 def test_get_report_skips_rebuild_when_fresh(client: TestClient, monkeypatch: pytest.MonkeyPatch):
@@ -495,6 +613,37 @@ def test_ingest_results(client: TestClient):
         names = zf.namelist()
         assert "复测-客户A门户-报告.md" in names
         assert "penetration_test_report.md" not in names
+
+    empty_counts = {
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "info": 0,
+        "total": 0,
+    }
+    expected_counts = {**empty_counts, "high": 1, "total": 1}
+    listed = client.get("/api/v1/tasks").json()["tasks"]
+    row = next(item for item in listed if item["id"] == task["id"])
+    assert row["finding_counts"] == expected_counts
+    assert row["has_report"] is True
+    detail = client.get(f"/api/v1/tasks/{task['id']}").json()
+    assert detail["finding_counts"] == expected_counts
+    assert detail["has_report"] is True
+
+    client.patch(
+        f"/api/v1/tasks/{task['id']}/findings/v1",
+        json={"review_status": "invalid"},
+    )
+    after_invalid = client.get("/api/v1/tasks").json()["tasks"]
+    invalidated = next(item for item in after_invalid if item["id"] == task["id"])
+    assert invalidated["finding_counts"] == empty_counts
+    assert invalidated["has_report"] is True
+
+    omitted = client.get("/api/v1/tasks?include_findings_summary=false").json()["tasks"]
+    skipped = next(item for item in omitted if item["id"] == task["id"])
+    assert skipped.get("finding_counts") is None
+    assert skipped["has_report"] is True
 
     empty_logs = client.get(f"/api/v1/tasks/{task['id']}/logs")
     assert empty_logs.status_code == 200

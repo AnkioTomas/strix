@@ -10,7 +10,7 @@ import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from app.services.findings import normalize_findings
+from app.services.findings import normalize_findings, tally_finding_counts
 
 PRIOR_FINDINGS_DIRNAME = "prior_findings"
 _RETEST_STRIP_KEYS = ("retest_status", "fix_verification")
@@ -83,6 +83,20 @@ def read_vulnerabilities(run_dir: Path) -> list[dict[str, Any]]:
 
 def load_normalized_findings(run_dir: Path, *, task_id: str) -> list[dict[str, Any]]:
     return normalize_findings(read_vulnerabilities(run_dir), task_id=task_id)
+
+
+def count_disk_findings(
+    run_dir: Path, *, invalid_ids: set[str] | None = None
+) -> dict[str, int]:
+    """Severity counts from vulnerabilities.json; does not touch SQLite."""
+    return tally_finding_counts(read_vulnerabilities(run_dir), invalid_ids=invalid_ids)
+
+
+def report_exists(run_dir: Path) -> bool:
+    return any(
+        (run_dir / name).is_file()
+        for name in ("penetration_test_report.md", "report.md")
+    )
 
 
 def prior_findings_dir(workspace: Path) -> Path:

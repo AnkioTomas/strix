@@ -28,15 +28,19 @@ from app.services.agent_prompts import (
 from app.services.feishu import notify_status, notify_task
 from app.services.findings import (
     apply_finding_flags,
+    empty_finding_counts,
     invalid_finding_ids,
     sort_findings,
 )
 from app.services.git_clone import GitError, clone_repository
 from app.services.results import (
+    count_disk_findings,
+    discover_run_name,
     load_normalized_findings,
     read_events,
     read_report_markdown,
     read_run_record,
+    report_exists,
     workspace_run_dir,
 )
 from app.services.run_import import (
@@ -55,6 +59,7 @@ from app.services.strix_runner import (
 logger = logging.getLogger(__name__)
 
 ACTIVE = {"queued", "starting", "running", "cancelling"}
+_LIVE_COUNT_STATUSES = {"starting", "running", "cancelling"}
 TERMINAL = {"completed", "failed", "cancelled"}
 CANCELLABLE = {"queued", "starting", "running"}
 DELETABLE = TERMINAL | {"held"}
@@ -233,6 +238,51 @@ class TaskManager:
         return self.db.list_tasks(
             status=status, task_type=task_type, limit=limit, offset=offset
         )
+
+    def attach_task_overlays(
+        self,
+        tasks: list[dict[str, Any]],
+        *,
+        include_findings: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Attach ``finding_counts`` / ``has_report`` without calling ``/results``.
+
+        Completed tasks use one SQL aggregate. Live scans (and not-yet-ingested
+        runs) count ``vulnerabilities.json`` so the list stays current.
+        """
+        if not tasks:
+            return tasks
+        ids = [str(task["id"]) for task in tasks]
+        sql_counts = self.db.count_active_findings(ids) if include_findings else {}
+        need_flags: list[str] = []
+        if include_findings:
+            for task in tasks:
+                tid = str(task["id"])
+                live = str(task.get("status") or "") in _LIVE_COUNT_STATUSES
+                if live or (tid not in sql_counts and task.get("run_name")):
+                    need_flags.append(tid)
+        invalid_by_task = (
+            self.db.invalid_finding_ids_for_tasks(need_flags) if need_flags else {}
+        )
+
+        for task in tasks:
+            workspace = Path(task["workspace"])
+            run_dir = workspace_run_dir(workspace, task.get("run_name"))
+            if run_dir is None:
+                run_dir = workspace_run_dir(workspace, discover_run_name(workspace))
+            task["has_report"] = bool(run_dir and report_exists(run_dir))
+            if not include_findings:
+                task.pop("finding_counts", None)
+                continue
+            tid = str(task["id"])
+            live = str(task.get("status") or "") in _LIVE_COUNT_STATUSES
+            if run_dir is not None and (live or tid not in sql_counts):
+                task["finding_counts"] = count_disk_findings(
+                    run_dir, invalid_ids=invalid_by_task.get(tid, set())
+                )
+            else:
+                task["finding_counts"] = sql_counts.get(tid) or empty_finding_counts()
+        return tasks
 
     def get_task(self, task_id: str) -> dict[str, Any]:
         task = self.db.get_task(task_id)

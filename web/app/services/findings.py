@@ -14,6 +14,35 @@ _SEVERITY_RANK = {
     "unknown": 5,
 }
 
+FINDING_COUNT_KEYS = ("critical", "high", "medium", "low", "info")
+
+
+def empty_finding_counts() -> dict[str, int]:
+    return dict.fromkeys(FINDING_COUNT_KEYS, 0) | {"total": 0}
+
+
+def bucket_severity(severity: object) -> str:
+    key = str(severity or "info").strip().lower()
+    return key if key in FINDING_COUNT_KEYS else "info"
+
+
+def tally_finding_counts(
+    items: list[dict[str, Any]],
+    *,
+    invalid_ids: set[str] | None = None,
+) -> dict[str, int]:
+    """Count active findings by severity. Unknown buckets fold into info."""
+    skip = invalid_ids or set()
+    counts = empty_finding_counts()
+    for item in items:
+        fid = str(item.get("id") or item.get("report_id") or "")
+        if fid and fid in skip:
+            continue
+        sev = bucket_severity(item.get("severity"))
+        counts[sev] += 1
+        counts["total"] += 1
+    return counts
+
 
 def normalize_finding(raw: dict[str, Any], *, task_id: str) -> dict[str, Any]:
     location: dict[str, Any] = {}

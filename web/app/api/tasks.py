@@ -37,6 +37,7 @@ from app.schemas import (
 )
 from app.api.viewer_proxy import attach_viewer_proxy_url
 from app.security.auth import require_api_key
+from app.services.findings import empty_finding_counts
 from app.services.results import list_artifacts, resolve_artifact, resolve_task_log, workspace_run_dir
 from app.services.task_manager import TaskError, TaskManager, report_download_stem
 
@@ -55,12 +56,27 @@ def _error(exc: TaskError) -> JSONResponse:
     )
 
 
-def _summary(task: dict[str, Any]) -> TaskSummary:
+def _summary(task: dict[str, Any], *, include_findings: bool = True) -> TaskSummary:
     data = attach_viewer_proxy_url(task)
     from app.services.proxy_config import redact_proxy_url
 
     data["proxy_display"] = redact_proxy_url(data.get("proxy_url"))
+    if include_findings:
+        data["finding_counts"] = data.get("finding_counts") or empty_finding_counts()
+    else:
+        data.pop("finding_counts", None)
+    data.setdefault("has_report", False)
     return TaskSummary.model_validate(data)
+
+
+def _summarize(
+    task: dict[str, Any],
+    manager: TaskManager,
+    *,
+    include_findings: bool = True,
+) -> TaskSummary:
+    manager.attach_task_overlays([task], include_findings=include_findings)
+    return _summary(task, include_findings=include_findings)
 
 
 def _form_value(form: Any, key: str) -> str | None:
@@ -162,7 +178,7 @@ async def create_task(
         )
     except TaskError as exc:
         return _error(exc)
-    return _summary(task)
+    return _summarize(task, manager)
 
 
 @router.post("/tasks/import", response_model=ImportRunsResponse)
@@ -188,12 +204,18 @@ async def list_tasks(
     type: str | None = Query(default=None, alias="type"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    include_findings_summary: bool = Query(default=True),
     manager: TaskManager = Depends(get_manager),
 ):
-    tasks = await asyncio.to_thread(
-        manager.list_tasks, status=status, task_type=type, limit=limit, offset=offset
+    def _load() -> list[dict[str, Any]]:
+        rows = manager.list_tasks(status=status, task_type=type, limit=limit, offset=offset)
+        return manager.attach_task_overlays(rows, include_findings=include_findings_summary)
+
+    tasks = await asyncio.to_thread(_load)
+    return TaskListResponse(
+        tasks=[_summary(t, include_findings=include_findings_summary) for t in tasks],
+        total=len(tasks),
     )
-    return TaskListResponse(tasks=[_summary(t) for t in tasks], total=len(tasks))
 
 
 @router.get("/tasks/{task_id}", response_model=TaskSummary)
@@ -202,7 +224,7 @@ async def get_task(task_id: str, manager: TaskManager = Depends(get_manager)):
         task = await asyncio.to_thread(manager.get_task, task_id)
     except TaskError as exc:
         return _error(exc)
-    return _summary(task)
+    return _summarize(task, manager)
 
 
 @router.patch("/tasks/{task_id}", response_model=TaskSummary)
@@ -223,7 +245,7 @@ async def update_task(
         )
     except TaskError as exc:
         return _error(exc)
-    return _summary(task)
+    return _summarize(task, manager)
 
 
 @router.post("/tasks/{task_id}/hold", response_model=TaskSummary)
@@ -232,7 +254,7 @@ async def hold_task(task_id: str, manager: TaskManager = Depends(get_manager)):
         task = await asyncio.to_thread(manager.hold_task, task_id)
     except TaskError as exc:
         return _error(exc)
-    return _summary(task)
+    return _summarize(task, manager)
 
 
 @router.post("/tasks/{task_id}/release", status_code=202, response_model=TaskSummary)
@@ -241,7 +263,7 @@ async def release_task(task_id: str, manager: TaskManager = Depends(get_manager)
         task = await asyncio.to_thread(manager.release_task, task_id)
     except TaskError as exc:
         return _error(exc)
-    return _summary(task)
+    return _summarize(task, manager)
 
 
 @router.post("/tasks/{task_id}/complete", response_model=TaskSummary)
@@ -250,7 +272,7 @@ async def complete_task(task_id: str, manager: TaskManager = Depends(get_manager
         task = await asyncio.to_thread(manager.complete_task, task_id)
     except TaskError as exc:
         return _error(exc)
-    return _summary(task)
+    return _summarize(task, manager)
 
 
 @router.post("/tasks/{task_id}/cancel", response_model=TaskSummary)
@@ -259,7 +281,7 @@ async def cancel_task(task_id: str, manager: TaskManager = Depends(get_manager))
         task = await asyncio.to_thread(manager.cancel_task, task_id)
     except TaskError as exc:
         return _error(exc)
-    return _summary(task)
+    return _summarize(task, manager)
 
 
 @router.delete("/tasks/{task_id}", status_code=204)
@@ -286,7 +308,7 @@ async def retry_task(
         )
     except TaskError as exc:
         return _error(exc)
-    return _summary(task)
+    return _summarize(task, manager)
 
 
 @router.post("/tasks/{task_id}/retest", status_code=202, response_model=TaskSummary)
@@ -307,7 +329,7 @@ async def retest_task(
         )
     except TaskError as exc:
         return _error(exc)
-    return _summary(task)
+    return _summarize(task, manager)
 
 
 @router.patch("/tasks/{task_id}/findings/{finding_id}", response_model=Finding)
@@ -346,7 +368,7 @@ async def request_finding_test(
         return _error(exc)
     return RequestFindingTestResponse(
         finding=Finding.model_validate(result["finding"]),
-        task=_summary(result["task"]),
+        task=_summarize(result["task"], manager),
     )
 
 
@@ -356,7 +378,7 @@ async def refresh_report(task_id: str, manager: TaskManager = Depends(get_manage
         task = await asyncio.to_thread(manager.refresh_report, task_id)
     except TaskError as exc:
         return _error(exc)
-    return _summary(task)
+    return _summarize(task, manager)
 
 
 @router.post("/tasks/{task_id}/resume", status_code=202, response_model=TaskSummary)
@@ -370,7 +392,7 @@ async def resume_task(
         task = await asyncio.to_thread(manager.resume_task, task_id, instruction)
     except TaskError as exc:
         return _error(exc)
-    return _summary(task)
+    return _summarize(task, manager)
 
 
 @router.get("/tasks/{task_id}/results", response_model=FindingsResponse)
@@ -404,7 +426,21 @@ async def get_finding(
     return finding
 
 
-@router.get("/tasks/{task_id}/report", response_model=ReportResponse)
+@router.get(
+    "/tasks/{task_id}/report",
+    response_model=ReportResponse,
+    responses={
+        200: {
+            "description": (
+                "JSON ``{task_id, format, content}`` by default. "
+                "``download=true`` returns a zip attachment "
+                "(markdown + images), not JSON."
+            ),
+        },
+        404: {"description": "Report package not found"},
+        409: {"description": "Report not ready"},
+    },
+)
 async def task_report(
     task_id: str,
     download: bool = False,

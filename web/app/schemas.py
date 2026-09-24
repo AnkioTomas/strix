@@ -182,6 +182,15 @@ class ImportRunsResponse(BaseModel):
     skipped_count: int
 
 
+class FindingCounts(BaseModel):
+    critical: int = 0
+    high: int = 0
+    medium: int = 0
+    low: int = 0
+    info: int = 0
+    total: int = 0
+
+
 class TaskSummary(BaseModel):
     id: str
     type: TaskType
@@ -214,6 +223,8 @@ class TaskSummary(BaseModel):
     proxy_display: str | None = None
     request_headers: str | None = None
     earliest_start: str | None = None
+    finding_counts: FindingCounts | None = None
+    has_report: bool = False
 
 
 class TaskListResponse(BaseModel):

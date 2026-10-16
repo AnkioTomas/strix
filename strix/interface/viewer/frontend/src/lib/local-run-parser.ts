@@ -162,6 +162,7 @@ function emptyVulnerabilityDefaults(): Omit<
     code_before: null,
     code_after: null,
     cwe: null,
+    vulnerability_type: null,
     code_locations: null,
     remediation_steps: null,
     fix_pr_body: null,
@@ -217,6 +218,7 @@ function parseOneVulnerability(
     poc_description: asStringOrNull(raw.poc_description),
     poc_script_code: asStringOrNull(raw.poc_script_code),
     cwe,
+    vulnerability_type: asStringOrNull(raw.vulnerability_type),
     code_locations: Array.isArray(raw.code_locations)
       ? (raw.code_locations as Vulnerability["code_locations"])
       : null,

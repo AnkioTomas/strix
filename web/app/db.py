@@ -445,6 +445,8 @@ class Database:
             # Reconstruct fields that live only in the original report payload.
             if not item.get("technical_analysis"):
                 item["technical_analysis"] = raw.get("technical_analysis")
+            if not item.get("vulnerability_type"):
+                item["vulnerability_type"] = raw.get("vulnerability_type")
             if not item.get("screenshots"):
                 rels = raw.get("screenshot_rels")
                 if isinstance(rels, list) and rels:

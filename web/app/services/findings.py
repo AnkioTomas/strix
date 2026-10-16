@@ -81,6 +81,7 @@ def normalize_finding(raw: dict[str, Any], *, task_id: str) -> dict[str, Any]:
         "impact": raw.get("impact"),
         "recommendation": raw.get("remediation_steps") or raw.get("recommendation"),
         "cwe": cwe,
+        "vulnerability_type": raw.get("vulnerability_type"),
         "cvss": raw.get("cvss"),
         "created_at": raw.get("timestamp"),
         "raw": raw,

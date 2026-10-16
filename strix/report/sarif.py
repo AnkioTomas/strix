@@ -543,6 +543,7 @@ def _result_properties(
         "method",
         "cve",
         "cwe",
+        "vulnerability_type",
         "impact",
         "technical_analysis",
         "remediation_steps",

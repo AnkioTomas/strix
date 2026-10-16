@@ -103,6 +103,17 @@ def get_all_skill_names() -> set[str]:
     return {name for _, name in _iter_user_skill_files()}
 
 
+def get_vulnerability_skill_names() -> frozenset[str]:
+    """Bare skill names under the ``vulnerabilities`` category.
+
+    These are the allowed values for a finding's ``vulnerability_type``
+    field — same stem as ``skills/vulnerabilities/<name>.md``.
+    """
+    return frozenset(
+        name for category, name in _iter_user_skill_files() if category == "vulnerabilities"
+    )
+
+
 def _get_all_skill_keys() -> set[str]:
     keys: set[str] = set()
     for category, name in _iter_user_skill_files():

@@ -178,6 +178,7 @@ func TestVulnerabilityReportRendersCalibrationFields(t *testing.T) {
 	out := ansi.Strip(Tool(tool("create_vulnerability_report",
 		map[string]any{
 			"title":                      "IDOR in invoice export",
+			"vulnerability_type":         "idor",
 			"confidence":                 "medium",
 			"confidence_rationale":       "traced statically; no authenticated instance to replay against",
 			"counterevidence":            "the gateway may strip the id parameter before it reaches the handler",
@@ -188,6 +189,7 @@ func TestVulnerabilityReportRendersCalibrationFields(t *testing.T) {
 		map[string]any{"success": true, "severity": "high", "cvss_score": 7.5},
 		"completed")))
 	requireContains(t, out,
+		"Type", "idor",
 		"Confidence", "MEDIUM", "no authenticated instance to replay against",
 		"Counterevidence", "gateway may strip the id parameter",
 		"Severity Would Change If", "other tenants' bank details",

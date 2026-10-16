@@ -69,6 +69,7 @@ UPDATABLE_REPORT_FIELDS = frozenset(
         "fix_effort",
         "cvss",
         "cvss_breakdown",
+        "vulnerability_type",
         "endpoint",
         "method",
         "cve",
@@ -82,7 +83,7 @@ UPDATABLE_REPORT_FIELDS = frozenset(
 )
 
 _LOWERCASE_REPORT_FIELDS = frozenset(
-    {"severity", "confidence", "fix_effort", "retest_status"}
+    {"severity", "confidence", "fix_effort", "retest_status", "vulnerability_type"}
 )
 
 # Fields that only describe another field. A revision may raise the rating or
@@ -326,6 +327,7 @@ class ReportState:
         method: str | None = None,
         cve: str | None = None,
         cwe: str | None = None,
+        vulnerability_type: str | None = None,
         code_locations: list[dict[str, Any]] | None = None,
         fix_verification: str | None = None,
         fix_pr_body: str | None = None,
@@ -386,6 +388,8 @@ class ReportState:
             report["cve"] = cve.strip()
         if cwe:
             report["cwe"] = cwe.strip()
+        if vulnerability_type:
+            report["vulnerability_type"] = vulnerability_type.strip().lower()
         if code_locations:
             report["code_locations"] = code_locations
         if fix_verification:

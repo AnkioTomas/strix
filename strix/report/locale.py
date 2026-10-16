@@ -52,6 +52,7 @@ class ReportLabels(TypedDict):
     value: str
     cvss: str
     cwe: str
+    vulnerability_type: str
     target: str
     endpoint: str
     method: str
@@ -119,6 +120,7 @@ _LABELS_ZH: ReportLabels = {
     "value": "内容",
     "cvss": "CVSS",
     "cwe": "CWE",
+    "vulnerability_type": "漏洞类型",
     "target": "目标",
     "endpoint": "端点",
     "method": "方法",
@@ -188,6 +190,7 @@ _LABELS_EN: ReportLabels = {
     "value": "Value",
     "cvss": "CVSS",
     "cwe": "CWE",
+    "vulnerability_type": "Vulnerability Type",
     "target": "Target",
     "endpoint": "Endpoint",
     "method": "Method",

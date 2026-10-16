@@ -44,6 +44,7 @@ func renderReport(args map[string]any, result any, heading, pending string) stri
 		b.WriteString("\n\n" + Bold(Field).Render("CVSS Score: ") +
 			lipgloss.NewStyle().Bold(true).Foreground(CVSSColor(score)).Render(StringValue(resultMap["cvss_score"])))
 	}
+	field("Type", StringValue(args["vulnerability_type"]))
 	field("Target", StringValue(args["target"]))
 	field("Endpoint", StringValue(args["endpoint"]))
 	field("Method", StringValue(args["method"]))

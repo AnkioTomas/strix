@@ -179,6 +179,7 @@ def _vuln_meta_table(report: dict[str, Any]) -> str:
         [
             (labels["cvss"], report.get("cvss")),
             (labels["cwe"], report.get("cwe")),
+            (labels["vulnerability_type"], report.get("vulnerability_type")),
             (labels["target"], report.get("target")),
             (labels["endpoint"], report.get("endpoint")),
             (labels["method"], report.get("method")),

@@ -57,6 +57,7 @@ def test_write_zh_delivery_bundle_embeds_relative_images(tmp_path: Path) -> None
             "endpoint": "/api/orders/{id}",
             "method": "GET",
             "cwe": "CWE-639",
+            "vulnerability_type": "idor",
             "cvss": 7.5,
             "poc_description": "1. 使用攻击者 cookie 访问受害者订单 URL。",
             "poc_script_code": (
@@ -102,6 +103,7 @@ def test_write_zh_delivery_bundle_embeds_relative_images(tmp_path: Path) -> None
     assert "对象级授权绕过" in md
     assert "# 漏洞清单" in md
     assert "## 1. [ 高危 ] IDOR 读取他人订单" in md
+    assert "| 漏洞类型 | idor |" in md
     assert "### 描述" in md
     assert "### 复现步骤" in md
     assert "### 影响" in md

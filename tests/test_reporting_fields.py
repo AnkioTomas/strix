@@ -117,6 +117,7 @@ async def test_create_report_persists_new_fields(report_state: ReportState) -> N
         severity_change_conditions="A strict CSP would lower the severity.",
         fix_effort="LOW",
         cvss_breakdown=_CVSS,
+        vulnerability_type="xss",
         endpoint="/search",
         method="GET",
         cve=None,
@@ -133,6 +134,7 @@ async def test_create_report_persists_new_fields(report_state: ReportState) -> N
     assert report["fix_effort"] == "low"
     assert report["fix_pr_body"] == "## Fix\nEncode output."
     assert report["finding_class"] == "dynamic"
+    assert report["vulnerability_type"] == "xss"
     assert report["counterevidence"] == "No output encoding or CSP observed on this response."
     assert report["confidence"] == "high"
     assert report["severity_change_conditions"] == "A strict CSP would lower the severity."
@@ -158,6 +160,7 @@ async def test_create_report_requires_evidence_and_assumptions(
         severity_change_conditions="n/a",
         fix_effort="low",
         cvss_breakdown=_CVSS,
+        vulnerability_type="xss",
         endpoint=None,
         method=None,
         cve=None,
@@ -195,6 +198,7 @@ async def test_create_report_rejects_invalid_fix_effort(report_state: ReportStat
         severity_change_conditions="n/a",
         fix_effort="enormous",
         cvss_breakdown=_CVSS,
+        vulnerability_type="xss",
         endpoint=None,
         method=None,
         cve=None,
@@ -226,6 +230,7 @@ async def _create_with(report_state: ReportState, **overrides: object) -> dict[s
         "severity_change_conditions": "Proof of internet exposure would raise it.",
         "fix_effort": "low",
         "cvss_breakdown": _CVSS,
+        "vulnerability_type": "xss",
         "endpoint": None,
         "method": None,
         "cve": None,
@@ -1073,8 +1078,16 @@ def test_tool_descriptions_include_formatting_guidance() -> None:
 
 def test_vuln_tool_exposes_new_params() -> None:
     props = create_vulnerability_report.params_json_schema["properties"]
-    for field in ("evidence", "assumptions", "fix_effort", "fix_pr_body", "screenshots"):
+    for field in (
+        "evidence",
+        "assumptions",
+        "fix_effort",
+        "fix_pr_body",
+        "screenshots",
+        "vulnerability_type",
+    ):
         assert field in props
+    assert "vulnerability_type" in create_vulnerability_report.params_json_schema["required"]
 
     dep_props = create_dependency_report.params_json_schema["properties"]
     for field in ("package_name", "installed_version", "cve", "advisory_cvss"):
@@ -1134,6 +1147,39 @@ async def test_informational_location_needs_no_verification(report_state: Report
 
 def test_vuln_tool_exposes_fix_verification() -> None:
     assert "fix_verification" in create_vulnerability_report.params_json_schema["properties"]
+
+
+async def test_create_report_rejects_invalid_vulnerability_type(
+    report_state: ReportState,
+) -> None:
+    result = await _create_with(report_state, vulnerability_type="not_a_real_skill")
+    assert result["success"] is False
+    assert any("vulnerability_type" in e for e in result["errors"])
+    assert not report_state.vulnerability_reports
+
+
+async def test_create_report_rejects_missing_vulnerability_type(
+    report_state: ReportState,
+) -> None:
+    result = await _create_with(report_state, vulnerability_type="")
+    assert result["success"] is False
+    assert any("vulnerability_type is required" in e for e in result["errors"])
+    assert not report_state.vulnerability_reports
+
+
+async def test_update_report_can_revise_vulnerability_type(
+    report_state: ReportState,
+) -> None:
+    created = await _create_with(report_state, vulnerability_type="xss")
+    assert created["success"] is True
+    report_id = created["report_id"]
+    result = _do_update(
+        report_id=report_id,
+        update_reason="Reclassified after confirming object-level authz failure.",
+        fields={"vulnerability_type": "idor"},
+    )
+    assert result["success"] is True
+    assert report_state.vulnerability_reports[0]["vulnerability_type"] == "idor"
 
 
 def test_dep_tool_exposes_contextual_cvss_params() -> None:
@@ -1312,6 +1358,7 @@ _CONFIRMED_KWARGS: dict[str, Any] = {
     "severity_change_conditions": "A guard before disk.write would remove the impact.",
     "fix_effort": "MEDIUM",
     "cvss_breakdown": _CVSS,
+    "vulnerability_type": "broken_function_level_authorization",
     "endpoint": "/files/{id}",
     "method": "PATCH",
     "cve": "CVE-2025-55746",

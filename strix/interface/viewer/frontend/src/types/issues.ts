@@ -113,6 +113,7 @@ export interface Vulnerability {
   code_before: string | null;
   code_after: string | null;
   cwe: string[] | null;
+  vulnerability_type: string | null;
   code_locations: CodeLocation[] | null;
   remediation_steps: string | null;
   fix_pr_body: string | null;

@@ -193,6 +193,32 @@ _USELESS_CLEANUP = frozenset(
 
 _VALID_FIX_EFFORT = frozenset({"trivial", "low", "medium", "high"})
 _VALID_CONFIDENCE = frozenset({"high", "medium", "low"})
+
+
+def _valid_vulnerability_types() -> frozenset[str]:
+    """Allowed ``vulnerability_type`` values = vulnerabilities skill stems."""
+    from strix.skills import get_vulnerability_skill_names
+
+    return get_vulnerability_skill_names()
+
+
+def _validate_vulnerability_type(vulnerability_type: str | None) -> tuple[str | None, list[str]]:
+    """Normalize and validate a required vulnerability skill name."""
+    cleaned = (vulnerability_type or "").strip().lower()
+    if not cleaned:
+        return None, [
+            "vulnerability_type is required - pass the matching vulnerabilities "
+            "skill name (e.g. sql_injection, idor, xss, information_disclosure)"
+        ]
+    allowed = _valid_vulnerability_types()
+    if cleaned not in allowed:
+        return None, [
+            f"Invalid vulnerability_type: {cleaned!r}. "
+            f"Must be one of: {sorted(allowed)}"
+        ]
+    return cleaned, []
+
+
 _VALID_RETEST_STATUS = frozenset({"fixed", "not_fixed", "partial", "regressed"})
 
 
@@ -454,6 +480,13 @@ def _collect_update_changes(  # noqa: PLR0912
     if cwe:
         changes["cwe"] = cwe
 
+    raw_vuln_type = fields.get("vulnerability_type")
+    if raw_vuln_type is not None:
+        vuln_type, type_errors = _validate_vulnerability_type(clean_optional(raw_vuln_type))
+        errors.extend(type_errors)
+        if vuln_type:
+            changes["vulnerability_type"] = vuln_type
+
     return changes, errors
 
 
@@ -691,6 +724,7 @@ async def _do_create(
     severity_change_conditions: str,
     fix_effort: str,
     cvss_breakdown: dict[str, str],
+    vulnerability_type: str,
     endpoint: str | None,
     method: str | None,
     cve: str | None,
@@ -743,6 +777,9 @@ async def _do_create(
         errors.append(
             f"Invalid fix_effort: {fix_effort!r}. Must be one of: {sorted(_VALID_FIX_EFFORT)}"
         )
+
+    vulnerability_type, type_errors = _validate_vulnerability_type(vulnerability_type)
+    errors.extend(type_errors)
 
     errors.extend(_validate_cvss_breakdown(cvss_breakdown))
 
@@ -807,6 +844,7 @@ async def _do_create(
             "fix_effort": fix_effort,
             "cvss": cvss_score,
             "cvss_breakdown": cvss_breakdown,
+            "vulnerability_type": vulnerability_type,
             "endpoint": endpoint,
             "method": method,
             "cve": cve,
@@ -895,6 +933,7 @@ async def create_vulnerability_report(
     severity_change_conditions: str,
     fix_effort: str,
     cvss_breakdown: dict[str, str],
+    vulnerability_type: str,
     endpoint: str | None = None,
     method: str | None = None,
     cve: str | None = None,
@@ -1060,10 +1099,12 @@ async def create_vulnerability_report(
       survives logout or a replayable link are session-management /
       defense-in-depth weaknesses — usually Low/Medium on their own.
     - **Reserve ``H`` impact for demonstrated broad impact.** ``C:H`` /
-      ``I:H`` require proof of wide or systemic read/write. A single
-      user's data, a read-only information leak, or merely confirming
-      that an account / domain / software version *exists* (enumeration)
-      is ``C:L`` (often ``I:N``) — not ``C:H``.
+      ``I:H`` require proof of wide or systemic read/write — including
+      mass / large-scale extraction of other users' or tenants' PII or
+      sensitive data (that impact is Critical, not High). A single
+      user's data, a narrow read-only leak, or merely confirming that
+      an account / domain / software version *exists* (enumeration) is
+      ``C:L`` (often ``I:N``) — not ``C:H``.
     - **Model required position and interaction honestly.** An
       adversary-in-the-middle prerequisite (e.g. cleartext transmission)
       or a required victim action is not guaranteed — reflect it in
@@ -1171,6 +1212,14 @@ async def create_vulnerability_report(
             critical").
         fix_effort: One of ``trivial`` / ``low`` / ``medium`` / ``high``.
         cvss_breakdown: 8-metric object per the format above.
+        vulnerability_type: REQUIRED. The matching vulnerabilities skill
+            name (stem of ``skills/vulnerabilities/<name>.md``). Examples:
+            ``sql_injection``, ``idor``, ``xss``, ``rce``,
+            ``information_disclosure``, ``ssrf``, ``authentication_jwt``,
+            ``broken_function_level_authorization``, ``csrf``, ``ssti``,
+            ``path_traversal_lfi_rfi``, ``insecure_deserialization``,
+            ``business_logic``. Prefer the most specific skill for the
+            demonstrated weakness. Free-text labels are rejected.
         endpoint: API path / Git path (e.g. ``/api/login``).
         method: HTTP method when relevant.
         cve: ``CVE-YYYY-NNNNN`` if certain, else omit.
@@ -1343,6 +1392,7 @@ async def create_vulnerability_report(
             Read-only. The search request did not create an account,
             write a file, or store a payload. Nothing for the customer
             to clean up.
+        vulnerability_type: "xss"
         screenshots:
             ["/workspace/.agent-browser-screenshots/xss-search-alert.png"]
     """
@@ -1366,6 +1416,7 @@ async def create_vulnerability_report(
         severity_change_conditions=severity_change_conditions,
         fix_effort=fix_effort,
         cvss_breakdown=cvss_breakdown,
+        vulnerability_type=vulnerability_type,
         endpoint=endpoint,
         method=method,
         cve=cve,
@@ -1402,6 +1453,7 @@ async def update_vulnerability_report(
     severity_change_conditions: str | None = None,
     fix_effort: str | None = None,
     cvss_breakdown: dict[str, str] | None = None,
+    vulnerability_type: str | None = None,
     endpoint: str | None = None,
     method: str | None = None,
     cve: str | None = None,
@@ -1479,6 +1531,8 @@ async def update_vulnerability_report(
         fix_effort: ``trivial`` / ``low`` / ``medium`` / ``high``.
         cvss_breakdown: All 8 CVSS metrics. Replaces the score and the
             severity too.
+        vulnerability_type: Replacement vulnerabilities skill name
+            (same enum as create).
         endpoint: Replacement endpoint.
         method: Replacement HTTP method.
         cve: Replacement CVE id.
@@ -1518,6 +1572,7 @@ async def update_vulnerability_report(
             "severity_change_conditions": severity_change_conditions,
             "fix_effort": fix_effort,
             "cvss_breakdown": cvss_breakdown,
+            "vulnerability_type": vulnerability_type,
             "endpoint": endpoint,
             "method": method,
             "cve": cve,
@@ -2163,6 +2218,7 @@ _REPORT_SUMMARY_FIELDS = (
     "cvss",
     "confidence",
     "finding_class",
+    "vulnerability_type",
     "cve",
     "cwe",
     "target",

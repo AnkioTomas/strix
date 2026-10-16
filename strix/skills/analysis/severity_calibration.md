@@ -33,7 +33,9 @@ mass data access, with evidence:
   reachable by any user on internet-exposed surface.
 - Full authentication bypass, or trivially forgeable authentication
   (accepted unsigned tokens, `alg: none`, signature not verified).
-- Mass extraction of other users' or other tenants' sensitive data.
+- Mass / large-scale extraction of other users' or other tenants'
+  sensitive data (including PII). Bulk user-information leakage is
+  Critical — do not rate it High.
 - Compromise of signing keys, control-plane credentials, or credentials
   granting broad infrastructure access.
 - Complete cross-tenant isolation failure in a multi-tenant system.
@@ -47,13 +49,15 @@ or the impact spans all tenants rather than one.
 - Authenticated RCE, or RCE requiring a common non-privileged role.
 - Privilege escalation crossing a real trust boundary (user → admin,
   tenant → tenant, read → write on protected objects).
-- Object-level authorization failures exposing or modifying other users'
-  sensitive data at scale.
-- SQL injection or equivalent injection reaching real data.
+- Object-level authorization failures that expose or modify other users'
+  sensitive data in a **limited** blast radius (one user or a small set
+  of records — not mass / systemic extraction; that is Critical).
+- SQL injection or equivalent injection reaching real data, when the
+  demonstrated impact is not mass data access.
 - SSRF that demonstrably reaches internal services, cloud metadata, or
   credentials.
-- Sensitive credential or PII exposure that an attacker can actually
-  reach.
+- Sensitive credential or PII exposure an attacker can actually reach,
+  when the demonstrated scope is limited (not mass / systemic).
 
 ## Medium
 

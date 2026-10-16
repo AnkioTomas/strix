@@ -326,6 +326,7 @@ class Finding(BaseModel):
     impact: str | None = None
     recommendation: str | None = None
     cwe: str | None = None
+    vulnerability_type: str | None = None
     cvss: float | None = None
     created_at: str | None = None
     review_status: Literal["active", "invalid"] = "active"
@@ -343,6 +344,7 @@ FINDING_SUMMARY_KEYS = frozenset(
         "asset",
         "location",
         "cwe",
+        "vulnerability_type",
         "cvss",
         "created_at",
         "review_status",

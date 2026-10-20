@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator
 
+from app.services.findings import apply_address
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -454,7 +456,7 @@ class Database:
             # Keep raw for retest seeding; empty object means nothing useful on disk.
             if raw:
                 item["raw"] = raw
-            results.append(item)
+            results.append(apply_address(item))
         return results
 
     def find_task_by_run_name(self, run_name: str) -> dict[str, Any] | None:

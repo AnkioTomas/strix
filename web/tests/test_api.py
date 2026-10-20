@@ -360,7 +360,7 @@ def test_normalize_finding():
     }
     finding = normalize_finding(raw, task_id="task_1")
     assert finding["id"] == "abc"
-    assert finding["location"]["endpoint"] == "/api?id=1"
+    assert finding["location"] == {"address": "example.com:443"}
     assert finding["cwe"] == "CWE-89"
     assert "poc steps" in finding["poc"]
     assert "curl" in finding["poc"]

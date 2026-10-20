@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import ipaddress
+import re
 from typing import Any
+from urllib.parse import urlsplit
 
 
 _SEVERITY_RANK = {
@@ -44,6 +47,77 @@ def tally_finding_counts(
     return counts
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443, "ws": 80, "wss": 443, "ftp": 21}
+_FILE_SUFFIXES = frozenset(
+    {"json", "lock", "py", "js", "ts", "go", "xml", "yml", "yaml", "txt", "md", "toml", "mod", "sum"}
+)
+_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
+
+
+def _looks_like_host(host: str, *, has_port: bool) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        return True
+    if "." not in host:
+        return has_port and bool(re.fullmatch(r"[a-z0-9-]+", host))
+    return has_port or host.rsplit(".", 1)[1] not in _FILE_SUFFIXES
+
+
+def _parse_address(value: str) -> tuple[str, bool] | None:
+    """Return (``host[:port]``, explicit_port) for a URL / host / host:port string."""
+    value = value.strip()
+    if not value or any(ch.isspace() for ch in value):
+        return None
+    has_scheme = bool(_SCHEME_RE.match(value))
+    try:
+        parts = urlsplit(value if has_scheme else f"//{value}")
+        host = (parts.hostname or "").lower()
+        port = parts.port
+    except ValueError:
+        return None
+    if not host or (not has_scheme and not _looks_like_host(host, has_port=port is not None)):
+        return None
+    explicit = port is not None
+    if port is None and has_scheme:
+        port = _DEFAULT_PORTS.get(parts.scheme.lower())
+    if ":" in host:
+        host = f"[{host}]"
+    return (f"{host}:{port}" if port else host), explicit
+
+
+def derive_address(*values: object) -> str | None:
+    """``host:port`` from the first usable value, preferring one with an explicit port."""
+    found = [r for v in values if isinstance(v, str) and (r := _parse_address(v))]
+    for address, explicit in found:
+        if explicit:
+            return address
+    return found[0][0] if found else None
+
+
+def apply_address(finding: dict[str, Any]) -> dict[str, Any]:
+    """Show network findings as host:port instead of a path.
+
+    Idempotent, so rows cached before this existed are migrated on read.
+    """
+    loc = finding.get("location")
+    loc = dict(loc) if isinstance(loc, dict) else {}
+    if not loc.get("file"):
+        address = loc.get("address") or derive_address(
+            finding.get("asset"), loc.get("url"), loc.get("endpoint")
+        )
+        if address:
+            loc["address"] = address
+            for key in ("url", "endpoint", "method"):
+                loc.pop(key, None)
+    finding["location"] = loc or None
+    return finding
+
+
 def normalize_finding(raw: dict[str, Any], *, task_id: str) -> dict[str, Any]:
     location: dict[str, Any] = {}
     code_locations = raw.get("code_locations") or []
@@ -58,14 +132,12 @@ def normalize_finding(raw: dict[str, Any], *, task_id: str) -> dict[str, Any]:
     if endpoint:
         location.setdefault("url", endpoint)
         location.setdefault("endpoint", endpoint)
-    if raw.get("method"):
-        location["method"] = raw.get("method")
 
     cwe = raw.get("cwe")
     if isinstance(cwe, list):
         cwe = ", ".join(str(item) for item in cwe)
 
-    return {
+    return apply_address({
         "id": str(raw.get("id") or raw.get("report_id") or "unknown"),
         "task_id": task_id,
         "title": str(raw.get("title") or "Untitled"),
@@ -85,7 +157,7 @@ def normalize_finding(raw: dict[str, Any], *, task_id: str) -> dict[str, Any]:
         "cvss": raw.get("cvss"),
         "created_at": raw.get("timestamp"),
         "raw": raw,
-    }
+    })
 
 
 def normalize_findings(raw_items: list[Any], *, task_id: str) -> list[dict[str, Any]]:

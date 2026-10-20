@@ -308,6 +308,7 @@ class FindingLocation(BaseModel):
     file: str | None = None
     line: int | None = None
     endpoint: str | None = None
+    address: str | None = None
 
 
 class Finding(BaseModel):

@@ -51,7 +51,7 @@
   function locationLabel(f) {
     const loc = (f && f.location) || {};
     if (loc.file) return `${loc.file}${loc.line != null ? `:${loc.line}` : ""}`;
-    return loc.url || loc.endpoint || loc.parameter || f.asset || "—";
+    return loc.address || loc.parameter || f.asset || "—";
   }
 
   function findingToMarkdown(f) {

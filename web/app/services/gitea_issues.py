@@ -99,8 +99,8 @@ def format_issue_body(finding: dict[str, Any], *, task: dict[str, Any]) -> str:
         where = f"{loc.get('file')}"
         if loc.get("line") is not None:
             where = f"{where}:{loc.get('line')}"
-    elif loc.get("url") or loc.get("endpoint"):
-        where = str(loc.get("url") or loc.get("endpoint"))
+    elif loc.get("address"):
+        where = str(loc["address"])
     elif finding.get("asset"):
         where = str(finding.get("asset"))
 

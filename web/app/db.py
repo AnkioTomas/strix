@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS findings (
     impact TEXT,
     recommendation TEXT,
     cwe TEXT,
+    vulnerability_type TEXT,
     cvss REAL,
     raw_json TEXT,
     created_at TEXT NOT NULL,
@@ -199,6 +200,16 @@ class Database:
             conn.execute("ALTER TABLE tasks ADD COLUMN earliest_start TEXT")
         if "feishu_notify" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN feishu_notify TEXT")
+        finding_cols = {row[1] for row in conn.execute("PRAGMA table_info(findings)").fetchall()}
+        if "vulnerability_type" not in finding_cols:
+            conn.execute("ALTER TABLE findings ADD COLUMN vulnerability_type TEXT")
+            conn.execute(
+                """
+                UPDATE findings
+                SET vulnerability_type = json_extract(raw_json, '$.vulnerability_type')
+                WHERE raw_json IS NOT NULL AND json_valid(raw_json)
+                """
+            )
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -385,9 +396,9 @@ class Database:
                     """
                     INSERT INTO findings (
                         id, task_id, title, severity, confidence, description, asset,
-                        location_json, evidence, poc, impact, recommendation, cwe, cvss,
-                        raw_json, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        location_json, evidence, poc, impact, recommendation, cwe, vulnerability_type,
+                        cvss, raw_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         finding["id"],
@@ -403,6 +414,7 @@ class Database:
                         finding.get("impact"),
                         finding.get("recommendation"),
                         finding.get("cwe"),
+                        finding.get("vulnerability_type"),
                         finding.get("cvss"),
                         json.dumps(finding.get("raw") or finding, ensure_ascii=False, default=str),
                         finding.get("created_at") or now,

@@ -151,7 +151,7 @@
     const body = $("findingsBody");
     if (count) count.textContent = "加载中…";
     if (body) {
-      body.innerHTML = `<tr><td colspan="4" class="muted">加载中…</td></tr>`;
+      body.innerHTML = `<tr><td colspan="5" class="muted">加载中…</td></tr>`;
     }
   }
 
@@ -759,6 +759,9 @@
     if (key === "title") {
       return String(f.title || "").toLowerCase();
     }
+    if (key === "vulnerability_type") {
+      return String(f.vulnerability_type || "").toLowerCase();
+    }
     if (key === "location") {
       return String(penna.locationLabel(f) || "").toLowerCase();
     }
@@ -809,7 +812,7 @@
     const count = $("findingsCount");
     if (!findingsCache.length) {
       count.textContent = "暂无漏洞";
-      body.innerHTML = `<tr><td colspan="4" class="muted">该任务暂无漏洞</td></tr>`;
+      body.innerHTML = `<tr><td colspan="5" class="muted">该任务暂无漏洞</td></tr>`;
       return;
     }
     const rows = sortedFindings();
@@ -827,6 +830,7 @@
         return `<tr data-id="${esc(f.id)}" class="${f.id === selectedFindingId ? "active" : ""} ${invalid ? "finding-invalid" : ""}">
           <td><span class="sev-${esc(sev)}">${esc((f.severity || "unknown").toUpperCase())}</span></td>
           <td>${esc(f.title || "Untitled")}</td>
+          <td>${esc(f.vulnerability_type || "—")}</td>
           <td>${esc(where)}</td>
           <td>${findingStatusCell(f)}</td>
         </tr>`;
@@ -851,7 +855,7 @@
       findingsCache = [];
       showFindingsList();
       $("findingsCount").textContent = "加载失败";
-      $("findingsBody").innerHTML = `<tr><td colspan="4">${esc(e.message)}</td></tr>`;
+      $("findingsBody").innerHTML = `<tr><td colspan="5">${esc(e.message)}</td></tr>`;
     }
   }
 

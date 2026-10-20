@@ -78,6 +78,7 @@
         f.request_test ? " · 已要求测试" : ""
       } |`
     );
+    if (f.vulnerability_type) parts.push(`| 漏洞类型 | ${f.vulnerability_type} |`);
     if (f.cwe) parts.push(`| CWE | ${f.cwe} |`);
     if (f.cvss != null) parts.push(`| CVSS | ${f.cvss} |`);
     parts.push("");

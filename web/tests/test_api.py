@@ -1021,6 +1021,7 @@ def test_retest_embeds_mandatory_instruction(client: TestClient):
     assert body["id"] != created["id"]
     assert body["parent_task_id"] == created["id"]
     assert body["action"] == "retest"
+    assert body["name"] == "复测-https://example.com"
     assert body["status"] == "queued"
     assert body["run_name"] == run_name
     assert manager.get_task(created["id"])["status"] == "completed"
@@ -1646,3 +1647,85 @@ def test_retest_task_report_lists_fixed_by_title_only(client: TestClient):
     assert "Retest Report" in english
     pkg = client.get(f"/api/v1/tasks/{created['id']}/report?download=1&lang=en")
     assert pkg.status_code == 200 and pkg.content[:2] == b"PK"
+
+
+@pytest.fixture()
+def mail_env(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("STRIX_SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("STRIX_SMTP_FROM", "sec@example.test")
+    monkeypatch.setenv("STRIX_MAIL_CC", "boss@example.test; audit@example.test")
+    monkeypatch.setenv("STRIX_MAIL_DOMAIN", "example.test")
+    monkeypatch.setenv("STRIX_MAIL_SUBJECT", "报告-{name}-{bu}")
+    monkeypatch.setenv("STRIX_MAIL_BODY", "{name}\\n共{total}个 {unknown}")
+
+
+def _batch_xlsx(rows: list[list[object]]) -> bytes:
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["应用名称", "端口", "BU", "负责人", "URL"])
+    for row in rows:
+        ws.append(row)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_batch_import_creates_tasks_and_mails_report(
+    mail_env, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    sheet = _batch_xlsx(
+        [
+            ["门户", 8443, "BU1", "alice@corp.test", "https://example.com"],
+            ["后台", 80, "BU2", "bob", "example.org"],
+            ["空地址", 80, "BU3", "carol", None],
+        ]
+    )
+    res = client.post(
+        "/api/v1/tasks/batch-import",
+        files={"file": ("apps.xlsx", sheet, "application/vnd.ms-excel")},
+        data={"scan_mode": "quick"},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert (body["total"], body["created"]) == (3, 2)
+    first, second, third = body["results"]
+    assert first["target"] == "https://example.com:8443"
+    assert second["target"] == "example.org:80"
+    assert second["mail_to"] == "bob@example.test"
+    assert third["error"] == "URL 为空"
+
+    task = client.get(f"/api/v1/tasks/{first['task_id']}").json()
+    assert task["name"] == "门户"
+    assert task["mail_to"] == "alice@corp.test"
+    assert task["mail_status"] == "pending"
+    assert "BU1" in task["notes"]
+
+    manager = client.app.state.manager
+    package = tmp_path / "report.zip"
+    package.write_bytes(b"PK")
+    monkeypatch.setattr(manager, "get_report_package", lambda *_a, **_k: package)
+    sent: dict = {}
+
+    def fake_send(settings, **kwargs):
+        sent.update(kwargs)
+
+    monkeypatch.setattr("app.services.mailer.send_report_mail", fake_send)
+
+    assert client.post(f"/api/v1/tasks/{first['task_id']}/send-report-mail").status_code == 409
+    manager.db.update_task(first["task_id"], status="completed")
+    done = client.post(f"/api/v1/tasks/{first['task_id']}/send-report-mail")
+    assert done.status_code == 200, done.text
+    assert done.json()["mail_status"] == "sent"
+    assert sent["to"] == ["alice@corp.test"]
+    assert sent["attachment"] == package
+    assert sent["subject"] == "报告-门户-BU1"
+    assert sent["body"] == "门户\n共0个 {unknown}"
+
+
+def test_batch_import_rejects_non_excel(client: TestClient):
+    res = client.post(
+        "/api/v1/tasks/batch-import", files={"file": ("a.xlsx", b"nope", "application/octet-stream")}
+    )
+    assert res.status_code == 400

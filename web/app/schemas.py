@@ -292,6 +292,9 @@ class TaskSummary(BaseModel):
     earliest_start: str | None = None
     finding_counts: FindingCounts | None = None
     has_report: bool = False
+    mail_to: str | None = None
+    mail_status: str | None = None
+    mail_error: str | None = None
 
 
 class TaskListResponse(BaseModel):

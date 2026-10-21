@@ -86,6 +86,13 @@ PYTHONPATH=. python -m app
 | `STRIX_SANDBOX_REAP_INTERVAL` | `60` | 每隔多少秒扫描 Docker，停掉「已结束任务」仍在跑的沙箱容器；`0`=关闭。只动本 Web 任务 `run.json` 里记下的 container_id |
 | `STRIX_FEISHU_WEBHOOK` | （空） | 飞书群机器人 Webhook；空=关闭。web 在跑时推送开始/结束/失败/取消/等人 |
 | `STRIX_FEISHU_EVENTS` | `started,finished,failed,cancelled,needs_user` | 启用的推送事件（逗号分隔） |
+| `STRIX_SMTP_HOST` / `STRIX_SMTP_PORT` | （空）/ `465` | 报告邮件 SMTP；Host 为空=不发邮件。批量任务完成后自动把中文报告 ZIP 发给负责人 |
+| `STRIX_SMTP_USER` / `STRIX_SMTP_PASSWORD` / `STRIX_SMTP_FROM` | （空） | SMTP 账号、密码、发件人（FROM 为空时用 USER） |
+| `STRIX_SMTP_SSL` | `true` | `true`=隐式 TLS（465）；`false`=明文/STARTTLS（587/25） |
+| `STRIX_MAIL_CC` | （空） | 报告邮件固定抄送，逗号/分号分隔 |
+| `STRIX_MAIL_SUBJECT` | `【安全测试报告】{name}` | 邮件标题模板；占位符 `{name} {target} {total} {critical} {high} {medium} {low} {info} {bu} {owner} {task_id}` |
+| `STRIX_MAIL_BODY` | 内置中文正文 | 邮件正文模板，占位符同上；写 `\n` 表示换行 |
+| `STRIX_MAIL_DOMAIN` | （空） | 表格里负责人不含 `@` 时自动补的邮箱域名 |
 | `STRIX_FEISHU_PROXY` | （空） | 仅飞书出站用的 HTTP(S) 代理，如 `http://127.0.0.1:7890`；空=直连（不吃系统 `HTTP_PROXY`） |
 | `STRIX_ALLOW_PRIVATE_TARGETS` | 1 | 是否允许扫私网/localhost |
 | `STRIX_GIT_USERNAME` / `STRIX_GIT_TOKEN` | （空） | Gitea HTTPS 机器人账号；必须成对出现。任务里填完整 `https://gitea…/org/repo.git`，凭证不入库、不进 URL。开 Issue 时 token 还需 issues 写权限 |

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Self
@@ -83,6 +84,33 @@ class Settings(BaseSettings):
     )
     # Outbound proxy for Feishu webhook only (http/https). Empty = direct.
     feishu_proxy: str = Field(default="", alias="STRIX_FEISHU_PROXY")
+
+    # Report mail (batch scans). Empty smtp_host = mail disabled.
+    smtp_host: str = Field(default="", alias="STRIX_SMTP_HOST")
+    smtp_port: int = Field(default=465, alias="STRIX_SMTP_PORT")
+    smtp_user: str = Field(default="", alias="STRIX_SMTP_USER")
+    smtp_password: str = Field(default="", alias="STRIX_SMTP_PASSWORD")
+    smtp_from: str = Field(default="", alias="STRIX_SMTP_FROM")
+    # true = implicit TLS (465); false = plain / STARTTLS when the server offers it.
+    smtp_ssl: bool = Field(default=True, alias="STRIX_SMTP_SSL")
+    # Always CC'd on report mails (comma/semicolon separated).
+    mail_cc: str = Field(default="", alias="STRIX_MAIL_CC")
+    # Appended to a bare owner id (no "@") from the spreadsheet, e.g. example.com.
+    mail_domain: str = Field(default="", alias="STRIX_MAIL_DOMAIN")
+
+    # Mail templates; placeholders: {name} {target} {total} {critical} {high} {medium}
+    # {low} {info} {bu} {owner} {task_id}. A literal "\\n" in the value is a newline.
+    mail_subject: str = Field(default="【安全测试报告】{name}", alias="STRIX_MAIL_SUBJECT")
+    mail_body: str = Field(
+        default=(
+            "您好，\\n\\n应用「{name}」的安全测试已完成，中文测试报告见附件（ZIP，含报告与截图）。\\n"
+            "测试目标：{target}\\n发现漏洞：{total} 个\\n\\n此邮件由系统自动发送。"
+        ),
+        alias="STRIX_MAIL_BODY",
+    )
+
+    def mail_cc_list(self) -> list[str]:
+        return [p.strip() for p in re.split(r"[,;，；\s]+", self.mail_cc) if p.strip()]
 
     @model_validator(mode="after")
     def git_auth_pair(self) -> Self:

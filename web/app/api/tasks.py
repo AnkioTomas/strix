@@ -218,6 +218,38 @@ async def create_task(
     return _summarize(task, manager)
 
 
+@router.post("/tasks/batch-import")
+async def batch_import_tasks(
+    request: Request,
+    manager: TaskManager = Depends(get_manager),
+):
+    """Create one pentest task per row of an uploaded .xlsx."""
+    from app.services.batch_import import SheetError, parse_sheet
+
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None or not hasattr(upload, "read"):
+        return _error(TaskError("INVALID_REQUEST", "请上传 Excel 文件（字段名 file）"))
+    data = await upload.read()
+    try:
+        rows = parse_sheet(data, mail_domain=manager.settings.mail_domain)
+    except SheetError as exc:
+        return _error(TaskError("INVALID_REQUEST", str(exc)))
+    scan_mode = _form_value(form, "scan_mode")
+    results = await asyncio.to_thread(manager.batch_create, rows, scan_mode=scan_mode)
+    created = sum(1 for item in results if item.get("task_id"))
+    return {"total": len(results), "created": created, "results": results}
+
+
+@router.post("/tasks/{task_id}/send-report-mail", response_model=TaskSummary)
+async def send_report_mail(task_id: str, manager: TaskManager = Depends(get_manager)):
+    try:
+        task = await asyncio.to_thread(manager.send_report_mail, task_id)
+    except TaskError as exc:
+        return _error(exc)
+    return _summarize(task, manager)
+
+
 @router.post("/tasks/import", response_model=ImportRunsResponse)
 async def import_tasks(
     payload: ImportRunsRequest,

@@ -1113,6 +1113,34 @@
     showCreate(false);
     showImport(true);
   };
+  $("batchTaskBtn").onclick = () => {
+    alert(
+      "Excel 列：应用名称、端口、BU、负责人、URL（首行为表头；负责人填邮箱）。\n" +
+        "每行创建一个测试任务，完成后自动把中文报告发给负责人，并抄送配置的邮箱。"
+    );
+    $("batchFile").click();
+  };
+  $("batchFile").onchange = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      await api.ensureSession();
+      const res = await api.apiForm("/api/v1/tasks/batch-import", form);
+      const problems = res.results
+        .filter((r) => r.error || r.warning)
+        .map((r) => `第 ${r.row} 行 ${r.name || r.target}：${r.error || r.warning}`);
+      alert(
+        `已创建 ${res.created}/${res.total} 个任务。` +
+          (problems.length ? `\n\n${problems.join("\n")}` : "")
+      );
+      await refresh();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
   $("cancelImport").onclick = () => showImport(false);
   $("attachments").onchange = updateAttachmentsHint;
   $("findingsBack").onclick = () => {

@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import shutil
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -898,8 +899,12 @@ class TaskManager:
                 "RESUME_UNAVAILABLE",
                 f"Missing agent snapshot for run {run_name}; cannot retest",
             )
+        request = self._request_from_task(parent)
+        base = str(request.name or parent.get("target") or "").strip()
+        if base and not base.startswith("复测"):
+            request.name = f"复测-{base}"[:200]
         child = self.create_task(
-            self._request_from_task(parent),
+            request,
             parent_task_id=parent["id"],
             action="retest",
             reuse_environment_from=parent,
@@ -1380,6 +1385,120 @@ class TaskManager:
 
     def _feishu_status(self, task: dict[str, Any], status: str) -> None:
         notify_status(self.settings, self.db, task, status)
+        # Batch tasks mail their report once the scan completes (off-thread: SMTP is slow).
+        if status == "completed" and task.get("mail_status") == "pending":
+            threading.Thread(
+                target=self._send_report_mail_safe,
+                args=(str(task["id"]),),
+                name=f"report-mail-{task['id']}",
+                daemon=True,
+            ).start()
+
+    def _send_report_mail_safe(self, task_id: str) -> None:
+        try:
+            self.send_report_mail(task_id)
+        except TaskError:
+            logger.exception("report mail failed for %s", task_id)
+
+    def batch_create(
+        self, rows: list[Any], *, scan_mode: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Create one pentest task per spreadsheet row; failures are reported per row."""
+        from app.services.mailer import mail_enabled
+
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            entry: dict[str, Any] = {"row": row.row, "name": row.name, "target": row.target}
+            if not row.target:
+                entry["error"] = "URL 为空"
+                results.append(entry)
+                continue
+            notes = "\n".join(
+                part
+                for part in (
+                    f"BU: {row.bu}" if row.bu else "",
+                    f"负责人: {row.owner}" if row.owner else "",
+                )
+                if part
+            )
+            try:
+                req = CreateTaskRequest(
+                    type="pentest",
+                    target=row.target,
+                    name=row.name or None,
+                    notes=notes or None,
+                    scan_mode=scan_mode or self.settings.default_scan_mode,
+                )
+                task = self.create_task(req)
+            except (TaskError, ValidationError) as exc:
+                entry["error"] = exc.message if isinstance(exc, TaskError) else str(exc)
+                results.append(entry)
+                continue
+            fields: dict[str, Any] = {"mail_to": ",".join(row.emails) or None}
+            if mail_enabled(self.settings):
+                fields["mail_status"] = "pending"
+            self.db.update_task(task["id"], **fields)
+            entry["task_id"] = task["id"]
+            entry["mail_to"] = fields["mail_to"]
+            if row.owner and not row.emails:
+                entry["warning"] = "负责人不是有效邮箱，报告只会发给抄送邮箱"
+            results.append(entry)
+        return results
+
+    def send_report_mail(self, task_id: str) -> dict[str, Any]:
+        """Mail the Chinese report zip to the owner, CC'ing STRIX_MAIL_CC."""
+        from app.services.mailer import MailError, render_template, send_report_mail
+
+        task = self.get_task(task_id)
+        if task["status"] != "completed":
+            raise TaskError(
+                "RESULT_NOT_READY", "Task is not completed yet", status_code=409
+            )
+        recipients = [a for a in str(task.get("mail_to") or "").split(",") if a]
+        try:
+            package = self.get_report_package(task_id)
+            self.attach_task_overlays([task])
+            counts = task.get("finding_counts") or {}
+            name = str(task.get("name") or task.get("target") or task_id)
+            owner = ""
+            for line in str(task.get("notes") or "").splitlines():
+                if line.startswith("负责人: "):
+                    owner = line[len("负责人: ") :]
+            values = {
+                "name": name,
+                "target": task.get("target") or "-",
+                "total": counts.get("total", 0),
+                "critical": counts.get("critical", 0),
+                "high": counts.get("high", 0),
+                "medium": counts.get("medium", 0),
+                "low": counts.get("low", 0),
+                "info": counts.get("info", 0),
+                "bu": next(
+                    (
+                        line[len("BU: ") :]
+                        for line in str(task.get("notes") or "").splitlines()
+                        if line.startswith("BU: ")
+                    ),
+                    "",
+                ),
+                "owner": owner,
+                "task_id": task_id,
+            }
+            send_report_mail(
+                self.settings,
+                to=recipients,
+                subject=render_template(self.settings.mail_subject, values),
+                body=render_template(self.settings.mail_body, values),
+                attachment=package,
+                attachment_name=f"{report_download_stem(task)}.zip",
+            )
+        except (MailError, TaskError) as exc:
+            message = exc.message if isinstance(exc, TaskError) else str(exc)
+            self.db.update_task(task_id, mail_status="failed", mail_error=message)
+            raise TaskError("MAIL_FAILED", message, status_code=502) from exc
+        updated = self.db.update_task(task_id, mail_status="sent", mail_error=None)
+        assert updated is not None
+        return updated
 
     def _gitea_sync_issues(
         self, task: dict[str, Any], findings: list[dict[str, Any]]

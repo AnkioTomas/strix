@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     error TEXT,
     earliest_start TEXT,
     feishu_notify TEXT,
+    mail_to TEXT,
+    mail_status TEXT,
+    mail_error TEXT,
     created_at TEXT NOT NULL,
     started_at TEXT,
     finished_at TEXT,
@@ -200,6 +203,9 @@ class Database:
             conn.execute("ALTER TABLE tasks ADD COLUMN earliest_start TEXT")
         if "feishu_notify" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN feishu_notify TEXT")
+        for column in ("mail_to", "mail_status", "mail_error"):
+            if column not in cols:
+                conn.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
         finding_cols = {row[1] for row in conn.execute("PRAGMA table_info(findings)").fetchall()}
         if "vulnerability_type" not in finding_cols:
             conn.execute("ALTER TABLE findings ADD COLUMN vulnerability_type TEXT")

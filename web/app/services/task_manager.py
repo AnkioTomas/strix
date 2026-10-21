@@ -24,6 +24,7 @@ from app.security.target import (
 from app.services.attachments import copy_attachments, save_uploads
 from app.services.agent_prompts import (
     REFRESH_REPORT_INSTRUCTION,
+    translate_report_instruction,
     RETEST_INSTRUCTION,
     focused_retest_instruction,
 )
@@ -136,6 +137,26 @@ class TaskError(Exception):
         self.status_code = status_code
 
 
+def _reset_run_json_for_resume(workspace: Path, run_name: str) -> None:
+    """Clear a stale terminal status so the pool does not reap the resumed run."""
+    run_json = workspace / "strix_runs" / run_name / "run.json"
+    if not run_json.is_file():
+        return
+    try:
+        record = json.loads(run_json.read_text(encoding="utf-8"))
+        if isinstance(record, dict):
+            record["status"] = "running"
+            record["end_time"] = None
+            run_json.write_text(
+                json.dumps(record, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+    except (OSError, json.JSONDecodeError, TypeError):
+        logger.warning(
+            "could not reset run.json status for resume run=%s", run_name, exc_info=True
+        )
+
+
 class TaskManager:
     def __init__(self, db: Database, settings: Settings) -> None:
         self.db = db
@@ -154,7 +175,15 @@ class TaskManager:
         action: str | None = None,
         attachments: list[tuple[str, bytes]] | None = None,
         copy_attachments_from: Path | str | None = None,
+        reuse_environment_from: dict[str, Any] | None = None,
+        resume_note: str | None = None,
     ) -> dict[str, Any]:
+        """Create a task.
+
+        ``reuse_environment_from`` (a finished parent task) clones its workspace
+        and keeps its ``run_name``, so the new task resumes the parent's run
+        (agents, scripts, source checkout) without touching the parent.
+        """
         task_id = f"task_{uuid.uuid4().hex[:16]}"
         workspace = self.settings.tasks_dir / task_id
         workspace.mkdir(parents=True, exist_ok=True)
@@ -212,12 +241,17 @@ class TaskManager:
                 save_uploads(workspace, attachments)
             if copy_attachments_from is not None:
                 copy_attachments(Path(copy_attachments_from), workspace)
+            if reuse_environment_from is not None:
+                self._clone_environment(reuse_environment_from, workspace, resume_note)
         except (TargetValidationError, SourceValidationError) as exc:
             shutil.rmtree(workspace, ignore_errors=True)
             raise TaskError(exc.code, exc.message) from exc
         except ValueError as exc:
             shutil.rmtree(workspace, ignore_errors=True)
             raise TaskError("INVALID_ATTACHMENT", str(exc)) from exc
+        except OSError as exc:
+            shutil.rmtree(workspace, ignore_errors=True)
+            raise TaskError("ENVIRONMENT_CLONE_FAILED", str(exc), status_code=500) from exc
 
         now = utc_now()
         name = (req.name or "").strip() or None
@@ -238,7 +272,7 @@ class TaskManager:
             "proxy_url": req.proxy_url,
             "request_headers": req.request_headers,
             "workspace": str(workspace),
-            "run_name": None,
+            "run_name": reuse_environment_from["run_name"] if reuse_environment_from else None,
             "viewer_url": None,
             "viewer_token": None,
             "pid": None,
@@ -253,6 +287,26 @@ class TaskManager:
             "updated_at": now,
         }
         return self.db.insert_task(row)
+
+    @staticmethod
+    def _clone_environment(
+        parent: dict[str, Any], workspace: Path, resume_note: str | None
+    ) -> None:
+        """Copy the parent's workspace into a new task and arm it to resume."""
+        shutil.copytree(
+            Path(parent["workspace"]),
+            workspace,
+            symlinks=True,
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("logs", "results", ".web_resume_instruction"),
+        )
+        for name in ("logs", "results"):
+            (workspace / name).mkdir(exist_ok=True)
+        _reset_run_json_for_resume(workspace, str(parent["run_name"]))
+        note_path = workspace / ".web_resume_instruction"
+        note_path.unlink(missing_ok=True)
+        if resume_note and resume_note.strip():
+            note_path.write_text(resume_note.strip(), encoding="utf-8")
 
     def list_tasks(
         self,
@@ -769,7 +823,11 @@ class TaskManager:
         *,
         finding_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Resume the same run with a retest nudge (reuse agents, scripts, vulns)."""
+        """Retest in a new task that reuses the parent's environment.
+
+        The parent's workspace (agents, scripts, source, run dir) is cloned, so
+        the parent keeps its own findings and report untouched.
+        """
         task = self.get_task(task_id)
         if task["status"] not in TERMINAL:
             raise TaskError("TASK_ALREADY_RUNNING", "Only finished tasks can be retested")
@@ -824,7 +882,37 @@ class TaskManager:
         extra = (instruction or "").strip()
         if extra:
             note = f"{note}\n\n[附加说明]\n{extra}"
-        return self.resume_task(task_id, note, action="retest")
+        return self._spawn_retest_task(task, note)
+
+    def _spawn_retest_task(self, parent: dict[str, Any], note: str) -> dict[str, Any]:
+        from strix.core.paths import RUNS_DIR_NAME, RUNTIME_STATE_DIR_NAME
+
+        run_name = parent.get("run_name")
+        if not run_name:
+            raise TaskError("RESUME_UNAVAILABLE", "Task has no run_name; nothing to retest")
+        agents_path = (
+            Path(parent["workspace"]) / RUNS_DIR_NAME / run_name / RUNTIME_STATE_DIR_NAME / "agents.json"
+        )
+        if not agents_path.is_file():
+            raise TaskError(
+                "RESUME_UNAVAILABLE",
+                f"Missing agent snapshot for run {run_name}; cannot retest",
+            )
+        child = self.create_task(
+            self._request_from_task(parent),
+            parent_task_id=parent["id"],
+            action="retest",
+            reuse_environment_from=parent,
+            resume_note=note,
+        )
+        for flag in self.db.list_finding_flags(parent["id"]).values():
+            self.db.upsert_finding_flag(
+                child["id"],
+                str(flag["finding_id"]),
+                review_status=str(flag.get("review_status") or "active"),
+                request_test=False,
+            )
+        return child
 
     def update_finding_review(
         self,
@@ -878,7 +966,11 @@ class TaskManager:
         from app.services.results import rebuild_delivery_report
 
         flags = self.db.list_finding_flags(task_id)
-        rebuild_delivery_report(run_dir, exclude_ids=invalid_finding_ids(flags))
+        rebuild_delivery_report(
+            run_dir,
+            exclude_ids=invalid_finding_ids(flags),
+            retest=task.get("action") == "retest",
+        )
 
     def refresh_report(self, task_id: str) -> dict[str, Any]:
         """Ask Strix to rewrite the delivery report in-place (resume or live steer)."""
@@ -891,6 +983,36 @@ class TaskManager:
             "REFRESH_UNAVAILABLE",
             f"Cannot refresh report for task in status {task['status']}",
         )
+
+    def translate_report(self, task_id: str) -> dict[str, Any]:
+        """Hand the existing markdown report to the agent for English translation."""
+        task = self.get_task(task_id)
+        run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
+        if not run_dir or not (run_dir / "penetration_test_report.md").is_file():
+            raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
+        instruction = translate_report_instruction(task.get("run_name"))
+        if task["status"] in {"starting", "running"}:
+            return self.resume_with_message(task_id, instruction)
+        if task["status"] in TERMINAL:
+            return self.resume_task(task_id, instruction)
+        raise TaskError(
+            "TRANSLATE_UNAVAILABLE",
+            f"Cannot translate report for task in status {task['status']}",
+        )
+
+    def _translated_report(self, task: dict[str, Any]) -> tuple[Path, Path]:
+        from app.services.results import translated_report_path
+
+        workspace = Path(task["workspace"])
+        run_dir = workspace_run_dir(workspace, task.get("run_name"))
+        found = translated_report_path(run_dir, workspace) if run_dir else None
+        if run_dir is None or found is None:
+            raise TaskError(
+                "TRANSLATION_NOT_READY",
+                "English report not available; ask the agent to translate it first",
+                status_code=409,
+            )
+        return run_dir, found
 
     def resume_task(
         self,
@@ -953,24 +1075,7 @@ class TaskManager:
 
         # Clear stale terminal status before the worker boots. Otherwise the API
         # pool can reap the new process while run.json still says "completed".
-        run_json = workspace / RUNS_DIR_NAME / run_name / "run.json"
-        if run_json.is_file():
-            try:
-                record = json.loads(run_json.read_text(encoding="utf-8"))
-                if isinstance(record, dict):
-                    record["status"] = "running"
-                    record["end_time"] = None
-                    run_json.write_text(
-                        json.dumps(record, ensure_ascii=False, indent=2) + "\n",
-                        encoding="utf-8",
-                    )
-            except (OSError, json.JSONDecodeError, TypeError):
-                logger.warning(
-                    "could not reset run.json status for resume task=%s run=%s",
-                    task_id,
-                    run_name,
-                    exc_info=True,
-                )
+        _reset_run_json_for_resume(workspace, run_name)
 
         resume_action = action if action in {"resume", "retest"} else "resume"
         updated = self.db.update_task(
@@ -1376,8 +1481,10 @@ class TaskManager:
             raise TaskError("FINDING_NOT_FOUND", f"Finding {finding_id} not found", status_code=404)
         return match
 
-    def get_report(self, task_id: str) -> str:
+    def get_report(self, task_id: str, lang: str | None = None) -> str:
         task = self.get_task(task_id)
+        if str(lang or "").lower().startswith("en"):
+            return self._translated_report(task)[1].read_text(encoding="utf-8")
         run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
         if not run_dir:
             raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
@@ -1386,24 +1493,45 @@ class TaskManager:
         exclude = invalid_finding_ids(self.db.list_finding_flags(task_id))
         # UI only needs markdown; skip zip rebuild on every tab open.
         rebuilt = rebuild_delivery_report(
-            run_dir, exclude_ids=exclude, build_zip=False
+            run_dir,
+            exclude_ids=exclude,
+            build_zip=False,
+            retest=task.get("action") == "retest",
+            lang=lang,
         )
-        content = rebuilt if rebuilt is not None else read_report_markdown(run_dir)
+        content = rebuilt if rebuilt is not None else read_report_markdown(run_dir, lang)
         if not content and task["status"] in ACTIVE:
             raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
         return content or ""
 
-    def get_report_package(self, task_id: str) -> Path:
+    def get_report_package(self, task_id: str, lang: str | None = None) -> Path:
         """Path to penetration_test_report.zip (markdown + images)."""
-        from app.services.results import rebuild_delivery_report, resolve_report_package
+        from app.services.results import (
+            build_translated_report_zip,
+            rebuild_delivery_report,
+            resolve_report_package,
+        )
 
         task = self.get_task(task_id)
+        if str(lang or "").lower().startswith("en"):
+            run_dir, en_path = self._translated_report(task)
+            package = build_translated_report_zip(
+                run_dir, en_path, f"{report_download_stem(task)}.en.md"
+            )
+            if package is None:
+                raise TaskError("TRANSLATION_NOT_READY", "English report package failed", status_code=409)
+            return package
         run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
         if not run_dir:
             raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
         # Match the on-screen report (invalid findings filtered) before packaging.
         exclude = invalid_finding_ids(self.db.list_finding_flags(task_id))
-        rebuild_delivery_report(run_dir, exclude_ids=exclude, build_zip=False)
+        rebuild_delivery_report(
+            run_dir,
+            exclude_ids=exclude,
+            build_zip=False,
+            retest=task.get("action") == "retest",
+        )
         package = resolve_report_package(
             run_dir, md_arcname=f"{report_download_stem(task)}.md"
         )

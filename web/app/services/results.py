@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from app.services.findings import normalize_findings, tally_finding_counts
+from app.services.retest_report import RETEST_REPORT_MARKER, render_retest_report
 
 PRIOR_FINDINGS_DIRNAME = "prior_findings"
 _RETEST_STRIP_KEYS = ("retest_status", "fix_verification")
@@ -237,8 +238,33 @@ def apply_prior_findings(workspace: Path, run_dir: Path) -> bool:
     return True
 
 
-def read_report_markdown(run_dir: Path) -> str:
-    for name in ("penetration_test_report.md", "report.md"):
+REPORT_LANGS = ("zh", "en")
+_REPORT_MD = {"zh": "penetration_test_report.md", "en": "penetration_test_report.en.md"}
+
+
+def normalize_report_lang(lang: str | None) -> str:
+    return "en" if str(lang or "").lower().startswith("en") else "zh"
+
+
+def report_md_name(lang: str | None) -> str:
+    return _REPORT_MD[normalize_report_lang(lang)]
+
+
+def translated_report_path(run_dir: Path, workspace: Path | None = None) -> Path | None:
+    """The agent-translated report, if present (run dir first, then workspace root)."""
+    for base in (run_dir, workspace):
+        if base is not None and (base / _REPORT_MD["en"]).is_file():
+            return base / _REPORT_MD["en"]
+    return None
+
+
+def read_report_markdown(run_dir: Path, lang: str | None = None) -> str:
+    names = (
+        (report_md_name(lang),)
+        if normalize_report_lang(lang) == "en"
+        else ("penetration_test_report.md", "report.md")
+    )
+    for name in names:
         path = run_dir / name
         if path.is_file():
             try:
@@ -251,8 +277,9 @@ def read_report_markdown(run_dir: Path) -> str:
 _DELIVERY_EXCLUDE_STAMP = ".web_delivery_exclude"
 
 
-def _exclude_stamp(exclude_ids: set[str] | None) -> str:
-    return ",".join(sorted(exclude_ids or ()))
+def _exclude_stamp(exclude_ids: set[str] | None, *, retest: bool = False) -> str:
+    stamp = ",".join(sorted(exclude_ids or ()))
+    return f"retest|{stamp}" if retest else stamp
 
 
 def vulnerabilities_mtime(run_dir: Path) -> float:
@@ -269,6 +296,7 @@ def delivery_report_is_fresh(
     run_dir: Path,
     *,
     exclude_ids: set[str] | None = None,
+    retest: bool = False,
 ) -> bool:
     """True when on-disk markdown already matches vulns + console excludes."""
     md_path = run_dir / "penetration_test_report.md"
@@ -279,8 +307,15 @@ def delivery_report_is_fresh(
         stamped = stamp_path.read_text(encoding="utf-8") if stamp_path.is_file() else None
     except OSError:
         stamped = None
-    if stamped != _exclude_stamp(exclude_ids):
+    if stamped != _exclude_stamp(exclude_ids, retest=retest):
         return False
+    if retest:
+        # finish_scan rewrites the markdown in Strix's layout after our stamp.
+        try:
+            if RETEST_REPORT_MARKER not in md_path.read_text(encoding="utf-8"):
+                return False
+        except OSError:
+            return False
     return md_path.stat().st_mtime >= vulnerabilities_mtime(run_dir)
 
 
@@ -290,6 +325,8 @@ def rebuild_delivery_report(
     exclude_ids: set[str] | None = None,
     build_zip: bool = False,
     force: bool = False,
+    retest: bool = False,
+    lang: str | None = None,
 ) -> str | None:
     """Re-assemble the customer markdown from run.json + vulnerabilities.json.
 
@@ -297,9 +334,13 @@ def rebuild_delivery_report(
     UI ``GET /report`` must not rebuild the download zip on every open — pass
     ``build_zip=False`` (default). Download paths can force a zip via
     ``resolve_report_package`` or ``build_zip=True``.
+
+    ``retest=True`` replaces Strix's per-finding layout with the retest report
+    (fixed findings are a title only). ``lang`` only picks which file is
+    returned; the English file is written by an agent translation run.
     """
-    if not force and delivery_report_is_fresh(run_dir, exclude_ids=exclude_ids):
-        return read_report_markdown(run_dir)
+    if not force and delivery_report_is_fresh(run_dir, exclude_ids=exclude_ids, retest=retest):
+        return read_report_markdown(run_dir, lang)
 
     from strix.report.writer import read_run_record
     from strix.report.zh_report import write_zh_delivery_bundle
@@ -317,22 +358,35 @@ def rebuild_delivery_report(
     scan_results = record.get("scan_results") if isinstance(record, dict) else None
     if not isinstance(scan_results, dict):
         scan_results = None
+    run_record = record if isinstance(record, dict) else {}
+    md_path = run_dir / _REPORT_MD["zh"]
     try:
         write_zh_delivery_bundle(
             run_dir,
-            run_record=record if isinstance(record, dict) else {},
+            run_record=run_record,
             vulnerability_reports=vulns,
             scan_results=scan_results,
-            build_zip=build_zip,
+            build_zip=build_zip and not retest,
         )
+        if retest:
+            md_path.write_text(
+                render_retest_report(
+                    run_record=run_record,
+                    vulnerability_reports=vulns,
+                    scan_results=scan_results,
+                ),
+                encoding="utf-8",
+            )
+            if build_zip:
+                _build_report_zip(run_dir, md_path)
     except Exception:
         return None
     stamp_path = run_dir / _DELIVERY_EXCLUDE_STAMP
     try:
-        stamp_path.write_text(_exclude_stamp(exclude_ids), encoding="utf-8")
+        stamp_path.write_text(_exclude_stamp(exclude_ids, retest=retest), encoding="utf-8")
     except OSError:
         pass
-    return read_report_markdown(run_dir)
+    return read_report_markdown(run_dir, lang)
 
 
 def _build_report_zip(
@@ -346,6 +400,21 @@ def _build_report_zip(
 
     def _write(zf: zipfile.ZipFile) -> None:
         zf.write(md_path, arcname=arcname)
+        images_dir = run_dir / "images"
+        if images_dir.is_dir():
+            for image in sorted(images_dir.iterdir()):
+                if image.is_file():
+                    zf.write(image, arcname=f"images/{image.name}")
+
+    return _atomic_zip_write(zip_path, _write)
+
+
+def build_translated_report_zip(run_dir: Path, en_path: Path, arcname: str) -> Path | None:
+    """Zip the translated markdown + screenshots (separate file from the zh zip)."""
+    zip_path = run_dir / "penetration_test_report.en.zip"
+
+    def _write(zf: zipfile.ZipFile) -> None:
+        zf.write(en_path, arcname=Path(arcname).name)
         images_dir = run_dir / "images"
         if images_dir.is_dir():
             for image in sorted(images_dir.iterdir()):

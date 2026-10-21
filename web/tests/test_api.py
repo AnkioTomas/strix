@@ -975,7 +975,7 @@ def test_retest_queues_behind_existing_waiting_tasks(client: TestClient):
 
     second = manager.db.claim_next_queued()
     assert second is not None
-    assert second["id"] == old["id"]
+    assert second["id"] == retest.json()["id"]
 
 
 def test_retest_embeds_mandatory_instruction(client: TestClient):
@@ -1018,11 +1018,17 @@ def test_retest_embeds_mandatory_instruction(client: TestClient):
     retried = client.post(f"/api/v1/tasks/{created['id']}/retest")
     assert retried.status_code == 202, retried.text
     body = retried.json()
-    assert body["id"] == created["id"]
+    assert body["id"] != created["id"]
+    assert body["parent_task_id"] == created["id"]
     assert body["action"] == "retest"
     assert body["status"] == "queued"
     assert body["run_name"] == run_name
-    note = workspace / ".web_resume_instruction"
+    assert manager.get_task(created["id"])["status"] == "completed"
+    child_ws = Path(manager.get_task(body["id"])["workspace"])
+    assert child_ws != workspace
+    assert (child_ws / "strix_runs" / run_name / ".state" / "agents.json").is_file()
+    assert not (workspace / ".web_resume_instruction").exists()
+    note = child_ws / ".web_resume_instruction"
     assert note.is_file()
     note_text = note.read_text(encoding="utf-8")
     assert RETEST_INSTRUCTION.strip() in note_text
@@ -1042,8 +1048,10 @@ def test_retest_embeds_mandatory_instruction(client: TestClient):
         json={"instruction": "新密码是 Secret123!\nCookie: session=abc"},
     )
     assert with_creds.status_code == 202, with_creds.text
-    assert with_creds.json()["id"] == created["id"]
-    note2 = (workspace / ".web_resume_instruction").read_text(encoding="utf-8")
+    assert with_creds.json()["id"] not in {created["id"], body["id"]}
+    note2 = (Path(manager.get_task(with_creds.json()["id"])["workspace"]) / ".web_resume_instruction").read_text(
+        encoding="utf-8"
+    )
     assert "新密码是 Secret123!" in note2
     assert "[附加说明]" in note2
     assert RETEST_INSTRUCTION.strip() in note2
@@ -1146,16 +1154,14 @@ def test_mark_finding_invalid_hides_from_report_and_retest(client: TestClient):
     retest = client.post(f"/api/v1/tasks/{task_id}/retest")
     assert retest.status_code == 202, retest.text
     body = retest.json()
-    assert body["id"] == task_id
+    assert body["id"] != task_id
     assert body["action"] == "retest"
-    note = (
-        Path(created["workspace"]) / ".web_resume_instruction"
-    ).read_text(encoding="utf-8")
+    note = (Path(client.app.state.manager.get_task(body["id"])["workspace"]) / ".web_resume_instruction").read_text(encoding="utf-8")
     assert "Drop Me" in note
     assert "跳过" in note or "无效" in note
     assert "Keep Me" not in note or "retest_status" in note
-    # Same run — no prior_findings child seed.
-    assert not (Path(created["workspace"]) / "prior_findings").exists()
+    child_flags = client.app.state.manager.db.list_finding_flags(body["id"])
+    assert child_flags["v-drop"]["review_status"] == "invalid"
 
 
 def test_request_finding_test_creates_focused_retest(client: TestClient):
@@ -1166,11 +1172,11 @@ def test_request_finding_test_creates_focused_retest(client: TestClient):
     assert res.status_code == 202, res.text
     body = res.json()
     assert body["finding"]["id"] == "v-keep"
-    assert body["task"]["id"] == task_id
+    assert body["task"]["id"] != task_id
     assert body["task"]["action"] == "retest"
-    note = (
-        Path(created["workspace"]) / ".web_resume_instruction"
-    ).read_text(encoding="utf-8")
+    note = (Path(client.app.state.manager.get_task(body["task"]["id"])["workspace"]) / ".web_resume_instruction").read_text(
+        encoding="utf-8"
+    )
     assert "指定漏洞复测" in note
     assert "Keep Me" in note
     assert "v-keep" in note
@@ -1191,10 +1197,10 @@ def test_retest_respects_request_test_queue(client: TestClient):
 
     retest = client.post(f"/api/v1/tasks/{task_id}/retest")
     assert retest.status_code == 202, retest.text
-    assert retest.json()["id"] == task_id
-    note = (
-        Path(created["workspace"]) / ".web_resume_instruction"
-    ).read_text(encoding="utf-8")
+    assert retest.json()["id"] != task_id
+    note = (Path(client.app.state.manager.get_task(retest.json()["id"])["workspace"]) / ".web_resume_instruction").read_text(
+        encoding="utf-8"
+    )
     assert "指定漏洞复测" in note
     assert "Keep Me" in note
     assert "Drop Me" not in note
@@ -1605,3 +1611,38 @@ def test_retry_with_earliest_start(client: TestClient):
     assert body["status"] == "queued"
     assert body["earliest_start"] == "2099-06-01T04:30:00Z"
     assert manager.db.claim_next_queued() is None
+
+
+def test_retest_task_report_lists_fixed_by_title_only(client: TestClient):
+    created, run_dir = _seed_completed_task_with_vulns(client)
+    manager = client.app.state.manager
+    vulns = json.loads((run_dir / "vulnerabilities.json").read_text(encoding="utf-8"))
+    for item in vulns:
+        if item["id"] == "v-drop":
+            item["retest_status"] = "fixed"
+            item["fix_verification"] = "should not appear"
+        else:
+            item["fix_verification"] = "重放请求，仍可复现"
+    (run_dir / "vulnerabilities.json").write_text(json.dumps(vulns), encoding="utf-8")
+    manager.db.update_task(created["id"], action="retest")
+
+    report = client.get(f"/api/v1/tasks/{created['id']}/report").json()["content"]
+    assert "复测报告" in report
+    assert "Drop Me（已修复）" in report
+    assert "should not appear" not in report
+    assert "noise" not in report
+    assert "Keep Me（未修复）" in report
+    assert "### 复测步骤" in report
+    assert "重放请求，仍可复现" in report
+    assert "example.com:443" in report
+
+    # English is only served once an agent has translated it.
+    assert client.get(f"/api/v1/tasks/{created['id']}/report?lang=en").status_code == 409
+    translated = client.post(f"/api/v1/tasks/{created['id']}/translate-report")
+    assert translated.status_code == 202, translated.text
+    workspace = Path(manager.get_task(created["id"])["workspace"])
+    (workspace / "penetration_test_report.en.md").write_text("# Retest Report\n", encoding="utf-8")
+    english = client.get(f"/api/v1/tasks/{created['id']}/report?lang=en").json()["content"]
+    assert "Retest Report" in english
+    pkg = client.get(f"/api/v1/tasks/{created['id']}/report?download=1&lang=en")
+    assert pkg.status_code == 200 and pkg.content[:2] == b"PK"

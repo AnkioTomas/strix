@@ -460,6 +460,15 @@ async def refresh_report(task_id: str, manager: TaskManager = Depends(get_manage
     return _summarize(task, manager)
 
 
+@router.post("/tasks/{task_id}/translate-report", status_code=202, response_model=TaskSummary)
+async def translate_report(task_id: str, manager: TaskManager = Depends(get_manager)):
+    try:
+        task = await asyncio.to_thread(manager.translate_report, task_id)
+    except TaskError as exc:
+        return _error(exc)
+    return _summarize(task, manager)
+
+
 @router.post("/tasks/{task_id}/resume", status_code=202, response_model=TaskSummary)
 async def resume_task(
     task_id: str,
@@ -513,7 +522,8 @@ async def get_finding(
             "description": (
                 "JSON ``{task_id, format, content}`` by default. "
                 "``download=true`` returns a zip attachment "
-                "(markdown + images), not JSON."
+                "(markdown + images), not JSON. "
+                "``lang=en`` returns the agent-translated English report (409 until translated)."
             ),
         },
         404: {"description": "Report package not found"},
@@ -523,21 +533,22 @@ async def get_finding(
 async def task_report(
     task_id: str,
     download: bool = False,
+    lang: str = "zh",
     manager: TaskManager = Depends(get_manager),
 ):
     if download:
         try:
             task = await asyncio.to_thread(manager.get_task, task_id)
-            package = await asyncio.to_thread(manager.get_report_package, task_id)
+            package = await asyncio.to_thread(manager.get_report_package, task_id, lang)
         except TaskError as exc:
             return _error(exc)
         return FileResponse(
             package,
             media_type="application/zip",
-            filename=f"{report_download_stem(task)}.zip",
+            filename=f"{report_download_stem(task)}{'.en' if lang.lower().startswith('en') else ''}.zip",
         )
     try:
-        content = await asyncio.to_thread(manager.get_report, task_id)
+        content = await asyncio.to_thread(manager.get_report, task_id, lang)
     except TaskError as exc:
         return _error(exc)
     return ReportResponse(task_id=task_id, format="markdown", content=content)

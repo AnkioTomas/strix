@@ -15,6 +15,7 @@
   let selectedFindingId = null;
   /** @type {{ taskId: string, content: string } | null} */
   let reportCache = null;
+  let reportLang = "zh";
   let reportRenderToken = 0;
   let findingsTableBound = false;
   let findingsSortBound = false;
@@ -346,6 +347,7 @@
     $("retestBtn").disabled = !terminal;
     $("resumeBtn").disabled = !terminal;
     $("refreshReportBtn").disabled = !(terminal || active);
+    $("translateReportBtn").disabled = !(terminal || active);
     $("cancelBtn").disabled = !active;
     $("completeBtn").disabled = !(t && t.status !== "completed");
     $("holdBtn").disabled = !queued;
@@ -870,6 +872,7 @@
         !force &&
         reportCache &&
         reportCache.taskId === taskId &&
+        reportCache.lang === reportLang &&
         host &&
         !host.querySelector(".report-loading") &&
         host.childNodes.length
@@ -883,9 +886,10 @@
         host.innerHTML = `<p class="muted report-loading">正在加载报告…</p>`;
       }
       clearReportToc();
-      const data = await api.api(`/api/v1/tasks/${taskId}/report`);
+      const data = await api.api(`/api/v1/tasks/${taskId}/report?lang=${reportLang}`);
       if (token !== reportRenderToken || selected !== taskId) return;
-      const content = data.content || "> [!NOTE]\n> 无报告\n";
+      const content =
+        data.content || (reportLang === "en" ? "> [!NOTE]\n> No report\n" : "> [!NOTE]\n> 无报告\n");
       if (content.length > 80_000 && host) {
         reportRenderer = null;
         host.innerHTML = `<p class="muted report-loading">报告较大（${Math.round(
@@ -897,7 +901,7 @@
         if (token !== reportRenderToken || selected !== taskId) return;
       }
       renderWithPenna(ensureReportRenderer(), content, taskId);
-      reportCache = { taskId, content };
+      reportCache = { taskId, content, lang: reportLang };
       scheduleReportToc();
     } catch (e) {
       if (token !== reportRenderToken || selected !== taskId) return;
@@ -1432,7 +1436,7 @@
     if (!selected) return;
     const note = await openInstructionModal({
       title: "复测",
-      sub: "将在同一 run 上 resume 复测：复用已有 Agent 环境、脚本与漏洞报告。凭证过期、新账号、环境变更等信息请写在下面。",
+      sub: "将新建一个复测任务，复用原任务的环境（Agent 状态、脚本、源码与附件），原任务及其报告保持不变。凭证过期、新账号、环境变更等信息请写在下面。",
       label: "复测说明（凭证 / 环境）",
       placeholder:
         "例如：\n登录账号 admin / 新密码 xxx\nCookie: session=...\n目标仍是 https://example.com，忽略证书错误",
@@ -1641,11 +1645,29 @@
     }
   }
 
+  $("reportLang").onchange = (e) => {
+    reportLang = e.target.value === "en" ? "en" : "zh";
+    void loadReport({ force: true });
+  };
+  $("translateReportBtn").onclick = async () => {
+    if (!selected) return;
+    if (!confirm("将把现有报告交给 Agent 翻译成英文（resume 当前任务，不扩测）。完成后在报告页切换到 English 即可查看并下载。继续？")) return;
+    try {
+      const updated = await api.api(`/api/v1/tasks/${selected}/translate-report`, {
+        method: "POST",
+      });
+      await refresh();
+      selectTask(updated.id);
+      setTab("viewer");
+    } catch (e) {
+      alert(e.message);
+    }
+  };
   $("downloadReport").onclick = async () => {
     if (!selected) return;
     try {
       await downloadWithRetry(
-        `/api/v1/tasks/${encodeURIComponent(selected)}/report?download=1`,
+        `/api/v1/tasks/${encodeURIComponent(selected)}/report?download=1&lang=${reportLang}`,
         reportDownloadFallbackName(currentTask())
       );
     } catch (e) {

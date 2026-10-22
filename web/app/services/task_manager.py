@@ -265,6 +265,7 @@ class TaskManager:
             "status": "held" if (req.held or hold_for_unreachable) else "queued",
             "name": name,
             "notes": notes,
+            "tags": ",".join(req.tags or []) or None,
             "target": target,
             **source_fields,
             "instruction": req.instruction,
@@ -539,6 +540,8 @@ class TaskManager:
             patch["name"] = (fields.get("name") or "").strip() or None
         if "notes" in fields:
             patch["notes"] = (fields.get("notes") or "").strip() or None
+        if "tags" in fields:
+            patch["tags"] = ",".join(fields.get("tags") or []) or None
         if "instruction" in fields:
             text = fields.get("instruction")
             patch["instruction"] = (text or "").strip() or None
@@ -1427,6 +1430,7 @@ class TaskManager:
                     target=row.target,
                     name=row.name or None,
                     notes=notes or None,
+                    tags=[row.bu] if row.bu else None,
                     scan_mode=scan_mode or self.settings.default_scan_mode,
                 )
                 task = self.create_task(req)

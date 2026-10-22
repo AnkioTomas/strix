@@ -1701,6 +1701,7 @@ def test_batch_import_creates_tasks_and_mails_report(
     assert task["mail_to"] == "alice@corp.test"
     assert task["mail_status"] == "pending"
     assert "BU1" in task["notes"]
+    assert task["tags"] == ["BU1"]
 
     manager = client.app.state.manager
     package = tmp_path / "report.zip"
@@ -1729,3 +1730,100 @@ def test_batch_import_rejects_non_excel(client: TestClient):
         "/api/v1/tasks/batch-import", files={"file": ("a.xlsx", b"nope", "application/octet-stream")}
     )
     assert res.status_code == 400
+
+
+def test_asset_pentests_export(client: TestClient):
+    res = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com:8443/app",
+            "scan_mode": "quick",
+            "tags": ["核心系统", "BU1,核心系统"],
+        },
+    )
+    assert res.status_code == 202, res.text
+    task = res.json()
+    assert task["tags"] == ["核心系统", "BU1"]
+
+    manager = client.app.state.manager
+    run_dir = Path(manager.get_task(task["id"])["workspace"]) / "strix_runs" / "r1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "start_time": "2026-10-20T01:00:00Z",
+                "end_time": "2026-10-20T01:10:00Z",
+                "llm_usage": {"requests": 3, "input_tokens": 100, "output_tokens": 50, "total_tokens": 150, "cost": 0.5},
+            }
+        ),
+        encoding="utf-8",
+    )
+    manager.db.update_task(task["id"], status="completed", run_name="r1")
+    manager.db.replace_findings(
+        task["id"],
+        [
+            {"id": "f1", "title": "SQLi", "severity": "high", "asset": "https://example.com:8443/login", "raw": {"retest_status": "fixed"}},
+            {"id": "f2", "title": "Leak", "severity": "low", "asset": "10.0.0.5:8080"},
+        ],
+    )
+
+    res = client.get("/api/v1/assets/pentests")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["total"] == 2
+    by_asset = {item["asset"]: item for item in body["items"]}
+    web = by_asset["example.com:8443"]
+    assert (web["host"], web["port"], web["asset_type"]) == ("example.com", 8443, "domain")
+    assert {"渗透测试", "quick", "高危", "核心系统", "BU1"} <= set(web["tags"])
+    assert web["findings"][0]["fix_status"] == "fixed"
+    assert by_asset["10.0.0.5:8080"]["findings"][0]["fix_status"] == "open"
+    assert web["pentest"]["duration_seconds"] == 600
+    assert web["tokens"]["total"] == 150 and web["tokens"]["cost"] == 0.5
+    ip = by_asset["10.0.0.5:8080"]
+    assert ip["asset_type"] == "ip" and "低危" in ip["tags"]
+
+    assert client.get("/api/v1/assets/pentests", params={"tag": "高危"}).json()["total"] == 1
+    assert client.get("/api/v1/assets/pentests", params={"q": "10.0.0"}).json()["total"] == 1
+    assert client.get("/api/v1/assets/pentests", params={"since": "2999-01-01T00:00:00Z"}).json()["total"] == 0
+    assert client.get("/api/v1/assets/pentests", params={"status": "bogus"}).status_code == 400
+
+    patched = client.patch(f"/api/v1/tasks/{task['id']}", json={"tags": ["新标签"]})
+    assert patched.json()["tags"] == ["新标签"]
+
+
+def test_asset_pentests_merge_retest_chain(client: TestClient):
+    manager = client.app.state.manager
+    base = {"type": "pentest", "target": "https://example.com:8443", "scan_mode": "quick"}
+    parent = client.post("/api/v1/tasks", json={**base, "tags": ["BU1"]}).json()
+    child = client.post(
+        "/api/v1/tasks", json={**base, "parent_task_id": parent["id"], "action": "retest"}
+    ).json()
+    asset = "https://example.com:8443/x"
+    manager.db.update_task(parent["id"], status="completed")
+    manager.db.update_task(child["id"], status="completed")
+    manager.db.replace_findings(
+        parent["id"],
+        [
+            {"id": "f1", "title": "A", "severity": "high", "asset": asset},
+            {"id": "f2", "title": "B", "severity": "low", "asset": asset},
+        ],
+    )
+    manager.db.replace_findings(
+        child["id"],
+        [
+            {"id": "f1", "title": "A", "severity": "high", "asset": asset, "raw": {"retest_status": "fixed"}},
+            {"id": "f2", "title": "B", "severity": "low", "asset": asset},
+        ],
+    )
+
+    items = client.get("/api/v1/assets/pentests").json()["items"]
+    assert len(items) == 1
+    item = items[0]
+    assert item["task_id"] == child["id"] and item["origin_task_id"] == parent["id"]
+    assert item["task_ids"] == [parent["id"], child["id"]]
+    assert {f["id"]: f["fix_status"] for f in item["findings"]} == {"f1": "fixed", "f2": "open"}
+    assert {"复测", "BU1"} <= set(item["tags"])
+
+    raw = client.get("/api/v1/assets/pentests", params={"collapse": "false"}).json()
+    assert raw["total"] == 2

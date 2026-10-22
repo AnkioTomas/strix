@@ -110,7 +110,7 @@ PYTHONPATH=. python -m app
 | POST | `/api/v1/tasks/import` | 导入旧版 CLI `strix_runs/`（可 `dry_run`） |
 | GET | `/api/v1/tasks` | 列表 |
 | GET | `/api/v1/tasks/{id}` | 详情（含 `viewer_proxy_url`） |
-| PATCH | `/api/v1/tasks/{id}` | 重命名 / 更新备注 |
+| PATCH | `/api/v1/tasks/{id}` | 重命名 / 更新备注 / 更新 `tags`（创建时也可传 `tags`；Excel 批量导入自动把 BU 作为 tag） |
 | POST | `/api/v1/tasks/{id}/hold` | 挂起（queued → held，不进执行队列） |
 | POST | `/api/v1/tasks/{id}/release` | 放行（held → queued） |
 | DELETE | `/api/v1/tasks/{id}` | 删除已结束或挂起任务（DB + workspace） |
@@ -135,6 +135,7 @@ PYTHONPATH=. python -m app
 | GET | `/api/v1/tasks/{id}/logs?download=1` | 打包下载执行日志 ZIP |
 | GET | `/api/v1/tasks/{id}/logs/{path}` | 下载单个日志文件 |
 | * | `/api/v1/tasks/{id}/viewer/...` | 同源反代 Live Viewer |
+| GET | `/api/v1/assets/pentests` | 资产系统对接：每个「资产（IP/域名+端口）× 任务」一条，含 `tags`、`pentest`（开始/结束时间、耗时）、`tokens`（input/output/cached/total/cost）、`finding_counts`；筛选 `status`（默认 completed）、`since`（按任务更新时间增量拉取）、`tag`、`q`、`limit`/`offset`。tag = 自动（渗透测试、扫描模式、复测、最高严重度/无漏洞）+ 手动 `tags`。`findings[].fix_status` = open/fixed/not_fixed/partial/regressed。新旧两种复测都能识别：旧的原地续跑直接写在原任务；新的复测子任务（`action=retest`）默认与原任务按资产合并为一条（`collapse=false` 看原始记录；返回 `origin_task_id`/`task_ids`），修复状态逐漏洞 id 累积，token/开始时间取最新任务（复测会克隆 run.json，数值已是累计）。token 为任务级，同一任务多个资产时重复出现 |
 | GET | `/health` | 健康 + 准入状态 |
 
 创建任务示例：

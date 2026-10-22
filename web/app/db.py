@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     status TEXT NOT NULL,
     name TEXT,
     notes TEXT,
+    tags TEXT,
     target TEXT,
     source_type TEXT,
     source_url TEXT,
@@ -195,6 +196,8 @@ class Database:
             conn.execute("ALTER TABLE tasks ADD COLUMN name TEXT")
         if "notes" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN notes TEXT")
+        if "tags" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN tags TEXT")
         if "proxy_url" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN proxy_url TEXT")
         if "request_headers" not in cols:

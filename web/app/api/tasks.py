@@ -139,6 +139,7 @@ async def _parse_create_payload(
             "instruction": _form_value(form, "instruction"),
             "name": _form_value(form, "name"),
             "notes": _form_value(form, "notes"),
+            "tags": _form_value(form, "tags"),
             "held": str(form.get("held") or "").lower() in {"1", "true", "yes", "on"},
             "earliest_start": _form_value(form, "earliest_start"),
             "use_proxy": str(form.get("use_proxy") or "").lower()

@@ -70,6 +70,7 @@ class CreateTaskRequest(BaseModel):
     instruction: str | None = None
     name: str | None = Field(default=None, max_length=200)
     notes: str | None = Field(default=None, max_length=4000)
+    tags: list[str] | None = None
     held: bool = False
     earliest_start: str | None = None
     scan_mode: ScanMode = "deep"
@@ -81,6 +82,15 @@ class CreateTaskRequest(BaseModel):
     use_proxy: bool = False
     request_headers: str | None = Field(default=None, max_length=8000)
     use_headers: bool = False
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _validate_tags(cls, value: object) -> list[str] | None:
+        if value is None:
+            return None
+        from app.services.assets import validate_tags
+
+        return validate_tags(value)
 
     @field_validator("earliest_start", mode="before")
     @classmethod
@@ -131,6 +141,7 @@ class UpdateTaskRequest(BaseModel):
 
     name: str | None = Field(default=None, max_length=200)
     notes: str | None = Field(default=None, max_length=4000)
+    tags: list[str] | None = None
     instruction: str | None = None
     scan_mode: ScanMode | None = None
     max_budget: float | None = Field(default=None, gt=0)
@@ -141,6 +152,15 @@ class UpdateTaskRequest(BaseModel):
     use_proxy: bool | None = None
     request_headers: str | None = Field(default=None, max_length=8000)
     use_headers: bool | None = None
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _validate_tags(cls, value: object) -> list[str] | None:
+        if value is None:
+            return None
+        from app.services.assets import validate_tags
+
+        return validate_tags(value)
 
     @field_validator("earliest_start", mode="before")
     @classmethod
@@ -264,6 +284,7 @@ class TaskSummary(BaseModel):
     status: TaskStatus
     name: str | None = None
     notes: str | None = None
+    tags: list[str] = Field(default_factory=list)
     target: str | None = None
     source_type: str | None = None
     source_url: str | None = None
@@ -295,6 +316,13 @@ class TaskSummary(BaseModel):
     mail_to: str | None = None
     mail_status: str | None = None
     mail_error: str | None = None
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _split_tags(cls, value: object) -> list[str]:
+        from app.services.assets import parse_tags
+
+        return parse_tags(value)
 
 
 class TaskListResponse(BaseModel):

@@ -840,6 +840,7 @@ class TaskManager:
         flags = self.db.list_finding_flags(task_id)
         skipped_invalid = invalid_finding_ids(flags)
 
+        scope_ids: list[str] | None = None
         selected_ids = [str(x) for x in (finding_ids or []) if str(x).strip()]
         if not selected_ids:
             selected_ids = [
@@ -862,6 +863,7 @@ class TaskManager:
                     "No eligible findings to retest (missing or marked invalid)",
                 )
             note = focused_retest_instruction(targets)
+            scope_ids = [str(item.get("id")) for item in targets]
             self.db.clear_finding_request_test(
                 task_id, [str(item.get("id")) for item in targets]
             )
@@ -886,9 +888,11 @@ class TaskManager:
         extra = (instruction or "").strip()
         if extra:
             note = f"{note}\n\n[附加说明]\n{extra}"
-        return self._spawn_retest_task(task, note)
+        return self._spawn_retest_task(task, note, scope_ids=scope_ids)
 
-    def _spawn_retest_task(self, parent: dict[str, Any], note: str) -> dict[str, Any]:
+    def _spawn_retest_task(
+        self, parent: dict[str, Any], note: str, *, scope_ids: list[str] | None = None
+    ) -> dict[str, Any]:
         from strix.core.paths import RUNS_DIR_NAME, RUNTIME_STATE_DIR_NAME
 
         run_name = parent.get("run_name")
@@ -913,6 +917,9 @@ class TaskManager:
             reuse_environment_from=parent,
             resume_note=note,
         )
+        from app.services.results import write_retest_scope
+
+        write_retest_scope(Path(child["workspace"]), scope_ids)
         for flag in self.db.list_finding_flags(parent["id"]).values():
             self.db.upsert_finding_flag(
                 child["id"],

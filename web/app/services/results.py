@@ -277,9 +277,31 @@ def read_report_markdown(run_dir: Path, lang: str | None = None) -> str:
 _DELIVERY_EXCLUDE_STAMP = ".web_delivery_exclude"
 
 
+RETEST_SCOPE_FILE = ".web_retest_scope.json"
+
+
+def write_retest_scope(workspace: Path, finding_ids: list[str] | None) -> None:
+    """Record which findings a retest covers; ``None`` means every finding."""
+    path = Path(workspace) / RETEST_SCOPE_FILE
+    if finding_ids:
+        path.write_text(json.dumps(sorted(set(finding_ids))), encoding="utf-8")
+    else:
+        path.unlink(missing_ok=True)
+
+
+def read_retest_scope(run_dir: Path) -> set[str] | None:
+    path = run_dir.parent.parent / RETEST_SCOPE_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return {str(x) for x in data} if isinstance(data, list) and data else None
+
+
 def _exclude_stamp(exclude_ids: set[str] | None, *, retest: bool = False) -> str:
     stamp = ",".join(sorted(exclude_ids or ()))
-    return f"retest|{stamp}" if retest else stamp
+    # "retest2": reports built before untested findings were listed must rebuild.
+    return f"retest2|{stamp}" if retest else stamp
 
 
 def vulnerabilities_mtime(run_dir: Path) -> float:
@@ -374,6 +396,7 @@ def rebuild_delivery_report(
                     run_record=run_record,
                     vulnerability_reports=vulns,
                     scan_results=scan_results,
+                    scope_ids=read_retest_scope(run_dir),
                 ),
                 encoding="utf-8",
             )

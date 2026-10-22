@@ -277,6 +277,10 @@ button, input, select, textarea {
   color: var(--muted, #667);
 }
 
+.filter-field + .filter-field {
+  margin-top: 0.5rem;
+}
+
 .filter-field select {
   width: 100%;
   font: inherit;

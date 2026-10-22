@@ -28,8 +28,9 @@ def translate_report_instruction(run_name: str | None) -> str:
 RETEST_INSTRUCTION = f"""\
 [复测 — 强制]
 在本 run 上复测已有漏洞（list_reports / get_report 用原 id）。禁止另开新报告、禁止只写口头结论。
-对每条：验证是否仍可利用；update_vulnerability_report 写 retest_status
+对每一条（逐条，不得遗漏、不得只挑几条）：验证是否仍可利用；update_vulnerability_report 写 retest_status
 （fixed / not_fixed / partial / regressed）；fixed 必须有 screenshots 或硬证据。
+全部写完后用 list_reports 逐条核对，凡缺 retest_status 的继续复测补齐，再 finish_scan。
 fix_verification 写本次复测的操作步骤与结果（按复测写，不照抄原复现步骤）。
 最后 finish_scan；executive_summary 概括复测结论。
 {_REPORT_STYLE}

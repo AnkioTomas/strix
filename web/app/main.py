@@ -58,6 +58,15 @@ async def lifespan(app: FastAPI):
     )
 
 
+class RevalidatedStatic(StaticFiles):
+    """Always revalidate (ETag) so a deploy is picked up without a hard refresh."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 app = FastAPI(
     title="Local Strix Security API",
     version="0.1.0",
@@ -70,12 +79,12 @@ app.include_router(session_router)
 app.include_router(tasks_router)
 app.include_router(assets_router)
 app.include_router(viewer_proxy_router)
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/static", RevalidatedStatic(directory=STATIC_DIR), name="static")
 
 
 @app.get("/")
 async def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/favicon.ico", include_in_schema=False)

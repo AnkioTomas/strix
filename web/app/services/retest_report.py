@@ -148,10 +148,19 @@ def render_retest_report(
     vulnerability_reports: list[dict[str, Any]],
     scan_results: dict[str, Any] | None = None,
     lang: str = "zh",
+    scope_ids: set[str] | None = None,
 ) -> str:
+    """``scope_ids`` limits a focused retest; otherwise every finding is listed.
+
+    Findings the agent did not mark show as "not retested" instead of vanishing.
+    """
     t = _TEXT[lang if lang in _TEXT else "zh"]
     lang = "en" if t is _TEXT["en"] else "zh"
-    reports = [r for r in vulnerability_reports if _status(r)] or list(vulnerability_reports)
+    reports = [
+        r
+        for r in vulnerability_reports
+        if scope_ids is None or str(r.get("id") or r.get("report_id") or "") in scope_ids
+    ]
     reports.sort(
         key=lambda r: (
             _SEVERITY_ORDER.get(str(r.get("severity") or "").lower(), 5),

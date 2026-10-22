@@ -1841,3 +1841,21 @@ def test_list_sorted_by_finished_at_desc_unfinished_first(client: TestClient):
     manager.db.update_task(ids[1], finished_at="2026-10-21T00:00:00Z")
     res = client.get("/api/v1/tasks", params={"sort": "finished_at", "order": "desc"}).json()
     assert [t["id"] for t in res["tasks"]] == [ids[2], ids[1], ids[0]]
+
+
+def test_static_assets_revalidate(client: TestClient):
+    assert client.get("/static/js/app.js").headers["cache-control"] == "no-cache"
+    assert client.get("/").headers["cache-control"] == "no-cache"
+
+
+def test_retest_report_lists_untested_unless_scoped():
+    from app.services.retest_report import render_retest_report
+
+    vulns = [
+        {"id": f"f{i}", "title": f"T{i}", "severity": "high", "retest_status": "fixed" if i == 1 else ""}
+        for i in range(1, 4)
+    ]
+    full = render_retest_report(run_record={}, vulnerability_reports=vulns)
+    assert "对 3 项漏洞进行了复测" in full and full.count("未复测") >= 2
+    focused = render_retest_report(run_record={}, vulnerability_reports=vulns, scope_ids={"f1"})
+    assert "对 1 项漏洞进行了复测" in focused and "T2" not in focused

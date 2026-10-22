@@ -295,10 +295,16 @@ class Database:
         if raw_order not in {"asc", "desc"}:
             raise ValueError(f"invalid order: {order}")
         direction = "ASC" if raw_order == "asc" else "DESC"
+        # Unfinished tasks (NULL end time) lead a descending finish-time list.
+        order_by = (
+            f"finished_at IS NULL {direction}, finished_at {direction}"
+            if sort_col == "finished_at"
+            else f"{sort_col} {direction}"
+        )
         params.extend([limit, offset])
         with self.connect() as conn:
             rows = conn.execute(
-                f"SELECT * FROM tasks {where} ORDER BY {sort_col} {direction} "
+                f"SELECT * FROM tasks {where} ORDER BY {order_by} "
                 "LIMIT ? OFFSET ?",
                 params,
             ).fetchall()

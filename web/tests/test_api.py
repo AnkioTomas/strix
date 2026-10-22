@@ -1827,3 +1827,17 @@ def test_asset_pentests_merge_retest_chain(client: TestClient):
 
     raw = client.get("/api/v1/assets/pentests", params={"collapse": "false"}).json()
     assert raw["total"] == 2
+
+
+def test_list_sorted_by_finished_at_desc_unfinished_first(client: TestClient):
+    manager = client.app.state.manager
+    ids = [
+        client.post(
+            "/api/v1/tasks", json={"type": "pentest", "target": "example.com", "held": True}
+        ).json()["id"]
+        for _ in range(3)
+    ]
+    manager.db.update_task(ids[0], finished_at="2026-10-20T00:00:00Z")
+    manager.db.update_task(ids[1], finished_at="2026-10-21T00:00:00Z")
+    res = client.get("/api/v1/tasks", params={"sort": "finished_at", "order": "desc"}).json()
+    assert [t["id"] for t in res["tasks"]] == [ids[2], ids[1], ids[0]]

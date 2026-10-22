@@ -81,6 +81,12 @@
             <option value="cancelled">cancelled</option>
           </select>
         </label>
+        <label class="filter-field">排序
+          <select id="taskSortFilter" aria-label="任务排序">
+            <option value="finished_at">结束时间 ↓</option>
+            <option value="created_at">创建时间 ↓</option>
+          </select>
+        </label>
       </div>
       <ul class="task-list" id="taskList"></ul>
     </aside>

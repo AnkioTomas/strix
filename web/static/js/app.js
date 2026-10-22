@@ -407,12 +407,20 @@
             ${t.action ? `<span class="task-action">${esc(actionLabel(t.action))}</span>` : ""}
             ${t.earliest_start ? `<span class="task-action">定时：${esc(formatLocalShort(t.earliest_start))}</span>` : ""}
           </div>
+          <div class="task-sub muted">${taskTimeLabel(t)}</div>
         </li>`;
       })
       .join("");
     list.querySelectorAll("li[data-id]").forEach((li) => {
       li.onclick = () => selectTask(li.dataset.id);
     });
+  }
+
+  function taskTimeLabel(t) {
+    const finished = t.scan_finished_at || t.finished_at;
+    return finished
+      ? `结束 ${esc(formatUtc8(finished).replace(" (UTC+8)", ""))}`
+      : `创建 ${esc(formatUtc8(t.created_at).replace(" (UTC+8)", ""))}`;
   }
 
   function actionLabel(action) {
@@ -952,8 +960,10 @@
   async function refresh() {
     try {
       const status = ($("taskStatusFilter")?.value || "").trim();
-      const qs = status ? `?status=${encodeURIComponent(status)}` : "";
-      const data = await api.api(`/api/v1/tasks${qs}`);
+      const sort = ($("taskSortFilter")?.value || "finished_at").trim();
+      const params = new URLSearchParams({ sort, order: "desc" });
+      if (status) params.set("status", status);
+      const data = await api.api(`/api/v1/tasks?${params}`);
       tasksCache = data.tasks || [];
       renderTaskList();
       if (selected) {
@@ -1102,6 +1112,9 @@
     showCreate(true);
   };
   $("taskStatusFilter").onchange = () => {
+    void refresh();
+  };
+  $("taskSortFilter").onchange = () => {
     void refresh();
   };
   $("cancelCreate").onclick = () => {

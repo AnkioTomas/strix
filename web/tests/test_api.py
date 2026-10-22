@@ -1859,3 +1859,113 @@ def test_retest_report_lists_untested_unless_scoped():
     assert "对 3 项漏洞进行了复测" in full and full.count("未复测") >= 2
     focused = render_retest_report(run_record={}, vulnerability_reports=vulns, scope_ids={"f1"})
     assert "对 1 项漏洞进行了复测" in focused and "T2" not in focused
+
+
+def _fake_proxy(reply: bytes):
+    import socket
+    import threading
+
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    seen: dict = {}
+
+    def run():
+        conn, _ = server.accept()
+        with conn:
+            data = b""
+            while b"\r\n\r\n" not in data:
+                data += conn.recv(4096)
+            seen["request"] = data.decode()
+            conn.sendall(reply)
+            seen["tail"] = conn.recv(16)
+
+    threading.Thread(target=run, daemon=True).start()
+    return server, seen
+
+
+def test_smtp_tunnel_connect_and_auth():
+    from app.services.mailer import _tunnel
+
+    server, seen = _fake_proxy(b"HTTP/1.1 200 Connection established\r\n\r\n")
+    sock = _tunnel(f"http://u:p%40w@127.0.0.1:{server.getsockname()[1]}", "smtp.corp.test", 465, 5)
+    sock.sendall(b"hello")
+    sock.close()
+    assert seen["request"].startswith("CONNECT smtp.corp.test:465 HTTP/1.1")
+    assert "Proxy-Authorization: Basic dTpwQHc=" in seen["request"]
+
+
+def test_smtp_tunnel_rejected():
+    from app.services.mailer import MailError, _tunnel
+
+    server, _seen = _fake_proxy(b"HTTP/1.1 403 Forbidden\r\n\r\n")
+    with pytest.raises(MailError, match="403"):
+        _tunnel(f"http://127.0.0.1:{server.getsockname()[1]}", "smtp.corp.test", 25, 5)
+
+
+def test_mail_test_endpoint(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    assert client.get("/api/v1/mail").json()["enabled"] is False
+    assert client.post("/api/v1/mail/test", json={"to": "a@b.com"}).status_code == 400
+
+    settings = client.app.state.manager.settings
+    monkeypatch.setattr(settings, "smtp_host", "smtp.corp.test")
+    monkeypatch.setattr(settings, "smtp_from", "sec@corp.test")
+    monkeypatch.setattr(settings, "smtp_proxy", "http://proxy.corp.test:80")
+    sent: dict = {}
+    monkeypatch.setattr(
+        "app.api.mail.send_test_mail", lambda s, *, to: sent.update(to=to)
+    )
+    info = client.get("/api/v1/mail").json()
+    assert info["enabled"] and "经代理" in info["smtp"]
+
+    ok = client.post("/api/v1/mail/test", json={"to": "a@b.com"})
+    assert ok.status_code == 200 and sent["to"] == ["a@b.com"]
+    assert client.post("/api/v1/mail/test", json={"to": "nope"}).status_code == 400
+
+    from app.services.mailer import MailError
+
+    def boom(s, *, to):
+        raise MailError("邮件发送失败：x")
+
+    monkeypatch.setattr("app.api.mail.send_test_mail", boom)
+    res = client.post("/api/v1/mail/test", json={"to": "a@b.com"})
+    assert res.status_code == 502 and "x" in res.json()["error"]["message"]
+
+
+def test_send_test_mail_goes_through_smtp_proxy(monkeypatch: pytest.MonkeyPatch):
+    from app.config import Settings
+    from app.services import mailer
+
+    calls: dict = {}
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout, proxy):
+            calls.update(host=host, port=port, proxy=proxy)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def has_extn(self, name):
+            return False
+
+        def login(self, user, password):
+            calls["login"] = user
+
+        def send_message(self, message, from_addr, to_addrs):
+            calls.update(subject=message["Subject"], to=to_addrs, sender=from_addr)
+
+    monkeypatch.setattr(mailer, "_ProxySMTP", FakeSMTP)
+    settings = Settings(
+        STRIX_SMTP_HOST="smtp.corp.test",
+        STRIX_SMTP_PORT=587,
+        STRIX_SMTP_SSL=False,
+        STRIX_SMTP_USER="u@corp.test",
+        STRIX_SMTP_PASSWORD="pw",
+        STRIX_SMTP_PROXY="http://proxy.corp.test:80",
+    )
+    mailer.send_test_mail(settings, to=["a@b.com"])
+    assert calls["proxy"] == "http://proxy.corp.test:80" and calls["port"] == 587
+    assert calls["to"] == ["a@b.com"] and calls["sender"] == "u@corp.test"

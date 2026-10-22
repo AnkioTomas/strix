@@ -1126,6 +1126,30 @@
     showCreate(false);
     showImport(true);
   };
+  $("mailTestBtn").onclick = async () => {
+    const btn = $("mailTestBtn");
+    try {
+      const info = await api.api("/api/v1/mail");
+      if (!info.enabled) {
+        alert("未配置 STRIX_SMTP_HOST，邮件功能未启用");
+        return;
+      }
+      const to = prompt(`SMTP：${info.smtp}\n测试邮件发给谁？`, info.default_to || "");
+      if (to === null) return;
+      btn.disabled = true;
+      btn.textContent = "发送中…";
+      const res = await api.api("/api/v1/mail/test", {
+        method: "POST",
+        body: JSON.stringify({ to: to.trim() || null }),
+      });
+      alert(`发送成功：${res.to.join(", ")}\n${res.smtp}\n请到邮箱确认收到。`);
+    } catch (e) {
+      alert(`发送失败：${e.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "测邮件";
+    }
+  };
   $("batchTaskBtn").onclick = () => {
     alert(
       "Excel 列：应用名称、端口、BU、负责人、URL（首行为表头；负责人填邮箱）。\n" +

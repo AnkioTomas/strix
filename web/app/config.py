@@ -93,6 +93,8 @@ class Settings(BaseSettings):
     smtp_from: str = Field(default="", alias="STRIX_SMTP_FROM")
     # true = implicit TLS (465); false = plain / STARTTLS when the server offers it.
     smtp_ssl: bool = Field(default=True, alias="STRIX_SMTP_SSL")
+    # HTTP CONNECT proxy for SMTP (http://[user:pass@]host:port). Empty = direct.
+    smtp_proxy: str = Field(default="", alias="STRIX_SMTP_PROXY")
     # Always CC'd on report mails (comma/semicolon separated).
     mail_cc: str = Field(default="", alias="STRIX_MAIL_CC")
     # Appended to a bare owner id (no "@") from the spreadsheet, e.g. example.com.

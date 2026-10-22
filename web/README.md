@@ -88,6 +88,7 @@ PYTHONPATH=. python -m app
 | `STRIX_FEISHU_EVENTS` | `started,finished,failed,cancelled,needs_user` | 启用的推送事件（逗号分隔） |
 | `STRIX_SMTP_HOST` / `STRIX_SMTP_PORT` | （空）/ `465` | 报告邮件 SMTP；Host 为空=不发邮件。批量任务完成后自动把中文报告 ZIP 发给负责人 |
 | `STRIX_SMTP_USER` / `STRIX_SMTP_PASSWORD` / `STRIX_SMTP_FROM` | （空） | SMTP 账号、密码、发件人（FROM 为空时用 USER） |
+| `STRIX_SMTP_PROXY` | （空） | SMTP 走 HTTP CONNECT 代理（`http://[user:pass@]host:port`）；空=直连。代理策略需放行 SMTP 端口 |
 | `STRIX_SMTP_SSL` | `true` | `true`=隐式 TLS（465）；`false`=明文/STARTTLS（587/25） |
 | `STRIX_MAIL_CC` | （空） | 报告邮件固定抄送，逗号/分号分隔 |
 | `STRIX_MAIL_SUBJECT` | `【安全测试报告】{name}` | 邮件标题模板；占位符 `{name} {target} {total} {critical} {high} {medium} {low} {info} {bu} {owner} {task_id}` |
@@ -136,6 +137,8 @@ PYTHONPATH=. python -m app
 | GET | `/api/v1/tasks/{id}/logs/{path}` | 下载单个日志文件 |
 | * | `/api/v1/tasks/{id}/viewer/...` | 同源反代 Live Viewer |
 | GET | `/api/v1/assets/pentests` | 资产系统对接：每个「资产（IP/域名+端口）× 任务」一条，含 `tags`、`pentest`（开始/结束时间、耗时）、`tokens`（input/output/cached/total/cost）、`finding_counts`；筛选 `status`（默认 completed）、`since`（按任务更新时间增量拉取）、`tag`、`q`、`limit`/`offset`。tag = 自动（渗透测试、扫描模式、复测、最高严重度/无漏洞）+ 手动 `tags`。`findings[].fix_status` = open/fixed/not_fixed/partial/regressed。新旧两种复测都能识别：旧的原地续跑直接写在原任务；新的复测子任务（`action=retest`）默认与原任务按资产合并为一条（`collapse=false` 看原始记录；返回 `origin_task_id`/`task_ids`），修复状态逐漏洞 id 累积，token/开始时间取最新任务（复测会克隆 run.json，数值已是累计）。token 为任务级，同一任务多个资产时重复出现 |
+| GET | `/api/v1/mail` | 邮件配置状态（是否启用、SMTP 地址、抄送） |
+| POST | `/api/v1/mail/test` | 发测试邮件验证 SMTP/代理/登录；`{"to": "a@b.com"}`，省略则依次取：第一个抄送 → 发件人 → SMTP 账号；页面左侧「测邮件」按钮同此 |
 | GET | `/health` | 健康 + 准入状态 |
 
 创建任务示例：

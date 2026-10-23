@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from app.config import Settings
 from app.db import Database, utc_now
 from app.schemas import CreateTaskRequest, GitSource, LocalSource
+from app.services.assets import parse_tags
 from app.security.source import SourceValidationError, validate_source
 from app.security.target import (
     TargetValidationError,
@@ -266,6 +267,8 @@ class TaskManager:
             "name": name,
             "notes": notes,
             "tags": ",".join(req.tags or []) or None,
+            "mail_to": ",".join(req.mail_to or []) or None,
+            "mail_status": "pending" if req.mail_to and self._mail_enabled() else None,
             "target": target,
             **source_fields,
             "instruction": req.instruction,
@@ -523,6 +526,11 @@ class TaskManager:
         if workspace.exists():
             shutil.rmtree(workspace, ignore_errors=True)
 
+    def _mail_enabled(self) -> bool:
+        from app.services.mailer import mail_enabled
+
+        return mail_enabled(self.settings)
+
     def update_task_meta(self, task_id: str, fields: dict[str, Any]) -> dict[str, Any]:
         """Patch display fields always; scan settings only while ``held``."""
         task = self.get_task(task_id)
@@ -542,6 +550,12 @@ class TaskManager:
             patch["notes"] = (fields.get("notes") or "").strip() or None
         if "tags" in fields:
             patch["tags"] = ",".join(fields.get("tags") or []) or None
+        if "mail_to" in fields:
+            recipients = fields.get("mail_to") or []
+            patch["mail_to"] = ",".join(recipients) or None
+            if task.get("mail_status") in (None, "", "pending", "failed"):
+                patch["mail_status"] = "pending" if recipients and self._mail_enabled() else None
+                patch["mail_error"] = None
         if "instruction" in fields:
             text = fields.get("instruction")
             patch["instruction"] = (text or "").strip() or None
@@ -826,6 +840,7 @@ class TaskManager:
         instruction: str | None = None,
         *,
         finding_ids: list[str] | None = None,
+        overrides: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Retest in a new task that reuses the parent's environment.
 
@@ -888,10 +903,15 @@ class TaskManager:
         extra = (instruction or "").strip()
         if extra:
             note = f"{note}\n\n[附加说明]\n{extra}"
-        return self._spawn_retest_task(task, note, scope_ids=scope_ids)
+        return self._spawn_retest_task(task, note, scope_ids=scope_ids, overrides=overrides)
 
     def _spawn_retest_task(
-        self, parent: dict[str, Any], note: str, *, scope_ids: list[str] | None = None
+        self,
+        parent: dict[str, Any],
+        note: str,
+        *,
+        scope_ids: list[str] | None = None,
+        overrides: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         from strix.core.paths import RUNS_DIR_NAME, RUNTIME_STATE_DIR_NAME
 
@@ -907,9 +927,16 @@ class TaskManager:
                 f"Missing agent snapshot for run {run_name}; cannot retest",
             )
         request = self._request_from_task(parent)
-        base = str(request.name or parent.get("target") or "").strip()
-        if base and not base.startswith("复测"):
-            request.name = f"复测-{base}"[:200]
+        changes = overrides or {}
+        if changes:
+            try:
+                request = CreateTaskRequest(**{**request.model_dump(), **changes})
+            except ValidationError as exc:
+                raise TaskError("INVALID_REQUEST", str(exc.errors()[0].get("msg"))) from exc
+        if not (changes.get("name") or "").strip():
+            base = str(request.name or parent.get("target") or "").strip()
+            if base and not base.startswith("复测"):
+                request.name = f"复测-{base}"[:200]
         child = self.create_task(
             request,
             parent_task_id=parent["id"],
@@ -1420,7 +1447,7 @@ class TaskManager:
         for row in rows:
             entry: dict[str, Any] = {"row": row.row, "name": row.name, "target": row.target}
             if not row.target:
-                entry["error"] = "URL 为空"
+                entry["error"] = "URL 为空（该行没有可识别的 URL，请检查表头是否含 URL/地址/域名 列）"
                 results.append(entry)
                 continue
             notes = "\n".join(
@@ -1721,6 +1748,8 @@ class TaskManager:
                 instruction=task.get("instruction"),
                 name=task.get("name"),
                 notes=task.get("notes"),
+                tags=parse_tags(task.get("tags")),
+                mail_to=parse_tags(task.get("mail_to")) or None,
                 scan_mode=task.get("scan_mode") or "deep",
                 max_budget=task.get("max_budget"),
                 proxy_url=proxy_url,
@@ -1743,6 +1772,8 @@ class TaskManager:
             instruction=task.get("instruction"),
             name=task.get("name"),
             notes=task.get("notes"),
+            tags=parse_tags(task.get("tags")),
+            mail_to=parse_tags(task.get("mail_to")) or None,
             scan_mode=task.get("scan_mode") or "deep",
             max_budget=task.get("max_budget"),
             proxy_url=proxy_url,

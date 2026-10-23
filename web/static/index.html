@@ -124,7 +124,7 @@
               <input id="gitBranch" placeholder="main" />
             </label>
           </div>
-          <label class="span-2">Instruction
+          <label class="span-2"><span id="instructionLabel">Instruction</span>
             <textarea id="instruction" placeholder="重点测试 IDOR / SQL Injection …"></textarea>
           </label>
           <label class="span-2 check">
@@ -144,6 +144,9 @@
             请求头（每行一条 Name: value）
             <textarea id="requestHeaders" rows="4" placeholder="Authorization: Bearer …&#10;Cookie: session=…"></textarea>
             <span class="field-hint">可选。同样本机缓存；勾选才生效。Agent 必须在相关 HTTP 请求里带上这些头。</span>
+          </label>
+          <label class="span-2">通知邮箱
+            <input id="taskMailTo" placeholder="可选，多个用逗号分隔。任务完成后把报告发到这些邮箱" />
           </label>
           <label class="span-2">备注
             <textarea id="taskNotes" placeholder="可选。给自己看的说明，不会发给模型。"></textarea>

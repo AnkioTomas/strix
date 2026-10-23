@@ -7,6 +7,7 @@ import smtplib
 import socket
 import ssl
 from email.message import EmailMessage
+import re
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -15,6 +16,28 @@ from app.config import Settings
 
 class MailError(RuntimeError):
     pass
+
+
+_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def parse_emails(value: object) -> list[str]:
+    """Split a CSV/list of addresses; raises ValueError on a malformed one."""
+    if value is None:
+        return []
+    parts = (
+        re.split(r"[,;，；\s]+", value) if isinstance(value, str) else [str(v) for v in value]
+    )
+    emails: list[str] = []
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if not _EMAIL.match(part):
+            raise ValueError(f"通知邮箱格式不正确：{part}")
+        if part not in emails:
+            emails.append(part)
+    return emails
 
 
 class _Safe(dict):

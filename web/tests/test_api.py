@@ -1695,7 +1695,7 @@ def test_batch_import_creates_tasks_and_mails_report(
     assert first["target"] == "https://example.com:8443"
     assert second["target"] == "example.org:80"
     assert second["mail_to"] == "bob@example.test"
-    assert third["error"] == "URL 为空"
+    assert third["error"].startswith("URL 为空")
 
     task = client.get(f"/api/v1/tasks/{first['task_id']}").json()
     assert task["name"] == "门户"
@@ -1994,3 +1994,138 @@ def test_openpyxl_survives_broken_numpy(tmp_path):
     )
     assert out.returncode == 0, out.stderr
     assert "load_workbook" in out.stdout
+
+
+def test_retest_accepts_create_form_overrides(client: TestClient):
+    created = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com",
+            "scan_mode": "quick",
+            "tags": ["bu:a"],
+        },
+    ).json()
+    manager = client.app.state.manager
+    workspace = Path(manager.get_task(created["id"])["workspace"])
+    run_name = "retest_override_1"
+    state_dir = workspace / "strix_runs" / run_name / ".state"
+    state_dir.mkdir(parents=True)
+    (workspace / "strix_runs" / run_name / "run.json").write_text(
+        json.dumps({"run_name": run_name, "status": "completed", "targets_info": []}),
+        encoding="utf-8",
+    )
+    (state_dir / "agents.json").write_text("{}", encoding="utf-8")
+    manager.db.update_task(
+        created["id"], status="completed", finished_at="2026-01-01T00:00:00Z", run_name=run_name
+    )
+    manager._processes.pop(created["id"], None)
+
+    res = client.post(
+        f"/api/v1/tasks/{created['id']}/retest",
+        json={
+            "name": "我的复测",
+            "notes": "备注",
+            "held": True,
+            "scan_mode": "standard",
+            "instruction": "新账号 admin/xxx",
+            "use_headers": True,
+            "request_headers": "X-Test: 1",
+        },
+    )
+    assert res.status_code == 202, res.text
+    body = res.json()
+    assert body["status"] == "held"
+    assert body["name"] == "我的复测"
+    assert body["scan_mode"] == "standard"
+    assert body["notes"] == "备注"
+    assert body["tags"] == ["bu:a"]
+    child = manager.get_task(body["id"])
+    assert child["request_headers"] == "X-Test: 1"
+    note = (Path(child["workspace"]) / ".web_resume_instruction").read_text(encoding="utf-8")
+    assert "新账号 admin/xxx" in note
+
+    bad = client.post(f"/api/v1/tasks/{created['id']}/retest", json={"use_proxy": True})
+    assert bad.status_code == 400
+
+
+def test_batch_sheet_tolerates_header_variants_and_url_column():
+    import io as _io
+
+    from openpyxl import Workbook
+
+    from app.services.batch_import import parse_sheet
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["应用名称", "端口", "BU", "负责人邮箱", "应用URL地址"])
+    ws.append(["A", 8080, "bu1", "a@b.com", "http://x.example.com"])
+    ws.append(["B", "", "bu1", "c@d.com", "10.0.0.5"])
+    buf = _io.BytesIO()
+    wb.save(buf)
+    rows = parse_sheet(buf.getvalue())
+    assert [r.target for r in rows] == ["http://x.example.com:8080", "10.0.0.5"]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["应用名称", "端口", "BU", "负责人"])
+    ws.append(["A", "", "bu1", "a@b.com"])
+    buf = _io.BytesIO()
+    wb.save(buf)
+    assert parse_sheet(buf.getvalue())[0].target == ""
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["系统", "端口", "BU", "负责人", "备用"])
+    ws.append(["A", "", "bu1", "a@b.com", "https://found.example.com/app"])
+    buf = _io.BytesIO()
+    wb.save(buf)
+    assert parse_sheet(buf.getvalue())[0].target == "https://found.example.com/app"
+
+
+def test_notify_mail_to_on_create_update_and_retest(client: TestClient, monkeypatch):
+    settings = client.app.state.manager.settings
+    monkeypatch.setattr(settings, "smtp_host", "smtp.corp.test")
+    created = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com",
+            "held": True,
+            "mail_to": "a@b.com, c@d.com",
+        },
+    )
+    assert created.status_code in (200, 201, 202), created.text
+    body = created.json()
+    assert body["mail_to"] == "a@b.com,c@d.com" and body["mail_status"] == "pending"
+
+    upd = client.patch(f"/api/v1/tasks/{body['id']}", json={"mail_to": "x@y.com"})
+    assert upd.json()["mail_to"] == "x@y.com"
+    cleared = client.patch(f"/api/v1/tasks/{body['id']}", json={"mail_to": ""}).json()
+    assert cleared["mail_to"] is None and cleared["mail_status"] is None
+
+    bad = client.post(
+        "/api/v1/tasks",
+        json={"type": "pentest", "target": "https://example.com", "mail_to": "nope"},
+    )
+    assert bad.status_code in (400, 422)
+
+
+def test_batch_sheet_skips_rows_without_name_and_url():
+    import io as _io
+
+    from openpyxl import Workbook
+
+    from app.services.batch_import import parse_sheet
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["应用名称", "URL", "端口", "BU", "负责人"])
+    ws.append(["eccp1", "eccp1.example.com", 8118, "YFI", "a@b.com;\nc@d.com"])
+    ws.append([None, None, None, None, None, "否", "否", "待测试"])
+    buf = _io.BytesIO()
+    wb.save(buf)
+    rows = parse_sheet(buf.getvalue())
+    assert len(rows) == 1
+    assert rows[0].target == "eccp1.example.com:8118"
+    assert rows[0].emails == ["a@b.com", "c@d.com"]

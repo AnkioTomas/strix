@@ -140,6 +140,7 @@ async def _parse_create_payload(
             "name": _form_value(form, "name"),
             "notes": _form_value(form, "notes"),
             "tags": _form_value(form, "tags"),
+            "mail_to": _form_value(form, "mail_to"),
             "held": str(form.get("held") or "").lower() in {"1", "true", "yes", "on"},
             "earliest_start": _form_value(form, "earliest_start"),
             "use_proxy": str(form.get("use_proxy") or "").lower()
@@ -432,12 +433,18 @@ async def retest_task(
 ):
     note = (payload.instruction if payload else None) or instruction
     finding_ids = payload.finding_ids if payload else None
+    overrides = (
+        payload.model_dump(exclude_unset=True, exclude={"instruction", "finding_ids"})
+        if payload
+        else {}
+    )
     try:
         task = await asyncio.to_thread(
             manager.retest_task,
             task_id,
             note,
             finding_ids=finding_ids,
+            overrides=overrides,
         )
     except TaskError as exc:
         return _error(exc)

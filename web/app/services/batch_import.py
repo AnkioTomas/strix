@@ -15,6 +15,8 @@ _ALIASES = {
     "owner": ("负责人", "责任人", "owner", "邮箱", "负责人邮箱"),
     "url": ("url", "地址", "链接", "访问地址", "域名"),
 }
+_URL_HINTS = ("url", "地址", "链接", "域名", "网址")
+_URL_LIKE = re.compile(r"^(https?://\S+|[\w.-]+\.[a-z]{2,}(:\d+)?(/\S*)?|\d{1,3}(\.\d{1,3}){3}(:\d+)?(/\S*)?)$", re.I)
 _POSITIONAL = ("name", "port", "bu", "owner", "url")
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -83,6 +85,14 @@ def _load_openpyxl():
     return load_workbook
 
 
+def _find_url(row: list[str], exclude: set[int]) -> str:
+    """URL column empty: use a cell outside the mapped columns that looks like one."""
+    for idx, cell in enumerate(row):
+        if idx not in exclude and _URL_LIKE.match(cell.strip()):
+            return cell.strip()
+    return ""
+
+
 def parse_sheet(data: bytes, *, mail_domain: str = "") -> list[BatchRow]:
     load_workbook = _load_openpyxl()
 
@@ -95,14 +105,22 @@ def parse_sheet(data: bytes, *, mail_domain: str = "") -> list[BatchRow]:
     if not rows:
         raise SheetError("表格为空")
 
-    header = {}
-    first = [c.lower() for c in rows[0][1]]
+    header: dict[str, int] = {}
+    first = [c.strip().lower() for c in rows[0][1]]
     for key, aliases in _ALIASES.items():
         for idx, title in enumerate(first):
+            if idx in header.values():
+                continue
             if title in aliases:
                 header[key] = idx
                 break
-    if "url" in header:
+    if "url" not in header:
+        # Tolerate titles like "应用URL地址" / "访问域名".
+        for idx, title in enumerate(first):
+            if idx not in header.values() and any(k in title for k in _URL_HINTS):
+                header["url"] = idx
+                break
+    if header:
         body = rows[1:]
     else:
         # No recognisable header: fall back to column order A..E.
@@ -115,8 +133,11 @@ def parse_sheet(data: bytes, *, mail_domain: str = "") -> list[BatchRow]:
 
     result: list[BatchRow] = []
     for number, row in body:
-        url = pick(row, "url")
+        url = pick(row, "url") or _find_url(row, exclude=set(header.values()))
         owner = pick(row, "owner")
+        if not url and not pick(row, "name"):
+            # Stray cells (notes, status columns) on an otherwise empty row.
+            continue
         result.append(
             BatchRow(
                 row=number,

@@ -71,6 +71,7 @@ class CreateTaskRequest(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     notes: str | None = Field(default=None, max_length=4000)
     tags: list[str] | None = None
+    mail_to: list[str] | None = None
     held: bool = False
     earliest_start: str | None = None
     scan_mode: ScanMode = "deep"
@@ -91,6 +92,15 @@ class CreateTaskRequest(BaseModel):
         from app.services.assets import validate_tags
 
         return validate_tags(value)
+
+    @field_validator("mail_to", mode="before")
+    @classmethod
+    def _validate_mail_to(cls, value: object) -> list[str] | None:
+        if value is None:
+            return None
+        from app.services.mailer import parse_emails
+
+        return parse_emails(value)
 
     @field_validator("earliest_start", mode="before")
     @classmethod
@@ -142,6 +152,7 @@ class UpdateTaskRequest(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     notes: str | None = Field(default=None, max_length=4000)
     tags: list[str] | None = None
+    mail_to: list[str] | None = None
     instruction: str | None = None
     scan_mode: ScanMode | None = None
     max_budget: float | None = Field(default=None, gt=0)
@@ -161,6 +172,15 @@ class UpdateTaskRequest(BaseModel):
         from app.services.assets import validate_tags
 
         return validate_tags(value)
+
+    @field_validator("mail_to", mode="before")
+    @classmethod
+    def _validate_mail_to(cls, value: object) -> list[str] | None:
+        if value is None:
+            return None
+        from app.services.mailer import parse_emails
+
+        return parse_emails(value)
 
     @field_validator("earliest_start", mode="before")
     @classmethod
@@ -412,8 +432,48 @@ class UpdateFindingRequest(BaseModel):
 
 
 class RetestTaskRequest(BaseModel):
+    """Retest options. Everything but ``instruction``/``finding_ids`` is an
+    optional override of the settings inherited from the parent task."""
+
     instruction: str | None = None
     finding_ids: list[str] | None = None
+    name: str | None = Field(default=None, max_length=200)
+    notes: str | None = Field(default=None, max_length=4000)
+    tags: list[str] | None = None
+    mail_to: list[str] | None = None
+    held: bool | None = None
+    earliest_start: str | None = None
+    scan_mode: ScanMode | None = None
+    max_budget: float | None = Field(default=None, gt=0)
+    proxy_url: str | None = Field(default=None, max_length=500)
+    use_proxy: bool | None = None
+    request_headers: str | None = Field(default=None, max_length=8000)
+    use_headers: bool | None = None
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _validate_tags(cls, value: object) -> list[str] | None:
+        if value is None:
+            return None
+        from app.services.assets import validate_tags
+
+        return validate_tags(value)
+
+    @field_validator("mail_to", mode="before")
+    @classmethod
+    def _validate_mail_to(cls, value: object) -> list[str] | None:
+        if value is None:
+            return None
+        from app.services.mailer import parse_emails
+
+        return parse_emails(value)
+
+    @field_validator("earliest_start", mode="before")
+    @classmethod
+    def _normalize_earliest_start(cls, value: object) -> str | None:
+        if value is None or value == "":
+            return None
+        return normalize_earliest_start(str(value))
 
 
 class RequestFindingTestResponse(BaseModel):

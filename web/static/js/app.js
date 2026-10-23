@@ -267,8 +267,14 @@
     $("taskType").disabled = false;
     $("attachments").disabled = false;
     $("taskHeld").disabled = false;
+    $("target").disabled = false;
+    $("gitUrl").disabled = false;
+    $("gitBranch").disabled = false;
+    $("instructionLabel").textContent = "Instruction";
+    $("instruction").placeholder = "重点测试 IDOR / SQL Injection …";
     $("taskName").value = "";
     $("taskNotes").value = "";
+    $("taskMailTo").value = "";
     $("taskHeld").checked = false;
     $("earliestStart").value = "";
     $("taskType").value = "pentest";
@@ -291,6 +297,7 @@
     $("createTask").textContent = action === "retry" ? "创建重试" : "创建";
     $("taskName").value = t.name || "";
     $("taskNotes").value = t.notes || "";
+    $("taskMailTo").value = t.mail_to || "";
     $("taskHeld").checked = false;
     $("earliestStart").value = "";
     $("taskType").value = t.type || "pentest";
@@ -309,6 +316,25 @@
     $("useHeaders").checked = Boolean(t.request_headers);
     syncHeaderFields();
     syncCreateTypeFields();
+    updateAttachmentsHint();
+  }
+
+  function fillCreateFormForRetest(t) {
+    fillCreateFormFromTask(t, "retry");
+    createDraft = { retestId: t.id };
+    const title = $("createPanel").querySelector("h2");
+    if (title) title.textContent = "复测任务";
+    $("createTask").textContent = "开始复测";
+    $("taskType").disabled = true;
+    $("target").disabled = true;
+    $("gitUrl").disabled = true;
+    $("gitBranch").disabled = true;
+    $("attachments").disabled = true;
+    $("instructionLabel").textContent = "复测说明（凭证 / 环境）";
+    $("instruction").value = "";
+    $("instruction").placeholder =
+      "例如：登录账号 admin / 新密码 xxx；Cookie: session=...；目标仍是 https://example.com，忽略证书错误";
+    $("taskName").value = t.name && t.name.startsWith("复测") ? t.name : `复测-${taskDisplayName(t)}`;
     updateAttachmentsHint();
   }
 
@@ -1079,6 +1105,8 @@
     if (!files.length) {
       hint.textContent = createDraft?.editId
         ? "编辑挂起任务不改附件。"
+        : createDraft?.retestId
+          ? "复测沿用原任务的环境与附件。"
         : createDraft
           ? "父任务附件会自动复制；也可另加新附件。"
           : "可选。例如 PoC、wordlist、凭证说明。";
@@ -1271,11 +1299,43 @@
   }
 
   $("createTask").onclick = async () => {
+    if (createDraft?.retestId) {
+      const body = {
+        name: $("taskName").value.trim() || null,
+        notes: $("taskNotes").value.trim() || null,
+        mail_to: $("taskMailTo").value.trim(),
+        scan_mode: $("scanMode").value,
+        held: $("taskHeld").checked,
+        earliest_start: localDatetimeToUtcZ($("earliestStart").value),
+        use_proxy: $("useProxy").checked,
+        proxy_url: $("useProxy").checked ? $("proxyUrl").value.trim() : null,
+        use_headers: $("useHeaders").checked,
+        request_headers: $("useHeaders").checked ? $("requestHeaders").value : null,
+      };
+      const note = $("instruction").value.trim();
+      if (note) body.instruction = note;
+      try {
+        await api.ensureSession();
+        const task = await api.api(`/api/v1/tasks/${createDraft.retestId}/retest`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        resetCreateForm();
+        showCreate(false);
+        await refresh();
+        selectTask(task.id);
+        setTab("viewer");
+      } catch (e) {
+        alert(e.message);
+      }
+      return;
+    }
     if (createDraft?.editId) {
       const type = $("taskType").value;
       const body = {
         name: $("taskName").value.trim() || null,
         notes: $("taskNotes").value.trim() || null,
+        mail_to: $("taskMailTo").value.trim(),
         instruction: $("instruction").value.trim() || null,
         scan_mode: $("scanMode").value,
         earliest_start: localDatetimeToUtcZ($("earliestStart").value),
@@ -1317,6 +1377,8 @@
     if (taskName) form.append("name", taskName);
     const notes = $("taskNotes").value.trim();
     if (notes) form.append("notes", notes);
+    const mailTo = $("taskMailTo").value.trim();
+    if (mailTo) form.append("mail_to", mailTo);
     if ($("taskHeld").checked) form.append("held", "true");
     const earliestStart = localDatetimeToUtcZ($("earliestStart").value);
     if (earliestStart) form.append("earliest_start", earliestStart);
@@ -1497,29 +1559,12 @@
     }
   };
 
-  $("retestBtn").onclick = async () => {
-    if (!selected) return;
-    const note = await openInstructionModal({
-      title: "复测",
-      sub: "将新建一个复测任务，复用原任务的环境（Agent 状态、脚本、源码与附件），原任务及其报告保持不变。凭证过期、新账号、环境变更等信息请写在下面。",
-      label: "复测说明（凭证 / 环境）",
-      placeholder:
-        "例如：\n登录账号 admin / 新密码 xxx\nCookie: session=...\n目标仍是 https://example.com，忽略证书错误",
-      confirmLabel: "开始复测",
-    });
-    if (note === null) return;
-    try {
-      const body = note.trim() ? { instruction: note.trim() } : {};
-      const t = await api.api(`/api/v1/tasks/${selected}/retest`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-      await refresh();
-      selectTask(t.id);
-      setTab("viewer");
-    } catch (e) {
-      alert(e.message);
-    }
+  $("retestBtn").onclick = () => {
+    const t = currentTask();
+    if (!t) return;
+    showImport(false);
+    fillCreateFormForRetest(t);
+    showCreate(true);
   };
 
   $("refreshReportBtn").onclick = async () => {

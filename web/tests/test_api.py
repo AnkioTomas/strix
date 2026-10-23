@@ -2148,13 +2148,14 @@ def test_report_mail_lists_serious_findings_and_sets_priority(
             {"id": "a", "title": "高危SQL注入", "severity": "high"},
             {"id": "b", "title": "RCE", "severity": "critical", "raw": {"retest_status": "fixed"}},
             {"id": "c", "title": "信息泄露", "severity": "low"},
+            {"id": "d", "title": "缺少安全响应头", "severity": "medium"},
         ],
     )
     monkeypatch.setattr(
         manager,
         "attach_task_overlays",
         lambda tasks, **_k: [
-            t.update(finding_counts={"total": 3, "critical": 1, "high": 1, "low": 1}) for t in tasks
+            t.update(finding_counts={"total": 4, "critical": 1, "high": 1, "medium": 1, "low": 1}) for t in tasks
         ],
     )
     sent: dict = {}
@@ -2165,7 +2166,12 @@ def test_report_mail_lists_serious_findings_and_sets_priority(
     res = client.post(f"/api/v1/tasks/{created['id']}/send-report-mail")
     assert res.status_code == 200, res.text
     assert sent["high_priority"] is True
-    assert "已修复" in sent["html"]
+    assert "已修复" not in sent["html"]  # plain report: no fix badges
+    assert "缺少安全响应头" in sent["html"] and "另有 1 个低危" in sent["html"]
+    manager.db.update_task(created["id"], action="retest")
+    client.post(f"/api/v1/tasks/{created['id']}/send-report-mail")
+    assert "已修复" in sent["html"] and "未复测" in sent["html"]
+    assert "复测结果：已修复 1，未复测 2" in sent["html"]
     assert sent["html"] and "高危SQL注入" in sent["html"] and "RCE" in sent["html"]
     assert "信息泄露" not in sent["html"]
     assert "{{" not in sent["html"]

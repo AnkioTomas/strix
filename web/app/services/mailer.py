@@ -54,7 +54,16 @@ _FIX_LABELS = {
     "not_fixed": "未修复",
     "partial": "部分修复",
     "regressed": "复现",
+    "open": "未复测",
 }
+_FIX_COLORS = {
+    "fixed": ("#166534", "#dcfce7"),
+    "not_fixed": ("#991b1b", "#fee2e2"),
+    "partial": ("#9a3412", "#ffedd5"),
+    "regressed": ("#991b1b", "#fee2e2"),
+    "open": ("#475569", "#e2e8f0"),
+}
+_LISTED_SEVERITIES = 3  # 严重 / 高危 / 中危
 
 
 _SEVERITY_COLORS = {
@@ -119,31 +128,55 @@ def build_report_html(
     )
 
     rows = []
-    for key, label in _SEVERITY_LABELS[:2]:
+    fix_counts: dict[str, int] = {}
+    for key, label in _SEVERITY_LABELS[:_LISTED_SEVERITIES]:
         for item in findings:
             if item.get("severity") != key:
                 continue
-            fix = _FIX_LABELS.get(str(item.get("fix_status") or ""))
-            badge = (
-                f' <span style="font-size:12px;color:#475569;background:#e2e8f0;border-radius:4px;'
-                f'padding:1px 6px;">{fix}</span>'
-                if fix
-                else ""
-            )
+            status = str(item.get("fix_status") or "open")
+            badge = ""
+            if retest and status in _FIX_LABELS:
+                fix_counts[status] = fix_counts.get(status, 0) + 1
+                color, background = _FIX_COLORS[status]
+                badge = (
+                    f'<span style="font-size:12px;font-weight:600;color:{color};'
+                    f'background:{background};border-radius:4px;padding:2px 8px;'
+                    f'white-space:nowrap;">{_FIX_LABELS[status]}</span>'
+                )
             rows.append(
                 f'<tr><td width="64" style="padding:10px 12px;border-bottom:1px solid #f1f5f9;">'
                 f'<span style="background:{_SEVERITY_COLORS[key]};color:#fff;border-radius:4px;'
                 f'padding:2px 8px;font-size:12px;">{label}</span></td>'
                 f'<td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:14px;line-height:1.5;">'
-                f'{escape(str(item.get("title") or "未命名"))}{badge}</td></tr>'
+                f'{escape(str(item.get("title") or "未命名"))}</td>'
+                + (
+                    f'<td width="76" align="right" style="padding:10px 12px;border-bottom:1px solid #f1f5f9;">{badge}</td>'
+                    if retest
+                    else ""
+                )
+                + "</tr>"
             )
+    others = sum(n[key] for key, _ in _SEVERITY_LABELS[_LISTED_SEVERITIES:])
+    more = f"另有 {others} 个低危 / 信息级漏洞，详见报告。" if others else ""
+    fix_summary = (
+        "复测结果：" + "，".join(
+            f"{_FIX_LABELS[key]} {fix_counts[key]}" for key in _FIX_LABELS if fix_counts.get(key)
+        )
+        if retest and fix_counts
+        else ""
+    )
+    note_style = "font-size:13px;color:#6b7280;margin-top:10px;"
     serious_section = (
         '<tr><td style="padding:24px 32px 0 32px;">'
-        '<div style="font-size:16px;font-weight:700;margin-bottom:12px;">严重 / 高危漏洞</div>'
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        '<div style="font-size:16px;font-weight:700;margin-bottom:12px;">'
+        "漏洞清单<span style=\"font-weight:400;color:#6b7280;font-size:13px;\">（严重 / 高危 / 中危）</span></div>"
+        + (f'<div style="font-size:14px;margin-bottom:12px;">{escape(fix_summary)}</div>' if fix_summary else "")
+        + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
         'style="border:1px solid #e5e7eb;border-radius:8px;">'
         + "".join(rows)
-        + "</table></td></tr>"
+        + "</table>"
+        + (f'<div style="{note_style}">{escape(more)}</div>' if more else "")
+        + "</td></tr>"
         if rows
         else ""
     )
@@ -188,7 +221,10 @@ def sample_report_html(settings: Settings) -> str:
             {"severity": "critical", "title": "登录接口存在 SQL 注入，可读取全部用户数据"},
             {"severity": "high", "title": "订单详情接口越权访问（IDOR）", "fix_status": "not_fixed"},
             {"severity": "high", "title": "文件上传未校验类型导致任意文件上传", "fix_status": "fixed"},
+            {"severity": "medium", "title": "会话 Cookie 未设置 Secure / HttpOnly", "fix_status": "partial"},
+            {"severity": "medium", "title": "接口返回详细错误堆栈", "fix_status": "open"},
         ],
+        retest=True,
         bu="YFI",
         owner="owner@example.com",
         task_id="demo-0001",

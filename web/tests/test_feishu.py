@@ -399,3 +399,38 @@ def test_pool_needs_user_survives_restart(
         agents.write_text(json.dumps({"wait_kinds": {"root": "user"}}), encoding="utf-8")
         pool2._poll_needs_user()
         assert len(cards) == 2
+
+
+def test_detect_loop_flags_repeated_action():
+    from app.services.checkin import detect_loop
+
+    same = [{"type": "tool", "message": "curl http://x/login"}] * 9
+    mixed = [{"type": "tool", "message": f"step {i}"} for i in range(30)]
+    assert detect_loop(mixed + same) is not None
+    assert detect_loop(mixed) is None
+
+
+def test_assess_stall_requires_previous_checkin():
+    from app.services.checkin import assess
+
+    progress = {"event_count": 5, "total_tokens": 100, "loop": None}
+    assert assess(progress, {})[0] is False
+    assert assess(progress, {"events": 5, "tokens": 100})[0] is True
+    assert assess(progress, {"events": 4, "tokens": 100})[0] is False
+
+
+def test_checkin_sends_message_and_card(client: TestClient, tmp_path: Path):
+    from app.services import checkin
+
+    task = {"id": "t1", "workspace": str(tmp_path), "name": "app", "started_at": "2026-01-01T00:00:00Z"}
+    assert checkin.checkin_due(task, 3600) is True
+    manager = MagicMock()
+    manager.settings = Settings(STRIX_FEISHU_WEBHOOK="https://example.test/hook")
+    with patch.object(checkin, "post_card", return_value=True) as post:
+        checkin.run_checkin(manager, task, console_url=None)
+    manager.resume_with_message.assert_called_once()
+    assert "循环" in manager.resume_with_message.call_args.args[1]
+    card = post.call_args.args[1]
+    assert card["header"]["title"]["content"].endswith("进度巡检")
+    assert checkin.checkin_due({**task, "started_at": "2999-01-01T00:00:00Z"}, 3600) is False
+    assert checkin.checkin_due(task, 3600) is False  # just checked in

@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     # Outbound proxy for Feishu webhook only (http/https). Empty = direct.
     feishu_proxy: str = Field(default="", alias="STRIX_FEISHU_PROXY")
 
+    # Seconds between progress check-ins on running scans (ask the agent for status,
+    # warn about stalls/loops, push a progress card to the webhook). 0 = off.
+    checkin_interval: int = Field(default=3600, alias="STRIX_CHECKIN_INTERVAL")
+
     # Report mail (batch scans). Empty smtp_host = mail disabled.
     smtp_host: str = Field(default="", alias="STRIX_SMTP_HOST")
     smtp_port: int = Field(default=465, alias="STRIX_SMTP_PORT")

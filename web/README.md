@@ -95,6 +95,7 @@ PYTHONPATH=. python -m app
 | `STRIX_MAIL_HTML_FILE` | 内置模板 | 自定义 HTML 邮件模板文件路径；内置 `app/templates/mail_report.html`，占位符形如 `{{title}}` |
 | `STRIX_MAIL_DOMAIN` | （空） | 表格里负责人不含 `@` 时自动补的邮箱域名 |
 | `STRIX_FEISHU_PROXY` | （空） | 仅飞书出站用的 HTTP(S) 代理，如 `http://127.0.0.1:7890`；空=直连（不吃系统 `HTTP_PROXY`） |
+| `STRIX_CHECKIN_INTERVAL` | `3600` | 运行中任务的巡检间隔（秒）；0=关闭。到点向 AI 询问进展并要求避免卡死/循环，同时向飞书 Webhook 推送进度卡片（已运行时长、Token、漏洞数；无新进展标红“疑似卡死”，重复动作标橙“疑似循环”） |
 | `STRIX_ALLOW_PRIVATE_TARGETS` | 1 | 是否允许扫私网/localhost |
 | `STRIX_GIT_USERNAME` / `STRIX_GIT_TOKEN` | （空） | Gitea HTTPS 机器人账号；必须成对出现。任务里填完整 `https://gitea…/org/repo.git`，凭证不入库、不进 URL。开 Issue 时 token 还需 issues 写权限 |
 | `STRIX_GITEA_ISSUES` | `0` | `1` 时：白盒 audit + git 源任务在 **扫描完成并入库后**，按漏洞清单自动在对应仓库创建 Issue（web 侧，不改 Strix 核心；按 finding id 去重） |

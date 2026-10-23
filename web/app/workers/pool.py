@@ -93,6 +93,7 @@ class WorkerPool:
             await asyncio.to_thread(self.manager.finish_process, task_id, cancelled=cancelled)
 
         await asyncio.to_thread(self._poll_needs_user)
+        await asyncio.to_thread(self._poll_checkins)
         await self._maybe_reap_sandboxes()
 
         snap = sample_system()
@@ -158,6 +159,26 @@ class WorkerPool:
                 detail=f"等待 Agent: {fingerprint}",
                 fingerprint=fingerprint,
             )
+
+    def _poll_checkins(self) -> None:
+        """Hourly (configurable) status question + webhook progress card."""
+        interval = int(self.settings.checkin_interval)
+        if interval <= 0:
+            return
+        from app.services.checkin import checkin_due, run_checkin
+        from app.services.feishu import _console_url
+
+        for task_id in list(self.manager._processes.keys()):
+            task = self.manager.db.get_task(task_id)
+            if not task or task.get("status") != "running":
+                continue
+            try:
+                if checkin_due(task, interval):
+                    run_checkin(
+                        self.manager, task, console_url=_console_url(self.settings)
+                    )
+            except Exception:
+                logger.exception("checkin failed task=%s", task_id)
 
     async def _maybe_reap_sandboxes(self) -> None:
         """Stop Docker sandboxes for finished tasks (throttled)."""

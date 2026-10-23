@@ -2215,3 +2215,17 @@ def test_batch_import_applies_proxy_and_headers(client: TestClient):
     assert task["proxy_url"] == "http://proxy.corp.test:8080"
     assert task["request_headers"] == "X-Scan: 1"
     assert task["instruction"] == "只测登录和订单接口"
+
+
+def test_mail_to_editable_while_running(client: TestClient, monkeypatch):
+    manager = client.app.state.manager
+    monkeypatch.setattr(manager.settings, "smtp_host", "smtp.corp.test")
+    created = client.post(
+        "/api/v1/tasks",
+        json={"type": "pentest", "target": "https://example.com", "held": True, "mail_to": "a@b.com"},
+    ).json()
+    manager.db.update_task(created["id"], status="running")
+    upd = client.patch(f"/api/v1/tasks/{created['id']}", json={"mail_to": "new@corp.test"})
+    assert upd.status_code == 200, upd.text
+    assert upd.json()["mail_to"] == "new@corp.test"
+    assert upd.json()["mail_status"] == "pending"

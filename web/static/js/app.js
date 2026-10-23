@@ -380,6 +380,7 @@
     $("releaseBtn").disabled = !held;
     $("editBtn").disabled = !held;
     $("renameBtn").disabled = !t;
+    $("mailToBtn").disabled = !t;
     $("saveNotesBtn").disabled = !t;
   }
 
@@ -1480,6 +1481,26 @@
     showImport(false);
     fillCreateFormForEdit(t);
     showCreate(true);
+  };
+
+  $("mailToBtn").onclick = async () => {
+    const t = currentTask();
+    if (!t) return;
+    const next = prompt(
+      "报告收件人（多个用逗号分隔，留空清除；运行中也可修改，完成后按新收件人发送）:",
+      t.mail_to || ""
+    );
+    if (next === null) return;
+    try {
+      await api.ensureSession();
+      await api.api(`/api/v1/tasks/${t.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ mail_to: next.trim() }),
+      });
+      await refresh();
+    } catch (err) {
+      alert(err.message);
+    }
   };
 
   $("renameBtn").onclick = async () => {

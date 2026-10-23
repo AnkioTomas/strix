@@ -904,6 +904,8 @@ button, input, select, textarea {
     0 1px 0 rgba(27, 34, 44, 0.04),
     0 18px 40px rgba(27, 34, 44, 0.16);
   padding: 1.15rem 1.2rem 1.05rem;
+  max-height: calc(100vh - 2.5rem);
+  overflow-y: auto;
   animation: modal-in 0.16s ease-out;
 }
 
@@ -934,16 +936,21 @@ button, input, select, textarea {
   color: var(--muted);
 }
 
+.modal-field input,
 .modal-field textarea {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.6rem 0.7rem;
   background: var(--surface);
   resize: vertical;
-  min-height: 6rem;
   line-height: 1.45;
 }
 
+.modal-field textarea { min-height: 6rem; }
+
+.modal-card .check { display: flex; gap: 0.4rem; align-items: center; margin-top: 1rem; font-size: 0.85rem; }
+
+.modal-field input:focus,
 .modal-field textarea:focus {
   outline: 2px solid var(--accent-soft);
   border-color: var(--accent);

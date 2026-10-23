@@ -675,16 +675,16 @@ def test_ingest_results(client: TestClient):
     assert "报告.zip" in disposition
     assert "example.com" in disposition
     with zipfile.ZipFile(io.BytesIO(zipped.content)) as zf:
-        assert "https_example.com-报告.md" in zf.namelist()
+        assert "example.com_443-报告.md" in zf.namelist()
 
     manager.db.update_task(task["id"], name="客户A门户", action="retest")
     renamed = client.get(f"/api/v1/tasks/{task['id']}/report?download=1")
     assert renamed.status_code == 200
     renamed_disp = urllib.parse.unquote(renamed.headers.get("content-disposition", ""))
-    assert "复测-客户A门户-报告.zip" in renamed_disp
+    assert "复测-客户A门户（example.com_443）-报告.zip" in renamed_disp
     with zipfile.ZipFile(io.BytesIO(renamed.content)) as zf:
         names = zf.namelist()
-        assert "复测-客户A门户-报告.md" in names
+        assert "复测-客户A门户（example.com_443）-报告.md" in names
         assert "penetration_test_report.md" not in names
 
     empty_counts = {
@@ -1657,7 +1657,6 @@ def mail_env(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("STRIX_MAIL_CC", "boss@example.test; audit@example.test")
     monkeypatch.setenv("STRIX_MAIL_DOMAIN", "example.test")
     monkeypatch.setenv("STRIX_MAIL_SUBJECT", "报告-{name}-{bu}")
-    monkeypatch.setenv("STRIX_MAIL_BODY", "{name}\\n共{total}个 {unknown}")
 
 
 def _batch_xlsx(rows: list[list[object]]) -> bytes:
@@ -1722,8 +1721,9 @@ def test_batch_import_creates_tasks_and_mails_report(
     assert done.json()["mail_status"] == "sent"
     assert sent["to"] == ["alice@corp.test"]
     assert sent["attachment"] == package
-    assert sent["subject"] == "报告-门户-BU1"
-    assert sent["body"] == "门户\n共0个 {unknown}"
+    assert sent["subject"] == "报告-门户（example.com:8443）-BU1"
+    assert "门户（example.com:8443）" in sent["html"]
+    assert sent["high_priority"] is False
 
 
 def test_batch_import_rejects_non_excel(client: TestClient):
@@ -2129,3 +2129,67 @@ def test_batch_sheet_skips_rows_without_name_and_url():
     assert len(rows) == 1
     assert rows[0].target == "eccp1.example.com:8118"
     assert rows[0].emails == ["a@b.com", "c@d.com"]
+
+
+def test_report_mail_lists_serious_findings_and_sets_priority(
+    mail_env, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    created = client.post(
+        "/api/v1/tasks", json={"type": "pentest", "target": "https://example.com"}
+    ).json()
+    manager = client.app.state.manager
+    package = tmp_path / "report.zip"
+    package.write_bytes(b"PK")
+    monkeypatch.setattr(manager, "get_report_package", lambda *_a, **_k: package)
+    monkeypatch.setattr(
+        manager,
+        "get_results",
+        lambda _tid, *a, **k: [
+            {"id": "a", "title": "高危SQL注入", "severity": "high"},
+            {"id": "b", "title": "RCE", "severity": "critical", "raw": {"retest_status": "fixed"}},
+            {"id": "c", "title": "信息泄露", "severity": "low"},
+        ],
+    )
+    monkeypatch.setattr(
+        manager,
+        "attach_task_overlays",
+        lambda tasks, **_k: [
+            t.update(finding_counts={"total": 3, "critical": 1, "high": 1, "low": 1}) for t in tasks
+        ],
+    )
+    sent: dict = {}
+    monkeypatch.setattr(
+        "app.services.mailer.send_report_mail", lambda settings, **kw: sent.update(kw)
+    )
+    manager.db.update_task(created["id"], status="completed", mail_to="a@b.com")
+    res = client.post(f"/api/v1/tasks/{created['id']}/send-report-mail")
+    assert res.status_code == 200, res.text
+    assert sent["high_priority"] is True
+    assert "已修复" in sent["html"]
+    assert sent["html"] and "高危SQL注入" in sent["html"] and "RCE" in sent["html"]
+    assert "信息泄露" not in sent["html"]
+    assert "{{" not in sent["html"]
+    assert sent["subject"].endswith("（example.com:443）") or "example.com:443" in sent["subject"]
+
+
+def test_send_report_mail_sets_importance_headers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from app.config import Settings
+    from app.services import mailer
+
+    seen: dict = {}
+    monkeypatch.setattr(
+        mailer, "_deliver", lambda settings, message, **kw: seen.update(msg=message)
+    )
+    attachment = tmp_path / "r.zip"
+    attachment.write_bytes(b"PK")
+    settings = Settings(STRIX_SMTP_HOST="smtp.corp.test", STRIX_SMTP_FROM="s@corp.test")
+    mailer.send_report_mail(
+        settings, to=["a@b.com"], subject="s", html="<p>b</p>", attachment=attachment,
+        attachment_name="r.zip", high_priority=True,
+    )
+    assert seen["msg"]["Importance"] == "High" and seen["msg"]["X-Priority"].startswith("1")
+    mailer.send_report_mail(
+        settings, to=["a@b.com"], subject="s", html="<p>b</p>", attachment=attachment,
+        attachment_name="r.zip",
+    )
+    assert seen["msg"]["Importance"] is None

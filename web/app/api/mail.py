@@ -6,11 +6,17 @@ import asyncio
 import re
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from app.security.auth import require_api_key
-from app.services.mailer import MailError, mail_enabled, send_test_mail, smtp_target
+from app.services.mailer import (
+    MailError,
+    mail_enabled,
+    sample_report_html,
+    send_test_mail,
+    smtp_target,
+)
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_key)])
 
@@ -41,6 +47,16 @@ async def mail_status(request: Request):
         "cc": settings.mail_cc_list(),
         "default_to": (_default_to(settings) or [""])[0],
     }
+
+
+@router.get("/mail/preview", response_class=HTMLResponse)
+async def mail_preview(request: Request):
+    """Render the HTML report mail with sample data (open in a browser to review)."""
+    settings = request.app.state.manager.settings
+    try:
+        return HTMLResponse(sample_report_html(settings))
+    except MailError as exc:
+        return _error(500, "MAIL_TEMPLATE_ERROR", str(exc))
 
 
 @router.post("/mail/test")

@@ -8,6 +8,8 @@ import socket
 import ssl
 from email.message import EmailMessage
 import re
+from datetime import datetime
+from html import escape
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -38,6 +40,159 @@ def parse_emails(value: object) -> list[str]:
         if part not in emails:
             emails.append(part)
     return emails
+
+
+_SEVERITY_LABELS = (
+    ("critical", "严重"),
+    ("high", "高危"),
+    ("medium", "中危"),
+    ("low", "低危"),
+    ("info", "信息"),
+)
+_FIX_LABELS = {
+    "fixed": "已修复",
+    "not_fixed": "未修复",
+    "partial": "部分修复",
+    "regressed": "复现",
+}
+
+
+_SEVERITY_COLORS = {
+    "critical": "#b91c1c",
+    "high": "#ea580c",
+    "medium": "#ca8a04",
+    "low": "#2563eb",
+    "info": "#64748b",
+}
+_DEFAULT_TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "mail_report.html"
+
+
+def _load_html_template(settings: Settings) -> str:
+    custom = settings.mail_html_file.strip()
+    path = Path(custom).expanduser() if custom else _DEFAULT_TEMPLATE
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise MailError(f"无法读取邮件 HTML 模板 {path}：{exc}") from exc
+
+
+def build_report_html(
+    settings: Settings,
+    *,
+    subject: str,
+    title: str,
+    target: str,
+    counts: dict[str, object],
+    findings: list[dict[str, object]],
+    bu: str = "",
+    owner: str = "",
+    task_id: str = "",
+    retest: bool = False,
+) -> str:
+    """Render the HTML mail. ``{{key}}`` placeholders; text values are escaped."""
+    n = {key: int(counts.get(key) or 0) for key, _ in _SEVERITY_LABELS}
+    total = int(counts.get("total") or sum(n.values()))
+    serious_total = n["critical"] + n["high"]
+    if n["critical"]:
+        accent, headline = "#b91c1c", f"发现 {serious_total} 个严重 / 高危漏洞，请优先处理"
+    elif n["high"]:
+        accent, headline = "#ea580c", f"发现 {serious_total} 个高危漏洞，请尽快处理"
+    elif total:
+        accent, headline = "#2563eb", f"共发现 {total} 个漏洞，未发现严重 / 高危漏洞"
+    else:
+        accent, headline = "#16a34a", "未发现漏洞"
+
+    cards = "".join(
+        f'<td align="center" style="background:#f8fafc;border:1px solid #e5e7eb;'
+        f'border-top:3px solid {_SEVERITY_COLORS[key]};border-radius:8px;padding:12px 4px;">'
+        f'<div style="font-size:26px;font-weight:700;color:{_SEVERITY_COLORS[key]};line-height:1.2;">{n[key]}</div>'
+        f'<div style="font-size:12px;color:#6b7280;margin-top:2px;">{label}</div></td>'
+        for key, label in _SEVERITY_LABELS
+    )
+
+    info = [("测试目标", target), ("所属 BU", bu), ("负责人", owner)]
+    info_rows = "".join(
+        f'<tr><td width="110" style="padding:10px 14px;color:#6b7280;border-bottom:1px solid #f1f5f9;">{k}</td>'
+        f'<td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;word-break:break-all;">{escape(v)}</td></tr>'
+        for k, v in info
+        if v
+    )
+
+    rows = []
+    for key, label in _SEVERITY_LABELS[:2]:
+        for item in findings:
+            if item.get("severity") != key:
+                continue
+            fix = _FIX_LABELS.get(str(item.get("fix_status") or ""))
+            badge = (
+                f' <span style="font-size:12px;color:#475569;background:#e2e8f0;border-radius:4px;'
+                f'padding:1px 6px;">{fix}</span>'
+                if fix
+                else ""
+            )
+            rows.append(
+                f'<tr><td width="64" style="padding:10px 12px;border-bottom:1px solid #f1f5f9;">'
+                f'<span style="background:{_SEVERITY_COLORS[key]};color:#fff;border-radius:4px;'
+                f'padding:2px 8px;font-size:12px;">{label}</span></td>'
+                f'<td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:14px;line-height:1.5;">'
+                f'{escape(str(item.get("title") or "未命名"))}{badge}</td></tr>'
+            )
+    serious_section = (
+        '<tr><td style="padding:24px 32px 0 32px;">'
+        '<div style="font-size:16px;font-weight:700;margin-bottom:12px;">严重 / 高危漏洞</div>'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="border:1px solid #e5e7eb;border-radius:8px;">'
+        + "".join(rows)
+        + "</table></td></tr>"
+        if rows
+        else ""
+    )
+
+    advice = (
+        "建议先处理上方严重 / 高危问题，修复后可申请复测确认。"
+        if serious_total
+        else "详细的漏洞描述、复现步骤与修复建议请见报告。"
+    )
+    intro = (
+        f"「{escape(title)}」的{'复测' if retest else '安全测试'}已完成，结果概览如下。"
+    )
+    values = {
+        "subject": escape(subject),
+        "title": escape(title),
+        "accent": accent,
+        "headline": escape(headline),
+        "intro": intro,
+        "info_rows": info_rows,
+        "total": str(total),
+        "severity_cards": cards,
+        "serious_section": serious_section,
+        "advice": escape(advice),
+        "task_id": escape(task_id or "-"),
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+    return re.sub(
+        r"\{\{(\w+)\}\}",
+        lambda m: values.get(m.group(1), m.group(0)),
+        _load_html_template(settings),
+    )
+
+
+def sample_report_html(settings: Settings) -> str:
+    return build_report_html(
+        settings,
+        subject="【安全测试报告】示例应用（demo.example.com:8443）",
+        title="示例应用（demo.example.com:8443）",
+        target="https://demo.example.com:8443",
+        counts={"total": 9, "critical": 1, "high": 2, "medium": 3, "low": 2, "info": 1},
+        findings=[
+            {"severity": "critical", "title": "登录接口存在 SQL 注入，可读取全部用户数据"},
+            {"severity": "high", "title": "订单详情接口越权访问（IDOR）", "fix_status": "not_fixed"},
+            {"severity": "high", "title": "文件上传未校验类型导致任意文件上传", "fix_status": "fixed"},
+        ],
+        bu="YFI",
+        owner="owner@example.com",
+        task_id="demo-0001",
+    )
 
 
 class _Safe(dict):
@@ -110,9 +265,10 @@ def send_report_mail(
     *,
     to: list[str],
     subject: str,
-    body: str,
+    html: str,
     attachment: Path,
     attachment_name: str,
+    high_priority: bool = False,
 ) -> None:
     if not mail_enabled(settings):
         raise MailError("未配置 STRIX_SMTP_HOST，无法发送邮件")
@@ -129,7 +285,11 @@ def send_report_mail(
     if to and cc:
         message["Cc"] = ", ".join(cc)
     message["Subject"] = subject
-    message.set_content(body)
+    if high_priority:
+        message["Importance"] = "High"
+        message["X-Priority"] = "1 (Highest)"
+        message["X-MSMail-Priority"] = "High"
+    message.set_content(html, subtype="html")
     message.add_attachment(
         attachment.read_bytes(),
         maintype="application",
@@ -188,7 +348,5 @@ def send_test_mail(settings: Settings, *, to: list[str]) -> None:
     message["From"] = sender
     message["To"] = ", ".join(to)
     message["Subject"] = "【Strix】邮件发送测试"
-    message.set_content(
-        f"这是一封测试邮件。收到说明 SMTP 配置正确：{smtp_target(settings)}\n"
-    )
+    message.set_content(sample_report_html(settings), subtype="html")
     _deliver(settings, message, sender=sender, recipients=to)

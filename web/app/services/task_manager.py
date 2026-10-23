@@ -114,15 +114,23 @@ _HELD_ONLY_FIELDS = frozenset(
 _DOWNLOAD_UNSAFE = re.compile(r'[/\\:*?"<>|\x00-\x1f]+')
 
 
+def task_display_title(task: dict[str, Any]) -> str:
+    """``应用名称（host:port）`` for pentest tasks; falls back to name / target."""
+    from app.services.findings import _parse_address
+
+    name = str(task.get("name") or "").strip()
+    parsed = (
+        _parse_address(str(task.get("target") or "")) if task.get("type") == "pentest" else None
+    )
+    address = parsed[0] if parsed else ""
+    if name and address and address not in name:
+        return f"{name}（{address}）"
+    return name or address or str(task.get("target") or task.get("source_url") or "").strip()
+
+
 def report_download_stem(task: dict[str, Any]) -> str:
-    """Client-facing report basename: task name, with 「复测-」 when action is retest."""
-    base = str(
-        task.get("name")
-        or task.get("target")
-        or task.get("source_url")
-        or task.get("id")
-        or "report"
-    ).strip()
+    """Client-facing report basename: ``名称（host:port）``, 「复测-」 prefix for retests."""
+    base = (task_display_title(task) or str(task.get("id") or "report")).strip()
     base = _DOWNLOAD_UNSAFE.sub("_", base)
     base = re.sub(r"\s+", " ", base).strip(" ._") or "report"
     base = base[:120]
@@ -1497,11 +1505,21 @@ class TaskManager:
             package = self.get_report_package(task_id)
             self.attach_task_overlays([task])
             counts = task.get("finding_counts") or {}
-            name = str(task.get("name") or task.get("target") or task_id)
+            name = task_display_title(task) or task_id
             owner = ""
             for line in str(task.get("notes") or "").splitlines():
                 if line.startswith("负责人: "):
                     owner = line[len("负责人: ") :]
+            from app.services.assets import _finding_detail
+            from app.services.findings import invalid_finding_ids
+            from app.services.mailer import build_report_html
+
+            skipped = invalid_finding_ids(self.db.list_finding_flags(task_id))
+            details = [
+                _finding_detail(item)
+                for item in self.get_results(task_id)
+                if str(item.get("id") or "") not in skipped
+            ]
             values = {
                 "name": name,
                 "target": task.get("target") or "-",
@@ -1522,13 +1540,27 @@ class TaskManager:
                 "owner": owner,
                 "task_id": task_id,
             }
+            subject = render_template(self.settings.mail_subject, values)
+            html = build_report_html(
+                self.settings,
+                subject=subject,
+                title=name,
+                target=str(task.get("target") or "-"),
+                counts=counts,
+                findings=details,
+                bu=str(values["bu"]),
+                owner=owner,
+                task_id=task_id,
+                retest=task.get("action") == "retest",
+            )
             send_report_mail(
                 self.settings,
                 to=recipients,
-                subject=render_template(self.settings.mail_subject, values),
-                body=render_template(self.settings.mail_body, values),
+                subject=subject,
+                html=html,
                 attachment=package,
                 attachment_name=f"{report_download_stem(task)}.zip",
+                high_priority=bool(counts.get("critical") or counts.get("high")),
             )
         except (MailError, TaskError) as exc:
             message = exc.message if isinstance(exc, TaskError) else str(exc)

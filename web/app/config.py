@@ -100,16 +100,11 @@ class Settings(BaseSettings):
     # Appended to a bare owner id (no "@") from the spreadsheet, e.g. example.com.
     mail_domain: str = Field(default="", alias="STRIX_MAIL_DOMAIN")
 
-    # Mail templates; placeholders: {name} {target} {total} {critical} {high} {medium}
-    # {low} {info} {bu} {owner} {task_id}. A literal "\\n" in the value is a newline.
+    # Subject template; placeholders: {name} {target} {total} {critical} {high} {medium}
+    # {low} {info} {bu} {owner} {task_id}. {name} is "应用名称（域名:端口）".
     mail_subject: str = Field(default="【安全测试报告】{name}", alias="STRIX_MAIL_SUBJECT")
-    mail_body: str = Field(
-        default=(
-            "您好，\\n\\n应用「{name}」的安全测试已完成，中文测试报告见附件（ZIP，含报告与截图）。\\n"
-            "测试目标：{target}\\n发现漏洞：{total} 个\\n\\n此邮件由系统自动发送。"
-        ),
-        alias="STRIX_MAIL_BODY",
-    )
+    # Body is an HTML mail: built-in app/templates/mail_report.html, or your own file.
+    mail_html_file: str = Field(default="", alias="STRIX_MAIL_HTML_FILE")
 
     def mail_cc_list(self) -> list[str]:
         return [p.strip() for p in re.split(r"[,;，；\s]+", self.mail_cc) if p.strip()]

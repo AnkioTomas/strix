@@ -92,7 +92,7 @@ PYTHONPATH=. python -m app
 | `STRIX_SMTP_SSL` | `true` | `true`=隐式 TLS（465）；`false`=明文/STARTTLS（587/25） |
 | `STRIX_MAIL_CC` | （空） | 报告邮件固定抄送，逗号/分号分隔 |
 | `STRIX_MAIL_SUBJECT` | `【安全测试报告】{name}` | 邮件标题模板；占位符 `{name} {target} {total} {critical} {high} {medium} {low} {info} {bu} {owner} {task_id}` |
-| `STRIX_MAIL_BODY` | 内置中文正文 | 邮件正文模板，占位符同上；写 `\n` 表示换行 |
+| `STRIX_MAIL_HTML_FILE` | 内置模板 | 自定义 HTML 邮件模板文件路径；内置 `app/templates/mail_report.html`，占位符形如 `{{title}}` |
 | `STRIX_MAIL_DOMAIN` | （空） | 表格里负责人不含 `@` 时自动补的邮箱域名 |
 | `STRIX_FEISHU_PROXY` | （空） | 仅飞书出站用的 HTTP(S) 代理，如 `http://127.0.0.1:7890`；空=直连（不吃系统 `HTTP_PROXY`） |
 | `STRIX_ALLOW_PRIVATE_TARGETS` | 1 | 是否允许扫私网/localhost |
@@ -138,6 +138,7 @@ PYTHONPATH=. python -m app
 | * | `/api/v1/tasks/{id}/viewer/...` | 同源反代 Live Viewer |
 | GET | `/api/v1/assets/pentests` | 资产系统对接：每个「资产（IP/域名+端口）× 任务」一条，含 `tags`、`pentest`（开始/结束时间、耗时）、`tokens`（input/output/cached/total/cost）、`finding_counts`；筛选 `status`（默认 completed）、`since`（按任务更新时间增量拉取）、`tag`、`q`、`limit`/`offset`。tag = 自动（渗透测试、扫描模式、复测、最高严重度/无漏洞）+ 手动 `tags`。`findings[].fix_status` = open/fixed/not_fixed/partial/regressed。新旧两种复测都能识别：旧的原地续跑直接写在原任务；新的复测子任务（`action=retest`）默认与原任务按资产合并为一条（`collapse=false` 看原始记录；返回 `origin_task_id`/`task_ids`），修复状态逐漏洞 id 累积，token/开始时间取最新任务（复测会克隆 run.json，数值已是累计）。token 为任务级，同一任务多个资产时重复出现 |
 | GET | `/api/v1/mail` | 邮件配置状态（是否启用、SMTP 地址、抄送） |
+| GET | `/api/v1/mail/preview` | 用示例数据渲染 HTML 报告邮件，浏览器直接打开预览 |
 | POST | `/api/v1/mail/test` | 发测试邮件验证 SMTP/代理/登录；`{"to": "a@b.com"}`，省略则依次取：第一个抄送 → 发件人 → SMTP 账号；页面左侧「测邮件」按钮同此 |
 | GET | `/health` | 健康 + 准入状态 |
 

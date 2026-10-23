@@ -184,7 +184,11 @@ class LiveStrixSession:
             )
             _prepare_resume_args(args, run_name=str(task["run_name"]), task=task)
         else:
-            if task.get("action") in {"resume", "retest"} and not task.get("run_name"):
+            if (
+                task.get("action") in {"resume", "retest"}
+                and not task.get("run_name")
+                and task.get("parent_task_id")
+            ):
                 raise RuntimeError(f"{task.get('action')} requested but task has no run_name")
             if task.get("type") == "pentest":
                 from strix.interface.scan_setup import HOST_GATEWAY_HOSTNAME

@@ -319,23 +319,38 @@
     updateAttachmentsHint();
   }
 
-  function fillCreateFormForRetest(t) {
-    fillCreateFormFromTask(t, "retry");
-    createDraft = { retestId: t.id };
+  async function startRetest({ file, task }) {
+    let draft;
+    try {
+      await api.ensureSession();
+      if (task) {
+        draft = await api.api(`/api/v1/tasks/${task.id}/retest-draft`);
+      } else {
+        const form = new FormData();
+        form.append("report", file);
+        draft = await api.apiForm("/api/v1/tasks/retest-draft", form);
+      }
+    } catch (e) {
+      alert(`解析报告失败：${e.message}`);
+      return;
+    }
+    showImport(false);
+    resetCreateForm();
+    createDraft = task ? { retestTaskId: task.id, reportName: "原任务报告" } : { retestReport: file, reportName: file.name };
     const title = $("createPanel").querySelector("h2");
-    if (title) title.textContent = "复测任务";
-    $("createTask").textContent = "开始复测";
-    $("taskType").disabled = true;
-    $("target").disabled = true;
-    $("gitUrl").disabled = true;
-    $("gitBranch").disabled = true;
-    $("attachments").disabled = true;
-    $("instructionLabel").textContent = "复测说明（凭证 / 环境）";
-    $("instruction").value = "";
-    $("instruction").placeholder =
-      "例如：登录账号 admin / 新密码 xxx；Cookie: session=...；目标仍是 https://example.com，忽略证书错误";
-    $("taskName").value = t.name && t.name.startsWith("复测") ? t.name : `复测-${taskDisplayName(t)}`;
+    if (title) title.textContent = "复测任务（确认后开始）";
+    $("createTask").textContent = "确认并开始复测";
+    $("taskName").value = draft.name || "";
+    $("taskType").value = "pentest";
+    $("target").value = draft.target || "";
+    $("instructionLabel").textContent = "复测提示词（可修改；凭证 / 环境变化请补在末尾）";
+    $("instruction").value = draft.instruction || "";
+    const n = (draft.findings || []).length;
+    $("taskNotes").value = `复测自：${createDraft.reportName}${n ? `（${n} 项漏洞）` : ""}`;
+    syncCreateTypeFields();
     updateAttachmentsHint();
+    showCreate(true);
+    if (!draft.target) alert("未能从报告中识别目标地址，请手动填写 Target。");
   }
 
   function showImport(show) {
@@ -370,7 +385,6 @@
     const queued = !!(t && t.status === "queued");
     $("deleteBtn").disabled = !(t && DELETABLE.has(t.status));
     $("retryBtn").disabled = !terminal;
-    $("retestBtn").disabled = !terminal;
     $("resumeBtn").disabled = !terminal;
     $("refreshReportBtn").disabled = !(terminal || active);
     $("translateReportBtn").disabled = !(terminal || active);
@@ -1106,8 +1120,8 @@
     if (!files.length) {
       hint.textContent = createDraft?.editId
         ? "编辑挂起任务不改附件。"
-        : createDraft?.retestId
-          ? "复测沿用原任务的环境与附件。"
+        : createDraft?.reportName
+          ? `${createDraft.reportName}会自动作为附件交给 Agent；也可另加附件。`
         : createDraft
           ? "父任务附件会自动复制；也可另加新附件。"
           : "可选。例如 PoC、wordlist、凭证说明。";
@@ -1350,37 +1364,6 @@
   }
 
   $("createTask").onclick = async () => {
-    if (createDraft?.retestId) {
-      const body = {
-        name: $("taskName").value.trim() || null,
-        notes: $("taskNotes").value.trim() || null,
-        mail_to: $("taskMailTo").value.trim(),
-        scan_mode: $("scanMode").value,
-        held: $("taskHeld").checked,
-        earliest_start: localDatetimeToUtcZ($("earliestStart").value),
-        use_proxy: $("useProxy").checked,
-        proxy_url: $("useProxy").checked ? $("proxyUrl").value.trim() : null,
-        use_headers: $("useHeaders").checked,
-        request_headers: $("useHeaders").checked ? $("requestHeaders").value : null,
-      };
-      const note = $("instruction").value.trim();
-      if (note) body.instruction = note;
-      try {
-        await api.ensureSession();
-        const task = await api.api(`/api/v1/tasks/${createDraft.retestId}/retest`, {
-          method: "POST",
-          body: JSON.stringify(body),
-        });
-        resetCreateForm();
-        showCreate(false);
-        await refresh();
-        selectTask(task.id);
-        setTab("viewer");
-      } catch (e) {
-        alert(e.message);
-      }
-      return;
-    }
     if (createDraft?.editId) {
       const type = $("taskType").value;
       const body = {
@@ -1458,6 +1441,8 @@
       const branch = $("gitBranch").value.trim();
       if (branch) form.append("source_branch", branch);
     }
+    if (createDraft?.retestReport) form.append("retest_report", createDraft.retestReport);
+    if (createDraft?.retestTaskId) form.append("retest_report_task_id", createDraft.retestTaskId);
     if (createDraft?.parentId) {
       form.append("parent_task_id", createDraft.parentId);
       form.append("action", createDraft.action || "retry");
@@ -1630,13 +1615,17 @@
     }
   };
 
+  const pickRetestZip = () => {
+    const input = $("retestZip");
+    input.value = "";
+    input.click();
+  };
   $("retestBtn").onclick = () => {
     const t = currentTask();
-    if (!t) return;
-    showImport(false);
-    fillCreateFormForRetest(t);
-    showCreate(true);
+    if (t) startRetest({ task: t });
   };
+  $("newRetestBtn").onclick = pickRetestZip;
+  $("retestZip").onchange = (ev) => ev.target.files[0] && startRetest({ file: ev.target.files[0] });
 
   $("refreshReportBtn").onclick = async () => {
     if (!selected) return;

@@ -150,8 +150,12 @@ async def _parse_create_payload(
             in {"1", "true", "yes", "on"},
             "request_headers": _form_value(form, "request_headers"),
         }
+        retest_report = form.get("retest_report")
+        retest_task_id = _form_value(form, "retest_report_task_id")
         parent_task_id = _form_value(form, "parent_task_id")
-        if parent_task_id:
+        if retest_task_id or (retest_report is not None and hasattr(retest_report, "read")):
+            payload["action"] = "retest"
+        elif parent_task_id:
             payload["parent_task_id"] = parent_task_id
             payload["action"] = _form_value(form, "action") or "retry"
         max_budget = _form_value(form, "max_budget")
@@ -179,6 +183,15 @@ async def _parse_create_payload(
             raise TaskError("INVALID_REQUEST", str(exc.errors())) from exc
 
         uploads: list[tuple[str, bytes]] = []
+        if retest_report is not None and hasattr(retest_report, "read"):
+            uploads.append(
+                (getattr(retest_report, "filename", None) or "report.zip", await retest_report.read())
+            )
+        if retest_task_id:
+            data, name = await asyncio.to_thread(
+                _task_report_zip, get_manager(request), retest_task_id
+            )
+            uploads.append((name, data))
         for item in form.getlist("attachments"):
             if not hasattr(item, "read"):
                 continue
@@ -218,6 +231,49 @@ async def create_task(
     except TaskError as exc:
         return _error(exc)
     return _summarize(task, manager)
+
+
+def _task_report_zip(manager: TaskManager, task_id: str) -> tuple[bytes, str]:
+    from app.services.results import resolve_report_package
+
+    task = manager.get_task(task_id)
+    run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
+    zip_path = resolve_report_package(run_dir) if run_dir else None
+    if zip_path is None:
+        raise TaskError("REPORT_NOT_FOUND", "该任务还没有可用的报告", status_code=404)
+    return zip_path.read_bytes(), f"{report_download_stem(task)}.zip"
+
+
+@router.get("/tasks/{task_id}/retest-draft")
+async def task_retest_draft(task_id: str, manager: TaskManager = Depends(get_manager)):
+    """Pre-fill a retest task from this task's own report (creates nothing)."""
+    from app.services.retest_draft import DraftError, build_retest_draft
+
+    try:
+        data, name = await asyncio.to_thread(_task_report_zip, manager, task_id)
+        return await asyncio.to_thread(build_retest_draft, data, name)
+    except TaskError as exc:
+        return _error(exc)
+    except DraftError as exc:
+        return _error(TaskError("INVALID_REPORT", str(exc)))
+
+
+@router.post("/tasks/retest-draft")
+async def retest_draft(request: Request):
+    """Parse an uploaded report zip into a pre-filled retest task form (creates nothing)."""
+    from app.services.retest_draft import DraftError, build_retest_draft
+
+    form = await request.form()
+    upload = form.get("report")
+    if upload is None or not hasattr(upload, "read"):
+        return _error(TaskError("INVALID_REQUEST", "请上传报告 zip（字段名 report）"))
+    data = await upload.read()
+    try:
+        return await asyncio.to_thread(
+            build_retest_draft, data, getattr(upload, "filename", None)
+        )
+    except DraftError as exc:
+        return _error(TaskError("INVALID_REPORT", str(exc)))
 
 
 @router.post("/tasks/batch-import")

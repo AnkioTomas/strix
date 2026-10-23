@@ -273,6 +273,75 @@ def test_create_task_with_attachments(client: TestClient):
         assert Path(item["source_path"]).is_file()
 
 
+def _report_zip() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(
+            "penetration_test_report.md",
+            "# 报告\n\n## 1. [ 高危 ] SQL 注入\n\n**地址：** https://example.com/login\n\n"
+            "## 2. [ 中危 ] 反射 XSS（未修复）\n",
+        )
+    return buf.getvalue()
+
+
+def test_retest_draft_from_report_zip_then_create(client: TestClient):
+    data = _report_zip()
+    draft = client.post(
+        "/api/v1/tasks/retest-draft",
+        files={"report": ("客户A（example.com）.zip", data, "application/zip")},
+    )
+    assert draft.status_code == 200, draft.text
+    body = draft.json()
+    assert body["target"] == "https://example.com/login"
+    assert body["name"].startswith("复测-")
+    assert body["findings"] == ["SQL 注入", "反射 XSS"]
+    assert "SQL 注入" in body["instruction"] and "retest_status" in body["instruction"]
+
+    assert client.post(
+        "/api/v1/tasks/retest-draft", files={"report": ("x.zip", b"nope", "application/zip")}
+    ).status_code == 400
+
+    res = client.post(
+        "/api/v1/tasks",
+        data={
+            "type": "pentest",
+            "target": body["target"],
+            "name": body["name"],
+            "instruction": body["instruction"],
+        },
+        files=[("retest_report", ("report.zip", data, "application/zip"))],
+    )
+    assert res.status_code == 202, res.text
+    task = res.json()
+    assert task["action"] == "retest"
+    assert (get_settings().tasks_dir / task["id"] / "attachments" / "report.zip").is_file()
+
+
+def test_retest_draft_from_task_report_autoattaches(client: TestClient):
+    created = client.post(
+        "/api/v1/tasks",
+        json={"type": "pentest", "target": "https://example.com", "scan_mode": "quick"},
+    ).json()
+    run_dir = get_settings().tasks_dir / created["id"] / "strix_runs" / "r1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "penetration_test_report.zip").write_bytes(_report_zip())
+    client.app.state.manager.db.update_task(created["id"], run_name="r1", status="completed")
+
+    draft = client.get(f"/api/v1/tasks/{created['id']}/retest-draft")
+    assert draft.status_code == 200, draft.text
+    assert draft.json()["target"] == "https://example.com/login"
+
+    res = client.post(
+        "/api/v1/tasks",
+        data={"type": "pentest", "target": "https://example.com", "retest_report_task_id": created["id"]},
+        files=[("attachments", ("n.txt", b"x", "text/plain"))],
+    )
+    assert res.status_code == 202, res.text
+    assert res.json()["action"] == "retest"
+    att = get_settings().tasks_dir / res.json()["id"] / "attachments"
+    assert any(p.suffix == ".zip" for p in att.iterdir())
+
+
 def test_complete_task_marks_finished_and_sticks(client: TestClient):
     res = client.post(
         "/api/v1/tasks",

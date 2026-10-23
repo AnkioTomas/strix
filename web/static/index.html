@@ -64,6 +64,8 @@
           <button type="button" class="btn ghost" id="batchTaskBtn" title="Excel 批量创建测试任务，完成后自动邮件发送中文报告">批量</button>
           <button type="button" class="btn ghost" id="mailTestBtn" title="发送一封测试邮件，验证 SMTP / 代理配置">测邮件</button>
           <input type="file" id="batchFile" accept=".xlsx" hidden />
+          <button type="button" class="btn ghost" id="newRetestBtn" title="导入外部报告 zip，生成预填好的复测任务，确认后开始">复测(zip)</button>
+          <input type="file" id="retestZip" accept=".zip" hidden />
           <button type="button" class="btn ghost" id="importTaskBtn">导入</button>
           <button type="button" class="btn" id="newTaskBtn">新建</button>
         </div>
@@ -213,7 +215,7 @@
             <button type="button" class="btn ghost" id="releaseBtn">放行</button>
             <button type="button" class="btn ghost" id="retryBtn">重试</button>
             <button type="button" class="btn ghost" id="resumeBtn">继续 (Resume)</button>
-            <button type="button" class="btn ghost" id="retestBtn">复测</button>
+            <button type="button" class="btn ghost" id="retestBtn" title="自动取本任务报告，预填复测任务，确认后开始">复测</button>
             <button type="button" class="btn" id="completeBtn">标记完成</button>
             <button type="button" class="btn danger" id="cancelBtn">取消</button>
             <button type="button" class="btn danger" id="deleteBtn">删除</button>

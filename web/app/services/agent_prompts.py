@@ -51,3 +51,28 @@ def focused_retest_instruction(findings: list[dict[str, Any]]) -> str:
 对每个 id：复测 → update retest_status（fixed/not_fixed/partial/regressed）+ screenshots/硬证据；
 未列出的不要改。finish_scan 一次。{_REPORT_STYLE}
 """
+
+
+MAX_REPORT_CHARS = 40000
+
+
+def retest_from_report_instruction(report_md: str, zip_name: str | None = None) -> str:
+    """Prompt for a fresh task that retests the findings of a delivered report."""
+    body = report_md.strip()
+    if len(body) > MAX_REPORT_CHARS:
+        body = body[:MAX_REPORT_CHARS] + "\n\n…（报告过长，已截断；完整报告见附件）"
+    attached = f"（完整报告与截图在附件 /workspace/{zip_name}）" if zip_name else ""
+    return f"""\
+[复测 — 强制]
+这是一次全新的复测任务，依据下方原报告{attached}逐条复测；不要扩测新漏洞。
+对原报告中的每一条漏洞（不得遗漏）：先按报告的地址与复现步骤验证是否仍可利用；
+用 create_vulnerability_report 以原标题登记，再用 update_vulnerability_report 写 retest_status
+（fixed / not_fixed / partial / regressed）；fixed 必须有 screenshots 或硬证据；
+fix_verification 写本次复测的操作步骤与结果。
+全部登记后用 list_reports 逐条核对，缺 retest_status 的补齐，再 finish_scan 一次；
+executive_summary 概括复测结论。凭证 / 环境变化见下方[附加说明]（如有）。
+{_REPORT_STYLE}
+
+[原报告]
+{body}
+"""

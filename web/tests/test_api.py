@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import urllib.parse
 import zipfile
 from pathlib import Path
@@ -1969,3 +1970,27 @@ def test_send_test_mail_goes_through_smtp_proxy(monkeypatch: pytest.MonkeyPatch)
     mailer.send_test_mail(settings, to=["a@b.com"])
     assert calls["proxy"] == "http://proxy.corp.test:80" and calls["port"] == 587
     assert calls["to"] == ["a@b.com"] and calls["sender"] == "u@corp.test"
+
+
+def test_openpyxl_survives_broken_numpy(tmp_path):
+    import subprocess
+    import sys
+
+    (tmp_path / "numpy").mkdir()
+    (tmp_path / "numpy" / "__init__.py").write_text(
+        "raise RuntimeError('NumPy was built with baseline optimizations')\n"
+    )
+    code = (
+        "from app.services.batch_import import _load_openpyxl;"
+        "print(_load_openpyxl().__name__)"
+    )
+    web_dir = Path(__file__).resolve().parents[1]
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=web_dir,
+        env={**os.environ, "PYTHONPATH": f"{tmp_path}{os.pathsep}{web_dir}"},
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 0, out.stderr
+    assert "load_workbook" in out.stdout

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import re
+import sys
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -69,8 +70,21 @@ def owner_emails(owner: str, mail_domain: str = "") -> list[str]:
     return emails
 
 
+def _load_openpyxl():
+    """openpyxl optionally imports numpy; a numpy that crashes on this CPU
+    (RuntimeError, not ImportError) must not break Excel import."""
+    try:
+        from openpyxl import load_workbook
+    except RuntimeError:
+        for name in [m for m in sys.modules if m == "numpy" or m.startswith(("numpy.", "openpyxl"))]:
+            del sys.modules[name]
+        sys.modules["numpy"] = None  # type: ignore[assignment]
+        from openpyxl import load_workbook
+    return load_workbook
+
+
 def parse_sheet(data: bytes, *, mail_domain: str = "") -> list[BatchRow]:
-    from openpyxl import load_workbook
+    load_workbook = _load_openpyxl()
 
     try:
         sheet = load_workbook(io.BytesIO(data), read_only=True, data_only=True).active

@@ -1446,7 +1446,11 @@ class TaskManager:
             logger.exception("report mail failed for %s", task_id)
 
     def batch_create(
-        self, rows: list[Any], *, scan_mode: str | None = None
+        self,
+        rows: list[Any],
+        *,
+        scan_mode: str | None = None,
+        options: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Create one pentest task per spreadsheet row; failures are reported per row."""
         from app.services.mailer import mail_enabled
@@ -1474,6 +1478,7 @@ class TaskManager:
                     notes=notes or None,
                     tags=[row.bu] if row.bu else None,
                     scan_mode=scan_mode or self.settings.default_scan_mode,
+                    **(options or {}),
                 )
                 task = self.create_task(req)
             except (TaskError, ValidationError) as exc:

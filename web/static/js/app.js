@@ -1181,7 +1181,8 @@
   $("batchTaskBtn").onclick = () => {
     alert(
       "Excel 列：应用名称、端口、BU、负责人、URL（首行为表头；负责人填邮箱）。\n" +
-        "每行创建一个测试任务，完成后自动把中文报告发给负责人，并抄送配置的邮箱。"
+        "每行创建一个测试任务，完成后自动把中文报告发给负责人，并抄送配置的邮箱。\n" +
+        "会沿用新建表单里已勾选的「代理」和「附加请求头」。"
     );
     $("batchFile").click();
   };
@@ -1191,6 +1192,17 @@
     if (!file) return;
     const form = new FormData();
     form.append("file", file);
+    // Same local options as the create form: proxy / extra request headers.
+    const proxy = loadProxyCache();
+    if (proxy.use && proxy.url) {
+      form.append("use_proxy", "true");
+      form.append("proxy_url", proxy.url);
+    }
+    const headers = loadHeadersCache();
+    if (headers.use && headers.text) {
+      form.append("use_headers", "true");
+      form.append("request_headers", headers.text);
+    }
     try {
       await api.ensureSession();
       const res = await api.apiForm("/api/v1/tasks/batch-import", form);

@@ -2193,3 +2193,23 @@ def test_send_report_mail_sets_importance_headers(monkeypatch: pytest.MonkeyPatc
         attachment_name="r.zip",
     )
     assert seen["msg"]["Importance"] is None
+
+
+def test_batch_import_applies_proxy_and_headers(client: TestClient):
+    sheet = _batch_xlsx([["门户", 8443, "BU1", "a@corp.test", "https://example.com"]])
+    res = client.post(
+        "/api/v1/tasks/batch-import",
+        files={"file": ("apps.xlsx", sheet, "application/vnd.ms-excel")},
+        data={
+            "use_proxy": "true",
+            "proxy_url": "http://proxy.corp.test:8080",
+            "use_headers": "true",
+            "request_headers": "X-Scan: 1",
+        },
+    )
+    assert res.status_code == 200, res.text
+    entry = res.json()["results"][0]
+    assert entry.get("task_id"), entry
+    task = client.get(f"/api/v1/tasks/{entry['task_id']}").json()
+    assert task["proxy_url"] == "http://proxy.corp.test:8080"
+    assert task["request_headers"] == "X-Scan: 1"

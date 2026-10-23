@@ -238,7 +238,16 @@ async def batch_import_tasks(
     except SheetError as exc:
         return _error(TaskError("INVALID_REQUEST", str(exc)))
     scan_mode = _form_value(form, "scan_mode")
-    results = await asyncio.to_thread(manager.batch_create, rows, scan_mode=scan_mode)
+    truthy = {"1", "true", "yes", "on"}
+    options = {
+        "use_proxy": str(form.get("use_proxy") or "").lower() in truthy,
+        "proxy_url": _form_value(form, "proxy_url"),
+        "use_headers": str(form.get("use_headers") or "").lower() in truthy,
+        "request_headers": _form_value(form, "request_headers"),
+    }
+    results = await asyncio.to_thread(
+        manager.batch_create, rows, scan_mode=scan_mode, options=options
+    )
     created = sum(1 for item in results if item.get("task_id"))
     return {"total": len(results), "created": created, "results": results}
 

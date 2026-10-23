@@ -2201,6 +2201,7 @@ def test_batch_import_applies_proxy_and_headers(client: TestClient):
         "/api/v1/tasks/batch-import",
         files={"file": ("apps.xlsx", sheet, "application/vnd.ms-excel")},
         data={
+            "instruction": "只测登录和订单接口",
             "use_proxy": "true",
             "proxy_url": "http://proxy.corp.test:8080",
             "use_headers": "true",
@@ -2213,3 +2214,4 @@ def test_batch_import_applies_proxy_and_headers(client: TestClient):
     task = client.get(f"/api/v1/tasks/{entry['task_id']}").json()
     assert task["proxy_url"] == "http://proxy.corp.test:8080"
     assert task["request_headers"] == "X-Scan: 1"
+    assert task["instruction"] == "只测登录和订单接口"

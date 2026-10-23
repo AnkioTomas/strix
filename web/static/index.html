@@ -338,6 +338,34 @@
     </div>
   </div>
 
+  <div class="modal-root hidden" id="batchModal" role="dialog" aria-modal="true" aria-labelledby="batchModalTitle">
+    <div class="modal-backdrop" id="batchModalBackdrop"></div>
+    <div class="modal-card">
+      <header class="modal-head">
+        <h2 id="batchModalTitle">批量导入</h2>
+        <p class="modal-sub">Excel 列：应用名称、端口、BU、负责人（填邮箱）、URL，首行为表头。每行创建一个测试任务，完成后把中文报告发给负责人并抄送配置的邮箱。下面的设置会应用到这批所有任务。</p>
+      </header>
+      <label class="modal-field">
+        <span>Instruction（可选）</span>
+        <textarea id="batchInstruction" rows="3" placeholder="重点测试 IDOR / SQL Injection …"></textarea>
+      </label>
+      <label class="check"><input id="batchUseProxy" type="checkbox" /> 要求 Agent 使用指定 HTTP 代理</label>
+      <label class="modal-field">
+        <span>代理 URL</span>
+        <input id="batchProxyUrl" placeholder="http://127.0.0.1:7890" />
+      </label>
+      <label class="check"><input id="batchUseHeaders" type="checkbox" /> 要求 Agent 附加请求头</label>
+      <label class="modal-field">
+        <span>请求头（每行一条 Name: value）</span>
+        <textarea id="batchHeaders" rows="3" placeholder="Authorization: ******"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="batchModalCancel">取消</button>
+        <button type="button" class="btn" id="batchModalConfirm">选择 Excel 并导入</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/penna-markdown@0.2.5/dist/penna-render.min.js"></script>
   <script src="/static/js/api.js"></script>
   <script src="/static/js/penna.js"></script>

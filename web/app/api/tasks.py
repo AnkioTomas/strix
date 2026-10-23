@@ -240,6 +240,7 @@ async def batch_import_tasks(
     scan_mode = _form_value(form, "scan_mode")
     truthy = {"1", "true", "yes", "on"}
     options = {
+        "instruction": _form_value(form, "instruction"),
         "use_proxy": str(form.get("use_proxy") or "").lower() in truthy,
         "proxy_url": _form_value(form, "proxy_url"),
         "use_headers": str(form.get("use_headers") or "").lower() in truthy,

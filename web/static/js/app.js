@@ -1178,30 +1178,68 @@
       btn.textContent = "测邮件";
     }
   };
+  const BATCH_INSTRUCTION_KEY = "strix.web.batchInstruction";
+  let batchOptions = null;
+
+  function syncBatchFields() {
+    $("batchProxyUrl").disabled = !$("batchUseProxy").checked;
+    $("batchHeaders").disabled = !$("batchUseHeaders").checked;
+  }
+  $("batchUseProxy").onchange = syncBatchFields;
+  $("batchUseHeaders").onchange = syncBatchFields;
+
+  function showBatchModal(show) {
+    $("batchModal").classList.toggle("hidden", !show);
+  }
+
   $("batchTaskBtn").onclick = () => {
-    alert(
-      "Excel 列：应用名称、端口、BU、负责人、URL（首行为表头；负责人填邮箱）。\n" +
-        "每行创建一个测试任务，完成后自动把中文报告发给负责人，并抄送配置的邮箱。\n" +
-        "会沿用新建表单里已勾选的「代理」和「附加请求头」。"
-    );
+    const proxy = loadProxyCache();
+    const headers = loadHeadersCache();
+    $("batchInstruction").value = localStorage.getItem(BATCH_INSTRUCTION_KEY) || "";
+    $("batchProxyUrl").value = proxy.url || "";
+    $("batchUseProxy").checked = Boolean(proxy.use && proxy.url);
+    $("batchHeaders").value = headers.text || "";
+    $("batchUseHeaders").checked = Boolean(headers.use && headers.text);
+    syncBatchFields();
+    showBatchModal(true);
+  };
+  $("batchModalCancel").onclick = () => showBatchModal(false);
+  $("batchModalBackdrop").onclick = () => showBatchModal(false);
+  $("batchModalConfirm").onclick = () => {
+    const useProxy = $("batchUseProxy").checked;
+    const useHeaders = $("batchUseHeaders").checked;
+    const proxyUrl = $("batchProxyUrl").value.trim();
+    const headers = $("batchHeaders").value;
+    if (useProxy && !proxyUrl) return alert("已勾选代理，请填写代理 URL");
+    if (useHeaders && !headers.trim()) return alert("已勾选请求头，请填写内容");
+    batchOptions = {
+      instruction: $("batchInstruction").value.trim(),
+      useProxy,
+      proxyUrl,
+      useHeaders,
+      headers,
+    };
+    localStorage.setItem(BATCH_INSTRUCTION_KEY, batchOptions.instruction);
+    saveProxyCache({ url: proxyUrl, use: useProxy });
+    saveHeadersCache({ text: headers, use: useHeaders });
+    showBatchModal(false);
     $("batchFile").click();
   };
   $("batchFile").onchange = async (e) => {
     const file = e.target.files && e.target.files[0];
     e.target.value = "";
-    if (!file) return;
+    if (!file || !batchOptions) return;
+    const opts = batchOptions;
     const form = new FormData();
     form.append("file", file);
-    // Same local options as the create form: proxy / extra request headers.
-    const proxy = loadProxyCache();
-    if (proxy.use && proxy.url) {
+    if (opts.instruction) form.append("instruction", opts.instruction);
+    if (opts.useProxy) {
       form.append("use_proxy", "true");
-      form.append("proxy_url", proxy.url);
+      form.append("proxy_url", opts.proxyUrl);
     }
-    const headers = loadHeadersCache();
-    if (headers.use && headers.text) {
+    if (opts.useHeaders) {
       form.append("use_headers", "true");
-      form.append("request_headers", headers.text);
+      form.append("request_headers", opts.headers);
     }
     try {
       await api.ensureSession();

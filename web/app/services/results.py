@@ -289,6 +289,38 @@ def write_retest_scope(workspace: Path, finding_ids: list[str] | None) -> None:
         path.unlink(missing_ok=True)
 
 
+_RETEST_OVERLAY_KEYS = ("retest_status", "fix_verification", "screenshot_rels", "screenshots")
+
+
+def assemble_retest_findings(run_dir: Path, vulns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Original findings verbatim + only the agent's retest verdict, steps and screenshots.
+
+    Without staged originals (uploaded-zip retests) the agent's reports are used as-is.
+    """
+    prior_path = prior_findings_dir(run_dir.parent.parent) / "vulnerabilities.json"
+    try:
+        prior = json.loads(prior_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return vulns
+    if not isinstance(prior, list) or not prior:
+        return vulns
+    current = {
+        str(v.get("id") or v.get("report_id") or ""): v for v in vulns if isinstance(v, dict)
+    }
+    merged: list[dict[str, Any]] = []
+    for original in prior:
+        if not isinstance(original, dict):
+            continue
+        item = {k: v for k, v in original.items() if k not in _RETEST_OVERLAY_KEYS}
+        item["evidence"] = ""
+        done = current.get(str(item.get("id") or ""), {})
+        for key in _RETEST_OVERLAY_KEYS:
+            if done.get(key):
+                item[key] = done[key]
+        merged.append(item)
+    return merged
+
+
 def read_retest_scope(run_dir: Path) -> set[str] | None:
     path = run_dir.parent.parent / RETEST_SCOPE_FILE
     try:
@@ -300,8 +332,8 @@ def read_retest_scope(run_dir: Path) -> set[str] | None:
 
 def _exclude_stamp(exclude_ids: set[str] | None, *, retest: bool = False) -> str:
     stamp = ",".join(sorted(exclude_ids or ()))
-    # "retest2": reports built before untested findings were listed must rebuild.
-    return f"retest2|{stamp}" if retest else stamp
+    # "retest3": reports built before untested findings were listed must rebuild.
+    return f"retest3|{stamp}" if retest else stamp
 
 
 def vulnerabilities_mtime(run_dir: Path) -> float:
@@ -394,7 +426,11 @@ def rebuild_delivery_report(
             md_path.write_text(
                 render_retest_report(
                     run_record=run_record,
-                    vulnerability_reports=vulns,
+                    vulnerability_reports=[
+                        v
+                        for v in assemble_retest_findings(run_dir, vulns)
+                        if str(v.get("id") or v.get("report_id") or "") not in (exclude_ids or set())
+                    ],
                     scan_results=scan_results,
                     scope_ids=read_retest_scope(run_dir),
                 ),

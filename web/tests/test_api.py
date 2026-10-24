@@ -2312,3 +2312,22 @@ def test_mail_to_editable_while_running(client: TestClient, monkeypatch):
     assert upd.status_code == 200, upd.text
     assert upd.json()["mail_to"] == "new@corp.test"
     assert upd.json()["mail_status"] == "pending"
+
+
+def test_retest_report_uses_original_findings_plus_verdict(tmp_path: Path):
+    from app.services.results import assemble_retest_findings, write_prior_findings
+
+    ws = tmp_path / "ws"
+    run_dir = ws / "strix_runs" / "r1"
+    run_dir.mkdir(parents=True)
+    original = {"id": "v1", "title": "SQL 注入", "severity": "high", "evidence": "old"}
+    write_prior_findings(ws, findings=[], parent_run_dir=None, reports=[original])
+    agent = [
+        {"id": "v1", "title": "复测·已修复：SQL 注入", "retest_status": "fixed", "fix_verification": "无法复现"},
+        {"id": "new9", "title": "agent 自建", "retest_status": "fixed"},
+    ]
+    out = assemble_retest_findings(run_dir, agent)
+    assert [r["id"] for r in out] == ["v1"]
+    assert out[0]["title"] == "SQL 注入"
+    assert out[0]["retest_status"] == "fixed" and out[0]["fix_verification"] == "无法复现"
+    assert out[0]["evidence"] == ""

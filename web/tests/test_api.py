@@ -2329,3 +2329,15 @@ def test_report_pdf_download(client: TestClient):
     assert res.status_code == 200, res.text
     assert res.headers["content-type"] == "application/pdf"
     assert res.content[:5] == b"%PDF-"
+
+
+def test_report_zip_contains_markdown_and_pdf(client: TestClient):
+    import io
+    import zipfile
+
+    created, _run_dir = _seed_completed_task_with_vulns(client)
+    res = client.get(f"/api/v1/tasks/{created['id']}/report?download=1")
+    assert res.status_code == 200, res.text
+    names = zipfile.ZipFile(io.BytesIO(res.content)).namelist()
+    assert any(n.endswith(".md") for n in names)
+    assert any(n.endswith(".pdf") for n in names)

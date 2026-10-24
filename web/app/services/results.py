@@ -448,6 +448,22 @@ def rebuild_delivery_report(
     return read_report_markdown(run_dir, lang)
 
 
+def _add_pdf(zf: zipfile.ZipFile, run_dir: Path, md_path: Path, arcname: str) -> None:
+    """Add a PDF twin of ``md_path``; a rendering failure must not break the zip."""
+    from app.services.pdf_report import render_pdf
+
+    try:
+        pdf_path = render_pdf(
+            md_path.read_text(encoding="utf-8"),
+            run_dir,
+            md_path.with_suffix(".pdf"),
+            title=Path(arcname).stem,
+        )
+        zf.write(pdf_path, arcname=Path(arcname).with_suffix(".pdf").name)
+    except Exception:
+        return
+
+
 def _build_report_zip(
     run_dir: Path,
     md_path: Path,
@@ -459,6 +475,7 @@ def _build_report_zip(
 
     def _write(zf: zipfile.ZipFile) -> None:
         zf.write(md_path, arcname=arcname)
+        _add_pdf(zf, run_dir, md_path, arcname)
         images_dir = run_dir / "images"
         if images_dir.is_dir():
             for image in sorted(images_dir.iterdir()):
@@ -474,6 +491,7 @@ def build_translated_report_zip(run_dir: Path, en_path: Path, arcname: str) -> P
 
     def _write(zf: zipfile.ZipFile) -> None:
         zf.write(en_path, arcname=Path(arcname).name)
+        _add_pdf(zf, run_dir, en_path, arcname)
         images_dir = run_dir / "images"
         if images_dir.is_dir():
             for image in sorted(images_dir.iterdir()):
@@ -484,7 +502,7 @@ def build_translated_report_zip(run_dir: Path, en_path: Path, arcname: str) -> P
 
 
 def resolve_report_package(run_dir: Path, *, md_arcname: str | None = None) -> Path | None:
-    """Return the report zip (md + images).
+    """Return the report zip (md + pdf + images).
 
     ``md_arcname`` is the name inside the zip. When set, the zip is always
     rewritten so a renamed task does not keep the previous entry name.

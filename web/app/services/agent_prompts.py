@@ -84,9 +84,10 @@ def retest_from_report_instruction(
 [复测 — 强制]
 这是一次全新的复测任务，依据下方原报告{attached}逐条复测；不要扩测新漏洞。
 {steps}
-全部登记后用 list_reports 逐条核对，缺 retest_status 的补齐，再 finish_scan 一次；
-executive_summary 概括复测结论。凭证 / 环境变化见下方[附加说明]（如有）。
-{_REPORT_STYLE}
+你不负责写报告：复测报告由系统根据你填写的漏洞结论自动生成，不要写报告正文、不要改标题/描述/严重度。
+你只填每条漏洞的 retest_status、fix_verification（简短复测步骤与结果）、screenshots。
+全部填完用 list_reports 核对，缺 retest_status 的补齐，再 finish_scan 一次，
+executive_summary 只用一两句话概括复测结论。凭证 / 环境变化见下方[附加说明]（如有）。
 
 [原报告]
 {body}

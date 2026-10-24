@@ -1657,7 +1657,10 @@ def test_retry_with_earliest_start(client: TestClient):
     assert manager.db.claim_next_queued() is None
 
 
-def test_retest_task_report_lists_fixed_by_title_only(client: TestClient):
+def test_retest_task_report_lists_fixed_by_title_only(client: TestClient, monkeypatch):
+    import app.services.translator as translator
+
+    monkeypatch.setattr(translator, "_llm_completion", lambda: lambda m: m[1]["content"])
     created, run_dir = _seed_completed_task_with_vulns(client)
     manager = client.app.state.manager
     vulns = json.loads((run_dir / "vulnerabilities.json").read_text(encoding="utf-8"))
@@ -1680,14 +1683,13 @@ def test_retest_task_report_lists_fixed_by_title_only(client: TestClient):
     assert "重放请求，仍可复现" in report
     assert "example.com:443" in report
 
-    # English is only served once an agent has translated it.
+    # English is only served once it has been translated.
     assert client.get(f"/api/v1/tasks/{created['id']}/report?lang=en").status_code == 409
     translated = client.post(f"/api/v1/tasks/{created['id']}/translate-report")
     assert translated.status_code == 202, translated.text
-    workspace = Path(manager.get_task(created["id"])["workspace"])
-    (workspace / "penetration_test_report.en.md").write_text("# Retest Report\n", encoding="utf-8")
     english = client.get(f"/api/v1/tasks/{created['id']}/report?lang=en").json()["content"]
     assert "Retest Report" in english
+    assert "Keep Me" in english
     pkg = client.get(f"/api/v1/tasks/{created['id']}/report?download=1&lang=en")
     assert pkg.status_code == 200 and pkg.content[:2] == b"PK"
 
@@ -2296,3 +2298,22 @@ def test_retest_report_uses_original_findings_plus_verdict(tmp_path: Path):
     assert out[0]["title"] == "SQL 注入"
     assert out[0]["retest_status"] == "fixed" and out[0]["fix_verification"] == "无法复现"
     assert out[0]["evidence"] == ""
+
+
+def test_translate_report_renders_english_from_translated_fields(client: TestClient, monkeypatch):
+    import app.services.translator as translator
+
+    created, run_dir = _seed_completed_task_with_vulns(client)
+
+    def fake_complete(messages):
+        fields = json.loads(messages[1]["content"])
+        return json.dumps({k: f"EN:{v}" for k, v in fields.items()})
+
+    monkeypatch.setattr(translator, "_llm_completion", lambda: fake_complete)
+    res = client.post(f"/api/v1/tasks/{created['id']}/translate-report")
+    assert res.status_code == 202, res.text
+    en = client.get(f"/api/v1/tasks/{created['id']}/report?lang=en").json()["content"]
+    assert "EN:Keep Me" in en
+    assert "Findings" in en or "Vulnerab" in en
+    assert (run_dir / "penetration_test_report.en.zip").is_file()
+    assert "Keep Me" in client.get(f"/api/v1/tasks/{created['id']}/report").json()["content"]

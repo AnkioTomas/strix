@@ -592,7 +592,7 @@
       ["状态", t.status],
       ["类型", t.type],
       ["目标", t.target || t.source_url || "—"],
-      ["动作", t.action || "—"],
+      ["动作", t.action ? actionLabel(t.action) : "—"],
       ["最早开始", t.earliest_start ? formatLocalShort(t.earliest_start) : "（立即）"],
       ["Scan mode", t.scan_mode || "—"],
       ["Run", t.run_name || "—"],
@@ -1821,16 +1821,19 @@
   };
   $("translateReportBtn").onclick = async () => {
     if (!selected) return;
-    if (!confirm("将把现有报告交给 Agent 翻译成英文（resume 当前任务，不扩测）。完成后在报告页切换到 English 即可查看并下载。继续？")) return;
+    if (!confirm("将调用 LLM 把报告说明文字翻译成英文，由代码按英文版式重新生成（不启动 Agent，需要几十秒）。完成后在报告页切换到 English 查看并下载。继续？")) return;
+    const btn = $("translateReportBtn");
+    btn.disabled = true;
     try {
-      const updated = await api.api(`/api/v1/tasks/${selected}/translate-report`, {
-        method: "POST",
-      });
-      await refresh();
-      selectTask(updated.id);
+      await api.api(`/api/v1/tasks/${selected}/translate-report`, { method: "POST" });
+      reportLang = "en";
+      $("reportLang").value = "en";
       setTab("viewer");
+      void loadReport({ force: true });
     } catch (e) {
       alert(e.message);
+    } finally {
+      btn.disabled = false;
     }
   };
   $("downloadReport").onclick = async () => {

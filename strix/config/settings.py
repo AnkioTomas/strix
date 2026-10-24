@@ -168,6 +168,8 @@ class ReportSettings(BaseSettings):
     # Any language label or common code: ``zh``, ``en``, ``ja``, ``Français``, …
     # Empty disables the language block. Default ``zh`` for this deployment.
     language: str = Field(default="zh", alias="STRIX_REPORT_LANGUAGE")
+    # Model for the one-shot report translation; falls back to ``STRIX_LLM``.
+    translate_model: str | None = Field(default=None, alias="STRIX_TRANSLATE_MODEL")
 
 
 class Settings(BaseSettings):

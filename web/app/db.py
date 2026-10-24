@@ -361,7 +361,7 @@ class Database:
             row = conn.execute(
                 "SELECT * FROM tasks WHERE status = 'queued' "
                 "AND (earliest_start IS NULL OR earliest_start <= ?) "
-                "ORDER BY updated_at ASC LIMIT 1",
+                "ORDER BY updated_at ASC, rowid ASC LIMIT 1",
                 (now,),
             ).fetchone()
             if not row:

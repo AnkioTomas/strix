@@ -633,7 +633,7 @@ async def get_finding(
                 "JSON ``{task_id, format, content}`` by default. "
                 "``download=true`` returns a zip attachment "
                 "(markdown + images), not JSON. "
-                "``lang=en`` returns the agent-translated English report (409 until translated)."
+                "``lang=en`` returns the LLM-translated English report (code-rendered) (409 until translated)."
             ),
         },
         404: {"description": "Report package not found"},

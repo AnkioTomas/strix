@@ -10,6 +10,9 @@ Unsupported chrome locales fall back to English labels.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
+from collections.abc import Iterator
 from typing import TypedDict
 
 from strix.config import load_settings
@@ -274,6 +277,21 @@ def resolve_report_language(raw: str | None) -> str | None:
     return LANGUAGE_LABELS.get(key, text)
 
 
+_CHROME_OVERRIDE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "strix_report_chrome_override", default=None
+)
+
+
+@contextlib.contextmanager
+def chrome_language(raw: str) -> Iterator[None]:
+    """Render report chrome in ``raw`` regardless of ``STRIX_REPORT_LANGUAGE``."""
+    token = _CHROME_OVERRIDE.set(raw)
+    try:
+        yield
+    finally:
+        _CHROME_OVERRIDE.reset(token)
+
+
 def chrome_locale(raw: str | None = None) -> str:
     """Return ``zh`` or ``en`` for structural report labels.
 
@@ -281,6 +299,8 @@ def chrome_locale(raw: str | None = None) -> str:
     falling back to settings default) uses English chrome, except when the
     configured default/settings value resolves to Chinese.
     """
+    if raw is None:
+        raw = _CHROME_OVERRIDE.get()
     if raw is None:
         raw = load_settings().report.language
     key = normalize_language_key(raw)

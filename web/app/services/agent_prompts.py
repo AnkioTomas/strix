@@ -4,17 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-def translate_report_instruction(run_name: str | None) -> str:
-    run_path = f"/workspace/strix_runs/{run_name}" if run_name else "/workspace/strix_runs/<run>"
-    return f"""\
-[翻译报告 — 强制]
-不扩测、不改漏洞结论与事实。把现有交付报告 {run_path}/penetration_test_report.md
-完整翻译成英文，写入 /workspace/penetration_test_report.en.md（用终端分段读、分段追加写）。
-保留 Markdown 结构、表格、代码块、URL、payload、命令、图片路径（images/...）原样不译；
-只翻译说明性文字与标题。写完后用终端确认文件非空，再 finish_scan 一次（不要改动漏洞数据）。
-"""
-
-
 MAX_REPORT_CHARS = 40000
 
 

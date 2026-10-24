@@ -25,7 +25,6 @@ from app.security.target import (
 )
 from app.services.attachments import copy_attachments, save_uploads
 from app.services.agent_prompts import (
-    translate_report_instruction,
     retest_from_report_instruction,
 )
 from app.services.feishu import notify_status, notify_task
@@ -995,20 +994,52 @@ class TaskManager:
         return task
 
     def translate_report(self, task_id: str) -> dict[str, Any]:
-        """Hand the existing markdown report to the agent for English translation."""
-        task = self.get_task(task_id)
-        run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
-        if not run_dir or not (run_dir / "penetration_test_report.md").is_file():
-            raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
-        instruction = translate_report_instruction(task.get("run_name"))
-        if task["status"] in {"starting", "running"}:
-            return self.resume_with_message(task_id, instruction)
-        if task["status"] in TERMINAL:
-            return self.resume_task(task_id, instruction)
-        raise TaskError(
-            "TRANSLATE_UNAVAILABLE",
-            f"Cannot translate report for task in status {task['status']}",
+        """Translate the report's prose to English via one-shot LLM calls; code renders it."""
+        from strix.report.writer import read_run_record
+
+        from app.services.results import (
+            assemble_retest_findings,
+            read_retest_scope,
+            read_vulnerabilities,
+            rebuild_delivery_report,
         )
+        from app.services.translator import translate_report
+
+        task = self.get_task(task_id)
+        if task["status"] not in TERMINAL:
+            raise TaskError(
+                "TRANSLATE_UNAVAILABLE",
+                f"Cannot translate report for task in status {task['status']}",
+            )
+        run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
+        exclude = invalid_finding_ids(self.db.list_finding_flags(task_id))
+        retest = task.get("action") == "retest"
+        if not run_dir or rebuild_delivery_report(
+            run_dir, exclude_ids=exclude, retest=retest, force=True
+        ) is None:
+            raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
+        record = read_run_record(run_dir)
+        record = record if isinstance(record, dict) else {}
+        findings = [
+            v
+            for v in read_vulnerabilities(run_dir)
+            if str(v.get("id") or v.get("report_id") or "") not in exclude
+        ]
+        if retest:
+            findings = assemble_retest_findings(run_dir, findings)
+        scan_results = record.get("scan_results")
+        try:
+            translate_report(
+                run_dir,
+                run_record=record,
+                findings=findings,
+                scan_results=scan_results if isinstance(scan_results, dict) else None,
+                retest=retest,
+                scope_ids=read_retest_scope(run_dir) if retest else None,
+            )
+        except Exception as exc:
+            raise TaskError("TRANSLATE_FAILED", f"Translation failed: {exc}", status_code=502) from exc
+        return task
 
     def _translated_report(self, task: dict[str, Any]) -> tuple[Path, Path]:
         from app.services.results import translated_report_path
@@ -1019,7 +1050,7 @@ class TaskManager:
         if run_dir is None or found is None:
             raise TaskError(
                 "TRANSLATION_NOT_READY",
-                "English report not available; ask the agent to translate it first",
+                "English report not available; translate it first",
                 status_code=409,
             )
         return run_dir, found

@@ -325,6 +325,10 @@ def test_retest_draft_from_task_report_autoattaches(client: TestClient):
     run_dir = get_settings().tasks_dir / created["id"] / "strix_runs" / "r1"
     run_dir.mkdir(parents=True)
     (run_dir / "penetration_test_report.zip").write_bytes(_report_zip())
+    (run_dir / "vulnerabilities.json").write_text(
+        json.dumps([{"id": "v1", "title": "SQL 注入", "severity": "high", "retest_status": "fixed"}]),
+        encoding="utf-8",
+    )
     client.app.state.manager.db.update_task(created["id"], run_name="r1", status="completed")
 
     draft = client.get(f"/api/v1/tasks/{created['id']}/retest-draft")
@@ -340,6 +344,10 @@ def test_retest_draft_from_task_report_autoattaches(client: TestClient):
     assert res.json()["action"] == "retest"
     att = get_settings().tasks_dir / res.json()["id"] / "attachments"
     assert any(p.suffix == ".zip" for p in att.iterdir())
+    seeded = json.loads(
+        (get_settings().tasks_dir / res.json()["id"] / "prior_findings" / "vulnerabilities.json").read_text()
+    )
+    assert [r["id"] for r in seeded] == ["v1"] and "retest_status" not in seeded[0]
 
 
 def test_complete_task_marks_finished_and_sticks(client: TestClient):

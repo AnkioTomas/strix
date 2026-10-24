@@ -913,6 +913,21 @@ class TaskManager:
             note = f"{note}\n\n[附加说明]\n{extra}"
         return self._spawn_retest_task(task, note, scope_ids=scope_ids, overrides=overrides)
 
+    def seed_retest_findings(self, task: dict[str, Any], source_task_id: str) -> None:
+        """Stage the source task's findings so the retest run starts with them (same ids)."""
+        from app.services.results import resolve_retest_reports, write_prior_findings
+
+        source = self.get_task(source_task_id)
+        run_dir = workspace_run_dir(Path(source["workspace"]), source.get("run_name"))
+        findings = self.get_results(source_task_id)
+        skipped = invalid_finding_ids(self.db.list_finding_flags(source_task_id))
+        reports = resolve_retest_reports(
+            parent_run_dir=run_dir, findings=findings, include_ids=None, skipped_invalid=skipped
+        )
+        write_prior_findings(
+            Path(task["workspace"]), findings=findings, parent_run_dir=run_dir, reports=reports
+        )
+
     def _spawn_retest_task(
         self,
         parent: dict[str, Any],

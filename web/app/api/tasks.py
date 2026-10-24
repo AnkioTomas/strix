@@ -188,6 +188,7 @@ async def _parse_create_payload(
                 (getattr(retest_report, "filename", None) or "report.zip", await retest_report.read())
             )
         if retest_task_id:
+            request.state.retest_source = retest_task_id
             data, name = await asyncio.to_thread(
                 _task_report_zip, get_manager(request), retest_task_id
             )
@@ -216,6 +217,7 @@ async def create_task(
 ):
     try:
         payload, uploads = await _parse_create_payload(request)
+        retest_source = getattr(request.state, "retest_source", None)
         copy_from = None
         if payload.parent_task_id:
             parent = await asyncio.to_thread(manager.get_task, payload.parent_task_id)
@@ -228,6 +230,8 @@ async def create_task(
             attachments=uploads or None,
             copy_attachments_from=copy_from,
         )
+        if retest_source:
+            await asyncio.to_thread(manager.seed_retest_findings, task, retest_source)
     except TaskError as exc:
         return _error(exc)
     return _summarize(task, manager)
@@ -251,7 +255,7 @@ async def task_retest_draft(task_id: str, manager: TaskManager = Depends(get_man
 
     try:
         data, name = await asyncio.to_thread(_task_report_zip, manager, task_id)
-        return await asyncio.to_thread(build_retest_draft, data, name)
+        return await asyncio.to_thread(build_retest_draft, data, name, seeded=True)
     except TaskError as exc:
         return _error(exc)
     except DraftError as exc:

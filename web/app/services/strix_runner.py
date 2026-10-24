@@ -234,6 +234,11 @@ class LiveStrixSession:
             "resume_instruction": getattr(args, "user_explicit_instruction", None) or "",
         }
 
+        if task.get("action") == "retest" and not resume_like:
+            from app.services.results import apply_prior_findings
+
+            apply_prior_findings(Path(task["workspace"]), run_dir)
+
         report_state = ReportState(self.run_name)
         report_state.hydrate_from_run_dir()
         report_state.set_scan_config(scan_config)

@@ -36,7 +36,9 @@ def _pick_markdown(zf: zipfile.ZipFile) -> zipfile.ZipInfo:
     return candidates[0]
 
 
-def build_retest_draft(data: bytes, filename: str | None = None) -> dict[str, Any]:
+def build_retest_draft(
+    data: bytes, filename: str | None = None, *, seeded: bool = False
+) -> dict[str, Any]:
     if len(data) > MAX_ZIP_BYTES:
         raise DraftError(f"报告 zip 超过 {MAX_ZIP_BYTES // (1024 * 1024)} MiB")
     try:
@@ -63,5 +65,5 @@ def build_retest_draft(data: bytes, filename: str | None = None) -> dict[str, An
         "target": target.rstrip(".,;"),
         "report_file": info.filename,
         "findings": titles,
-        "instruction": retest_from_report_instruction(markdown, zip_name),
+        "instruction": retest_from_report_instruction(markdown, zip_name, seeded=seeded),
     }

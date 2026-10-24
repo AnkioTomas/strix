@@ -214,9 +214,9 @@ Then open `http://127.0.0.1:8787/` (console) or `/docs` (OpenAPI). Configure `ST
 |---------|----------------|
 | **Named tasks / notes / hold** | Custom display names and notes; create as held (stay out of the queue) then release |
 | **Editable retry** | Retry opens a prefilled create form; confirm to spawn a child run (parent attachments copied) |
-| **Resume + refresh report** | Resume modal for nudges; “更新报告” rewrites `finish_scan` to the delivery format without expanding scope |
+| **Resume + refresh report** | Resume modal for nudges; “更新报告” regenerates the delivery report from findings by code (no Agent run) |
 | **Retest with credentials** | Retest modal for expired passwords / cookies / env notes; each prior finding must get `retest_status` with screenshots or hard evidence (`fixed` requires screenshots) |
-| **Delivery report layout** | No invented metadata table; agent narrative + structured findings (each finding is an `h2`); “复测情况” table when retest data exists |
+| **Delivery report layout** | No invented metadata table; executive summary + code-assembled findings (each finding is an `h2`); “复测情况” table when retest data exists |
 | **Online report UX** | Penna Markdown render, left TOC from headings, ZIP download of report + images |
 | **Reliable finish / resume** | Interactive park no longer leaves tasks stuck “running”; resume is not killed by a stale `completed` `run.json` |
 | **TCP preflight** | Create parks unreachable HTTP(S) host:port as `held` with a `[连通性]` note; release / resume re-check and refuse until reachable |

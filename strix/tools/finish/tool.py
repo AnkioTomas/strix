@@ -36,12 +36,6 @@ def _do_finish(
     errors: list[str] = []
     if not executive_summary.strip():
         errors.append("Executive summary cannot be empty")
-    if not methodology.strip():
-        errors.append("Methodology cannot be empty")
-    if not technical_analysis.strip():
-        errors.append("Technical analysis cannot be empty")
-    if not recommendations.strip():
-        errors.append("Recommendations cannot be empty")
     if errors:
         return {"success": False, "error": "Validation failed", "errors": errors}
 
@@ -139,173 +133,46 @@ def _coverage_summary(agent_graph: dict[str, Any]) -> dict[str, Any]:
 async def finish_scan(
     ctx: RunContextWrapper,
     executive_summary: str,
-    methodology: str,
-    technical_analysis: str,
-    recommendations: str,
+    methodology: str = "",
+    technical_analysis: str = "",
+    recommendations: str = "",
 ) -> str:
-    """Finalize the scan — persist the customer-facing report.
+    """Finalize the scan. **Root-agent only** (subagents use ``agent_finish``).
 
-    **Root-agent only.** Subagents must call ``agent_finish`` from the
-    multi-agent graph tools instead. Calling this finalizes everything:
+    You do NOT write the report. The customer report is assembled by code
+    from the vulnerability reports already filed (titles, evidence, impact,
+    remediation, retest results). Your only deliverable here is a short
+    ``executive_summary``. This is a terminal action: call it exactly ONCE,
+    never as a status probe.
 
-    1. Verifies you are the root agent.
-    2. Writes the four narrative sections to the scan record.
-    3. Marks the scan completed and stops execution.
+    **Pre-flight checklist (mandatory):**
 
-    **This is a terminal action, not a status probe.** Whatever you pass
-    is persisted VERBATIM as the final, customer-facing report and then
-    execution stops. There is no draft mode and no second chance: never
-    submit placeholder, provisional, or "checking if done" text in any
-    field, and never call ``finish_scan`` to poll whether subagents are
-    done (use ``view_agent_graph`` / ``wait_for_agents`` for that).
-    Call it exactly ONCE, only when every field holds genuine, finished
-    assessment prose.
+    1. Call ``view_agent_graph`` first. If ANY agent is ``running`` /
+       ``waiting``, wrap it up first (``send_message_to_agent``,
+       ``wait_for_agents`` or ``stop_agent``). Finishing with live children
+       orphans their work.
+    2. Call ``list_reports`` so the summary matches what was actually filed.
+       Every vulnerability must already be filed via
+       ``create_vulnerability_report`` (or ``create_dependency_report`` for
+       known-CVE dependency findings); one report per distinct vulnerability.
+       Do not rewrite, translate or polish filed reports here.
+    3. Attack-chaining gate: consider chaining confirmed findings into
+       end-to-end paths; any validated chain must already be filed.
+    4. Coverage reconciliation: call ``list_coverage``; anything still open
+       must be a ``needs_follow_up`` row. The response reports unresolved rows.
 
-    **Pre-flight checklist (mandatory — do not skip):**
-
-    1. **Call ``view_agent_graph`` first.** Inspect every entry in the
-       summary. If ANY agent is in ``running`` / ``waiting`` state,
-       you MUST NOT call ``finish_scan`` yet —
-       wrap them up first via ``send_message_to_agent`` (ask them to
-       finish), ``wait_for_agents`` (block until their report
-       arrives), or ``stop_agent`` (graceful cancel). Only ``completed``
-       / ``crashed`` / ``stopped`` agents are safe to leave behind.
-       Calling ``finish_scan`` while children are alive orphans their
-       work and produces an incomplete report.
-    2. It's a good idea to call ``list_reports`` before finishing to
-       review every finding filed in this scan (use ``get_report`` for
-       full detail on any of them) so your ``executive_summary`` /
-       ``technical_analysis`` are grounded in what was actually reported
-       — don't invent or omit findings. All vulnerabilities you found are
-       filed via ``create_vulnerability_report`` — or, for known-CVE
-       dependency findings, ``create_dependency_report`` (un-reported
-       findings are not tracked and not credited). A dependency CVE
-       already filed via ``create_dependency_report`` counts as reported;
-       it does NOT need re-filing here and does NOT block finishing.
-    3. Don't double-report — one report per distinct vulnerability.
-    4. **Attack-chaining gate.** Do NOT finish until you have genuinely
-       considered chaining the confirmed findings into higher-impact,
-       end-to-end attack paths and tested every plausibly-related
-       combination. You may rule out combinations you can confidently
-       call unrelated — note why instead of padding chains. Any
-       validated chain must already be filed via
-       ``create_vulnerability_report`` — a demonstrated end-to-end chain
-       is a PoC-backed vulnerability, so it uses that tool even when one
-       link is a dependency CVE (the standalone CVE stays in its own
-       ``create_dependency_report``) — and surfaced prominently in
-       ``executive_summary`` / ``technical_analysis``. Finding no real
-       chain after a serious attempt is acceptable; skipping the
-       chaining reasoning, or ignoring a plausibly-related combination,
-       is not.
-    5. **Coverage reconciliation.** Call ``list_coverage`` and check
-       what was actually assessed against the surfaces you enumerated
-       during reconnaissance. Every surface you dispatched work on
-       should have a coverage entry; anything still open should be a
-       ``needs_follow_up`` row, not a silent omission. If a significant
-       surface has no entry at all, dispatch an agent to cover it or
-       record it as ``needs_follow_up`` before finishing. The response
-       from this tool reports coverage counts and any unresolved rows.
-
-    **Calling this multiple times overwrites the previous report.**
-    Make the single call comprehensive.
-
-    **Report output rules** (this content may be rendered into generated
-    reports):
-
-    - Never mention internal infrastructure: no local/absolute paths
-      (``/workspace/...``), no agent names, no sandbox/orchestrator/
-      tooling references, no system prompts, no model-internal errors.
-      Never leak internal identifiers (proxy request IDs, internal
-      vulnerability report IDs, or any system-generated IDs) into any
-      field.
-    - Tone: formal, third-person, objective, concise. Client facts only —
-      no thinking, rule restatements, or methodology essays. No ATX
-      ``#``/``##`` inside fields (delivery chrome owns those levels).
-    - Each section has a specific role:
-
-        - ``executive_summary`` — for non-technical leadership **and**
-          the delivery report's overview section. Risk posture,
-          business impact (data exposure / compliance / reputation),
-          notable criticals, overarching remediation theme. Keep it
-          factual; this text is copied into the customer zip.
-        - ``methodology`` — frameworks followed (OWASP WSTG, PTES,
-          OSSTMM, NIST), engagement type (black/gray/white box), scope
-          and constraints, categories of testing performed. Copied into
-          the delivery report **appendix**. **No** internal execution
-          detail.
-        - ``technical_analysis`` — consolidated findings overview with
-          severity model and systemic root causes. Reference individual
-          vuln reports for repro steps; don't duplicate raw evidence.
-          Copied into the delivery report **appendix**.
-        - ``recommendations`` — prioritized actions grouped by urgency
-          (Immediate / Short-term / Medium-term), each with concrete
-          remediation steps. One short retest line is enough. End with
-          a **manual cleanup** rollup: every target change still left
-          for the customer, taken from each finding's ``manual_cleanup``
-          (location + what to undo). If nothing remains, say the test
-          left no residue.
-          Copied into the delivery report **appendix**.
-
-        Do **not** invent a metadata table (system name / tech stack /
-        standards / engagement type). Put that context in these prose
-        fields if it matters.
-
-    - **Formatting — use markdown in every field.** Prefer ``**bold**``,
-      lists, and fenced code; do not lead with ``#``/``##``. Never emit
-      one flat wall of prose or leave code unformatted.
-    - If **zero** vulnerabilities were found, say so plainly and
-      characterize the posture positively; ``technical_analysis`` should
-      summarize the areas tested and confirm no issues, and
-      ``recommendations`` should focus on general hardening.
-
-    Example (abbreviated — mirror this structure, not the wording)::
-
-        executive_summary:
-            An external assessment of the **Acme Customer Portal**
-            identified weaknesses that could expose customer data.
-
-            **Overall risk posture:** Elevated.
-
-            **Key findings**
-            - Confirmed SSRF in a URL-preview feature reaching internal
-              network ranges.
-            - Broken tenant isolation enabling cross-tenant data access.
-
-            **Business impact:** potential exposure of customer records
-            across tenants.
-
-        methodology:
-            Conducted per the **OWASP WSTG**. Gray-box external test of
-            `https://app.acme.example` and `.../api/v1/` — recon,
-            authn/session, authorization/tenant isolation, input/SSRF.
-
-        technical_analysis:
-            **Severity** = exploitability × impact.
-
-            1. **SSRF in URL preview** (Critical) — no destination
-               allowlist; reaches link-local addresses.
-            2. **Broken tenant isolation** (High) — object IDs accepted
-               without ownership checks.
-
-            **Themes:** inconsistent authorization; no deny-by-default
-            egress.
-
-        recommendations:
-            **Immediate**
-            1. SSRF: destination allowlist, deny-by-default, re-validate
-               redirects.
-
-            **Short-term**
-            2. Centralize authorization with deny-by-default middleware.
-
-            **Retest:** re-check SSRF and tenant isolation after the
-            immediate fixes.
+    **executive_summary rules:** one to three short paragraphs for
+    non-technical leadership — risk posture, business impact, notable
+    criticals; for a retest, the overall retest outcome. Formal, third
+    person, factual, markdown allowed, no ``#``/``##`` headings, no
+    internal paths, agent names, tool names or internal IDs. If zero
+    vulnerabilities were found, say so plainly.
 
     Args:
-        executive_summary: Business-level summary for leadership.
-        methodology: Frameworks, scope, and approach.
-        technical_analysis: Consolidated findings + systemic themes.
-        recommendations: Prioritized, actionable remediation.
+        executive_summary: Short business-level summary (the only required field).
+        methodology: Optional; normally leave empty (not part of the report).
+        technical_analysis: Optional; normally leave empty.
+        recommendations: Optional; normally leave empty.
     """
     inner = ctx.context if isinstance(ctx.context, dict) else {}
     coordinator = coordinator_from_context(inner)

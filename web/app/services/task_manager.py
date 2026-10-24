@@ -25,10 +25,8 @@ from app.security.target import (
 )
 from app.services.attachments import copy_attachments, save_uploads
 from app.services.agent_prompts import (
-    REFRESH_REPORT_INSTRUCTION,
     translate_report_instruction,
-    RETEST_INSTRUCTION,
-    focused_retest_instruction,
+    retest_from_report_instruction,
 )
 from app.services.feishu import notify_status, notify_task
 from app.services.findings import (
@@ -185,15 +183,8 @@ class TaskManager:
         action: str | None = None,
         attachments: list[tuple[str, bytes]] | None = None,
         copy_attachments_from: Path | str | None = None,
-        reuse_environment_from: dict[str, Any] | None = None,
-        resume_note: str | None = None,
     ) -> dict[str, Any]:
-        """Create a task.
-
-        ``reuse_environment_from`` (a finished parent task) clones its workspace
-        and keeps its ``run_name``, so the new task resumes the parent's run
-        (agents, scripts, source checkout) without touching the parent.
-        """
+        """Create a task."""
         task_id = f"task_{uuid.uuid4().hex[:16]}"
         workspace = self.settings.tasks_dir / task_id
         workspace.mkdir(parents=True, exist_ok=True)
@@ -251,8 +242,6 @@ class TaskManager:
                 save_uploads(workspace, attachments)
             if copy_attachments_from is not None:
                 copy_attachments(Path(copy_attachments_from), workspace)
-            if reuse_environment_from is not None:
-                self._clone_environment(reuse_environment_from, workspace, resume_note)
         except (TargetValidationError, SourceValidationError) as exc:
             shutil.rmtree(workspace, ignore_errors=True)
             raise TaskError(exc.code, exc.message) from exc
@@ -285,7 +274,7 @@ class TaskManager:
             "proxy_url": req.proxy_url,
             "request_headers": req.request_headers,
             "workspace": str(workspace),
-            "run_name": reuse_environment_from["run_name"] if reuse_environment_from else None,
+            "run_name": None,
             "viewer_url": None,
             "viewer_token": None,
             "pid": None,
@@ -300,26 +289,6 @@ class TaskManager:
             "updated_at": now,
         }
         return self.db.insert_task(row)
-
-    @staticmethod
-    def _clone_environment(
-        parent: dict[str, Any], workspace: Path, resume_note: str | None
-    ) -> None:
-        """Copy the parent's workspace into a new task and arm it to resume."""
-        shutil.copytree(
-            Path(parent["workspace"]),
-            workspace,
-            symlinks=True,
-            dirs_exist_ok=True,
-            ignore=shutil.ignore_patterns("logs", "results", ".web_resume_instruction"),
-        )
-        for name in ("logs", "results"):
-            (workspace / name).mkdir(exist_ok=True)
-        _reset_run_json_for_resume(workspace, str(parent["run_name"]))
-        note_path = workspace / ".web_resume_instruction"
-        note_path.unlink(missing_ok=True)
-        if resume_note and resume_note.strip():
-            note_path.write_text(resume_note.strip(), encoding="utf-8")
 
     def list_tasks(
         self,
@@ -842,77 +811,6 @@ class TaskManager:
             copy_attachments_from=parent["workspace"],
         )
 
-    def retest_task(
-        self,
-        task_id: str,
-        instruction: str | None = None,
-        *,
-        finding_ids: list[str] | None = None,
-        overrides: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Retest in a new task that reuses the parent's environment.
-
-        The parent's workspace (agents, scripts, source, run dir) is cloned, so
-        the parent keeps its own findings and report untouched.
-        """
-        task = self.get_task(task_id)
-        if task["status"] not in TERMINAL:
-            raise TaskError("TASK_ALREADY_RUNNING", "Only finished tasks can be retested")
-
-        findings = self.get_results(task_id)
-        flags = self.db.list_finding_flags(task_id)
-        skipped_invalid = invalid_finding_ids(flags)
-
-        scope_ids: list[str] | None = None
-        selected_ids = [str(x) for x in (finding_ids or []) if str(x).strip()]
-        if not selected_ids:
-            selected_ids = [
-                str(flag["finding_id"])
-                for flag in flags.values()
-                if flag.get("request_test") and str(flag.get("review_status") or "") != "invalid"
-            ]
-
-        active = [
-            item
-            for item in findings
-            if str(item.get("id") or "") not in skipped_invalid
-        ]
-        if selected_ids:
-            wanted = set(selected_ids)
-            targets = [item for item in active if str(item.get("id") or "") in wanted]
-            if not targets:
-                raise TaskError(
-                    "NO_FINDINGS_TO_RETEST",
-                    "No eligible findings to retest (missing or marked invalid)",
-                )
-            note = focused_retest_instruction(targets)
-            scope_ids = [str(item.get("id")) for item in targets]
-            self.db.clear_finding_request_test(
-                task_id, [str(item.get("id")) for item in targets]
-            )
-        else:
-            if findings and not active:
-                raise TaskError(
-                    "NO_FINDINGS_TO_RETEST",
-                    "All findings are marked invalid; nothing to retest",
-                )
-            note = RETEST_INSTRUCTION
-            if skipped_invalid:
-                skipped_titles = [
-                    str(item.get("title") or item.get("id"))
-                    for item in findings
-                    if str(item.get("id")) in skipped_invalid
-                ]
-                note = (
-                    f"{note}\n\n[跳过 — 无效漏洞]\n"
-                    + "\n".join(f"- {title}" for title in skipped_titles)
-                )
-
-        extra = (instruction or "").strip()
-        if extra:
-            note = f"{note}\n\n[附加说明]\n{extra}"
-        return self._spawn_retest_task(task, note, scope_ids=scope_ids, overrides=overrides)
-
     def seed_retest_findings(self, task: dict[str, Any], source_task_id: str) -> None:
         """Stage the source task's findings so the retest run starts with them (same ids)."""
         from app.services.results import resolve_retest_reports, write_prior_findings
@@ -928,55 +826,96 @@ class TaskManager:
             Path(task["workspace"]), findings=findings, parent_run_dir=run_dir, reports=reports
         )
 
-    def _spawn_retest_task(
+    def retest_task(
         self,
-        parent: dict[str, Any],
-        note: str,
+        task_id: str,
+        instruction: str | None = None,
         *,
-        scope_ids: list[str] | None = None,
+        finding_ids: list[str] | None = None,
         overrides: dict[str, Any] | None = None,
+        held: bool = False,
     ) -> dict[str, Any]:
-        from strix.core.paths import RUNS_DIR_NAME, RUNTIME_STATE_DIR_NAME
+        """Create a fresh retest task from a finished task's report.
 
-        run_name = parent.get("run_name")
-        if not run_name:
-            raise TaskError("RESUME_UNAVAILABLE", "Task has no run_name; nothing to retest")
-        agents_path = (
-            Path(parent["workspace"]) / RUNS_DIR_NAME / run_name / RUNTIME_STATE_DIR_NAME / "agents.json"
+        The original findings are staged into the new run under their original
+        ids; the agent only fills retest verdicts and the report is assembled
+        by code. ``held=True`` parks it so the user can review before it runs.
+        """
+        from app.services.results import (
+            read_report_markdown,
+            resolve_report_package,
+            resolve_retest_reports,
+            write_prior_findings,
+            write_retest_scope,
         )
-        if not agents_path.is_file():
+
+        parent = self.get_task(task_id)
+        if parent["status"] not in TERMINAL:
+            raise TaskError("TASK_ALREADY_RUNNING", "Only finished tasks can be retested")
+
+        findings = self.get_results(task_id)
+        flags = self.db.list_finding_flags(task_id)
+        skipped = invalid_finding_ids(flags)
+        selected = {str(x) for x in (finding_ids or []) if str(x).strip()} or {
+            str(flag["finding_id"])
+            for flag in flags.values()
+            if flag.get("request_test") and str(flag.get("review_status") or "") != "invalid"
+        }
+        run_dir = workspace_run_dir(Path(parent["workspace"]), parent.get("run_name"))
+        reports = resolve_retest_reports(
+            parent_run_dir=run_dir,
+            findings=findings,
+            include_ids=selected or None,
+            skipped_invalid=skipped,
+        )
+        if not reports:
             raise TaskError(
-                "RESUME_UNAVAILABLE",
-                f"Missing agent snapshot for run {run_name}; cannot retest",
+                "NO_FINDINGS_TO_RETEST",
+                "No eligible findings to retest (missing or marked invalid)",
             )
+
+        report_md = read_report_markdown(run_dir) if run_dir and not selected and not skipped else ""
+        if not report_md.strip():
+            report_md = "\n".join(
+                f"- {r.get('id')}: {r.get('title') or r.get('id')}" for r in reports
+            )
+        zip_path = resolve_report_package(run_dir) if run_dir else None
+        note = retest_from_report_instruction(
+            report_md, zip_path.name if zip_path else None, seeded=True
+        )
+        if selected:
+            ids = "\n".join(f"- {r.get('id')}: {r.get('title')}" for r in reports)
+            note = f"{note}\n[本次只复测以下 id]\n{ids}"
+        extra = (instruction or "").strip()
+        if extra:
+            note = f"{note}\n\n[附加说明]\n{extra}"
+
         request = self._request_from_task(parent)
-        changes = overrides or {}
-        if changes:
-            try:
-                request = CreateTaskRequest(**{**request.model_dump(), **changes})
-            except ValidationError as exc:
-                raise TaskError("INVALID_REQUEST", str(exc.errors()[0].get("msg"))) from exc
+        changes = {**(overrides or {}), "instruction": note}
+        if held:
+            changes["held"] = True
+        try:
+            request = CreateTaskRequest(**{**request.model_dump(), **changes})
+        except ValidationError as exc:
+            raise TaskError("INVALID_REQUEST", str(exc.errors()[0].get("msg"))) from exc
         if not (changes.get("name") or "").strip():
-            base = str(request.name or parent.get("target") or "").strip()
+            base = str(parent.get("name") or parent.get("target") or "").strip()
             if base and not base.startswith("复测"):
                 request.name = f"复测-{base}"[:200]
+        uploads = [(zip_path.name, zip_path.read_bytes())] if zip_path else None
         child = self.create_task(
             request,
             parent_task_id=parent["id"],
             action="retest",
-            reuse_environment_from=parent,
-            resume_note=note,
+            attachments=uploads,
+            copy_attachments_from=parent["workspace"],
         )
-        from app.services.results import write_retest_scope
-
-        write_retest_scope(Path(child["workspace"]), scope_ids)
-        for flag in self.db.list_finding_flags(parent["id"]).values():
-            self.db.upsert_finding_flag(
-                child["id"],
-                str(flag["finding_id"]),
-                review_status=str(flag.get("review_status") or "active"),
-                request_test=False,
-            )
+        write_prior_findings(
+            Path(child["workspace"]), findings=findings, parent_run_dir=run_dir, reports=reports
+        )
+        write_retest_scope(Path(child["workspace"]), [str(r.get("id")) for r in reports] if selected else None)
+        if selected:
+            self.db.clear_finding_request_test(task_id, [str(r.get("id")) for r in reports])
         return child
 
     def update_finding_review(
@@ -1020,7 +959,7 @@ class TaskManager:
         )
         if finding.get("review_status") == "invalid":
             raise TaskError("FINDING_INVALID", "Cannot retest an invalid finding", status_code=400)
-        child = self.retest_task(task_id, finding_ids=[finding_id])
+        child = self.retest_task(task_id, finding_ids=[finding_id], held=True)
         return {"finding": finding, "task": child}
 
     def _rebuild_report_for_task(self, task_id: str) -> None:
@@ -1038,16 +977,22 @@ class TaskManager:
         )
 
     def refresh_report(self, task_id: str) -> dict[str, Any]:
-        """Ask Strix to rewrite the delivery report in-place (resume or live steer)."""
+        """Regenerate the delivery report (and zip) from the stored findings — code only."""
         task = self.get_task(task_id)
-        if task["status"] in {"starting", "running"}:
-            return self.resume_with_message(task_id, REFRESH_REPORT_INSTRUCTION)
-        if task["status"] in TERMINAL:
-            return self.resume_task(task_id, REFRESH_REPORT_INSTRUCTION)
-        raise TaskError(
-            "REFRESH_UNAVAILABLE",
-            f"Cannot refresh report for task in status {task['status']}",
+        run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
+        if not run_dir:
+            raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
+        from app.services.results import rebuild_delivery_report
+
+        flags = self.db.list_finding_flags(task_id)
+        rebuild_delivery_report(
+            run_dir,
+            exclude_ids=invalid_finding_ids(flags),
+            retest=task.get("action") == "retest",
+            build_zip=True,
+            force=True,
         )
+        return task
 
     def translate_report(self, task_id: str) -> dict[str, Any]:
         """Hand the existing markdown report to the agent for English translation."""

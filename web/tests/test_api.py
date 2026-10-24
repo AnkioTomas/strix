@@ -968,43 +968,24 @@ def test_resume_requires_agent_snapshot(client: TestClient):
     assert run_record.get("end_time") is None
 
 
-def test_refresh_report_writes_resume_instruction(client: TestClient):
-    from app.services.agent_prompts import REFRESH_REPORT_INSTRUCTION
-
-    created = client.post(
-        "/api/v1/tasks",
-        json={"type": "pentest", "target": "https://example.com", "scan_mode": "quick"},
-    ).json()
-    manager = client.app.state.manager
-    task = manager.get_task(created["id"])
-    workspace = Path(task["workspace"])
-    run_name = "example_refresh_1"
-    state_dir = workspace / "strix_runs" / run_name / ".state"
-    state_dir.mkdir(parents=True)
-    (state_dir / "agents.json").write_text("{}", encoding="utf-8")
-    (workspace / "strix_runs" / run_name / "run.json").write_text(
-        '{"run_name":"example_refresh_1","status":"completed","targets_info":[{"type":"web","details":{}}]}',
+def _write_min_vuln(run_dir: Path) -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "vulnerabilities.json").write_text(
+        json.dumps([{"id": "v1", "title": "Keep Me", "severity": "high", "target": "https://example.com"}]),
         encoding="utf-8",
     )
-    manager.db.update_task(
-        created["id"],
-        status="completed",
-        finished_at="2026-01-01T00:00:00Z",
-        run_name=run_name,
-    )
-    manager._processes.pop(created["id"], None)
 
+
+def test_refresh_report_writes_resume_instruction(client: TestClient):
+    created, run_dir = _seed_completed_task_with_vulns(client)
+    manager = client.app.state.manager
     refreshed = client.post(f"/api/v1/tasks/{created['id']}/refresh-report")
     assert refreshed.status_code == 202, refreshed.text
     body = refreshed.json()
-    assert body["action"] == "resume"
-    assert body["status"] == "queued"
-    note = workspace / ".web_resume_instruction"
-    assert note.is_file()
-    assert "更新报告" in note.read_text(encoding="utf-8")
-    assert "finish_scan" in note.read_text(encoding="utf-8")
-    assert "screenshots" in note.read_text(encoding="utf-8")
-    assert REFRESH_REPORT_INSTRUCTION.strip() in note.read_text(encoding="utf-8")
+    assert body["id"] == created["id"]
+    assert body["status"] == "completed"
+    assert not (Path(manager.get_task(created["id"])["workspace"]) / ".web_resume_instruction").exists()
+    assert "Keep Me" in client.get(f"/api/v1/tasks/{created['id']}/report").json()["content"]
 
 
 def test_retest_queues_behind_existing_waiting_tasks(client: TestClient):
@@ -1026,6 +1007,7 @@ def test_retest_queues_behind_existing_waiting_tasks(client: TestClient):
     run_name = "old_retest_queue"
     state_dir = workspace / "strix_runs" / run_name / ".state"
     state_dir.mkdir(parents=True)
+    _write_min_vuln(workspace / "strix_runs" / run_name)
     (workspace / "strix_runs" / run_name / "run.json").write_text(
         json.dumps({"run_name": run_name, "status": "completed", "targets_info": []}),
         encoding="utf-8",
@@ -1057,8 +1039,6 @@ def test_retest_queues_behind_existing_waiting_tasks(client: TestClient):
 
 
 def test_retest_embeds_mandatory_instruction(client: TestClient):
-    from app.services.agent_prompts import RETEST_INSTRUCTION
-
     created = client.post(
         "/api/v1/tasks",
         json={
@@ -1074,6 +1054,7 @@ def test_retest_embeds_mandatory_instruction(client: TestClient):
     run_name = "retest_resume_1"
     state_dir = workspace / "strix_runs" / run_name / ".state"
     state_dir.mkdir(parents=True)
+    _write_min_vuln(workspace / "strix_runs" / run_name)
     (workspace / "strix_runs" / run_name / "run.json").write_text(
         json.dumps(
             {
@@ -1101,20 +1082,14 @@ def test_retest_embeds_mandatory_instruction(client: TestClient):
     assert body["action"] == "retest"
     assert body["name"] == "复测-https://example.com"
     assert body["status"] == "queued"
-    assert body["run_name"] == run_name
+    assert not body.get("run_name")
     assert manager.get_task(created["id"])["status"] == "completed"
-    child_ws = Path(manager.get_task(body["id"])["workspace"])
+    child = manager.get_task(body["id"])
+    child_ws = Path(child["workspace"])
     assert child_ws != workspace
-    assert (child_ws / "strix_runs" / run_name / ".state" / "agents.json").is_file()
+    assert (child_ws / "prior_findings" / "vulnerabilities.json").is_file()
     assert not (workspace / ".web_resume_instruction").exists()
-    note = child_ws / ".web_resume_instruction"
-    assert note.is_file()
-    note_text = note.read_text(encoding="utf-8")
-    assert RETEST_INSTRUCTION.strip() in note_text
-    assert "retest_status" in note_text
-    assert "screenshots" in note_text
-    # Original scan instruction stays on the task; resume nudge is separate.
-    assert "原始指令" not in note_text
+    assert "retest_status" in child["instruction"]
 
     manager.db.update_task(
         created["id"],
@@ -1128,12 +1103,9 @@ def test_retest_embeds_mandatory_instruction(client: TestClient):
     )
     assert with_creds.status_code == 202, with_creds.text
     assert with_creds.json()["id"] not in {created["id"], body["id"]}
-    note2 = (Path(manager.get_task(with_creds.json()["id"])["workspace"]) / ".web_resume_instruction").read_text(
-        encoding="utf-8"
-    )
+    note2 = manager.get_task(with_creds.json()["id"])["instruction"]
     assert "新密码是 Secret123!" in note2
     assert "[附加说明]" in note2
-    assert RETEST_INSTRUCTION.strip() in note2
 
 
 def _seed_completed_task_with_vulns(client: TestClient) -> tuple[dict, Path]:
@@ -1235,12 +1207,9 @@ def test_mark_finding_invalid_hides_from_report_and_retest(client: TestClient):
     body = retest.json()
     assert body["id"] != task_id
     assert body["action"] == "retest"
-    note = (Path(client.app.state.manager.get_task(body["id"])["workspace"]) / ".web_resume_instruction").read_text(encoding="utf-8")
-    assert "Drop Me" in note
-    assert "跳过" in note or "无效" in note
+    note = client.app.state.manager.get_task(body["id"])["instruction"]
+    assert "Drop Me" not in note
     assert "Keep Me" not in note or "retest_status" in note
-    child_flags = client.app.state.manager.db.list_finding_flags(body["id"])
-    assert child_flags["v-drop"]["review_status"] == "invalid"
 
 
 def test_request_finding_test_creates_focused_retest(client: TestClient):
@@ -1253,10 +1222,8 @@ def test_request_finding_test_creates_focused_retest(client: TestClient):
     assert body["finding"]["id"] == "v-keep"
     assert body["task"]["id"] != task_id
     assert body["task"]["action"] == "retest"
-    note = (Path(client.app.state.manager.get_task(body["task"]["id"])["workspace"]) / ".web_resume_instruction").read_text(
-        encoding="utf-8"
-    )
-    assert "指定漏洞复测" in note
+    note = client.app.state.manager.get_task(body["task"]["id"])["instruction"]
+    assert "本次只复测以下 id" in note
     assert "Keep Me" in note
     assert "v-keep" in note
     assert "Drop Me" not in note
@@ -1277,10 +1244,8 @@ def test_retest_respects_request_test_queue(client: TestClient):
     retest = client.post(f"/api/v1/tasks/{task_id}/retest")
     assert retest.status_code == 202, retest.text
     assert retest.json()["id"] != task_id
-    note = (Path(client.app.state.manager.get_task(retest.json()["id"])["workspace"]) / ".web_resume_instruction").read_text(
-        encoding="utf-8"
-    )
-    assert "指定漏洞复测" in note
+    note = client.app.state.manager.get_task(retest.json()["id"])["instruction"]
+    assert "本次只复测以下 id" in note
     assert "Keep Me" in note
     assert "Drop Me" not in note
 
@@ -2088,6 +2053,7 @@ def test_retest_accepts_create_form_overrides(client: TestClient):
     run_name = "retest_override_1"
     state_dir = workspace / "strix_runs" / run_name / ".state"
     state_dir.mkdir(parents=True)
+    _write_min_vuln(workspace / "strix_runs" / run_name)
     (workspace / "strix_runs" / run_name / "run.json").write_text(
         json.dumps({"run_name": run_name, "status": "completed", "targets_info": []}),
         encoding="utf-8",
@@ -2119,8 +2085,7 @@ def test_retest_accepts_create_form_overrides(client: TestClient):
     assert body["tags"] == ["bu:a"]
     child = manager.get_task(body["id"])
     assert child["request_headers"] == "X-Test: 1"
-    note = (Path(child["workspace"]) / ".web_resume_instruction").read_text(encoding="utf-8")
-    assert "新账号 admin/xxx" in note
+    assert "新账号 admin/xxx" in child["instruction"]
 
     bad = client.post(f"/api/v1/tasks/{created['id']}/retest", json={"use_proxy": True})
     assert bad.status_code == 400

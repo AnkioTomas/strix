@@ -1689,6 +1689,24 @@ class TaskManager:
             raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
         return content or ""
 
+    def get_report_pdf(self, task_id: str, lang: str | None = None) -> Path:
+        """PDF rendered from the same markdown the on-screen report shows."""
+        from app.services.pdf_report import render_pdf
+
+        task = self.get_task(task_id)
+        content = self.get_report(task_id, lang)
+        if not content.strip():
+            raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
+        run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
+        if run_dir is None:
+            raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
+        english = str(lang or "").lower().startswith("en")
+        out = run_dir / ("penetration_test_report.en.pdf" if english else "penetration_test_report.pdf")
+        try:
+            return render_pdf(content, run_dir, out, title=report_download_stem(task))
+        except Exception as exc:
+            raise TaskError("PDF_FAILED", f"PDF generation failed: {exc}", status_code=500) from exc
+
     def get_report_package(self, task_id: str, lang: str | None = None) -> Path:
         """Path to penetration_test_report.zip (markdown + images)."""
         from app.services.results import (

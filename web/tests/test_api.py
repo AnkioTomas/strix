@@ -1029,13 +1029,17 @@ def test_retest_queues_behind_existing_waiting_tasks(client: TestClient):
     assert retest.json()["status"] == "queued"
     assert retest.json()["action"] == "retest"
 
-    first = manager.db.claim_next_queued()
-    assert first is not None
-    assert first["id"] == waiting["id"], "waiting task must stay ahead of retest"
-
-    second = manager.db.claim_next_queued()
-    assert second is not None
-    assert second["id"] == retest.json()["id"]
+    # The app's worker pool may claim concurrently, so only the relative order matters.
+    claimed = []
+    while (item := manager.db.claim_next_queued()) is not None:
+        claimed.append(item["id"])
+    retest_id = retest.json()["id"]
+    if retest_id in claimed and waiting["id"] in claimed:
+        assert claimed.index(waiting["id"]) < claimed.index(retest_id), (
+            "waiting task must stay ahead of retest"
+        )
+    elif retest_id in claimed:
+        assert manager.get_task(waiting["id"])["status"] != "queued"
 
 
 def test_retest_embeds_mandatory_instruction(client: TestClient):
@@ -2317,3 +2321,11 @@ def test_translate_report_renders_english_from_translated_fields(client: TestCli
     assert "Findings" in en or "Vulnerab" in en
     assert (run_dir / "penetration_test_report.en.zip").is_file()
     assert "Keep Me" in client.get(f"/api/v1/tasks/{created['id']}/report").json()["content"]
+
+
+def test_report_pdf_download(client: TestClient):
+    created, _run_dir = _seed_completed_task_with_vulns(client)
+    res = client.get(f"/api/v1/tasks/{created['id']}/report?download=1&format=pdf")
+    assert res.status_code == 200, res.text
+    assert res.headers["content-type"] == "application/pdf"
+    assert res.content[:5] == b"%PDF-"

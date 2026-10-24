@@ -632,7 +632,7 @@ async def get_finding(
             "description": (
                 "JSON ``{task_id, format, content}`` by default. "
                 "``download=true`` returns a zip attachment "
-                "(markdown + images), not JSON. "
+                "(markdown + images), or a PDF with ``format=pdf``, not JSON. "
                 "``lang=en`` returns the LLM-translated English report (code-rendered) (409 until translated)."
             ),
         },
@@ -644,8 +644,20 @@ async def task_report(
     task_id: str,
     download: bool = False,
     lang: str = "zh",
+    format: str = "zip",
     manager: TaskManager = Depends(get_manager),
 ):
+    if download and format.lower() == "pdf":
+        try:
+            task = await asyncio.to_thread(manager.get_task, task_id)
+            pdf = await asyncio.to_thread(manager.get_report_pdf, task_id, lang)
+        except TaskError as exc:
+            return _error(exc)
+        return FileResponse(
+            pdf,
+            media_type="application/pdf",
+            filename=f"{report_download_stem(task)}{'.en' if lang.lower().startswith('en') else ''}.pdf",
+        )
     if download:
         try:
             task = await asyncio.to_thread(manager.get_task, task_id)

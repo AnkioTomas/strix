@@ -1836,6 +1836,17 @@
       btn.disabled = false;
     }
   };
+  $("downloadReportPdf").onclick = async () => {
+    if (!selected) return;
+    try {
+      await downloadWithRetry(
+        `/api/v1/tasks/${encodeURIComponent(selected)}/report?download=1&format=pdf&lang=${reportLang}`,
+        reportDownloadFallbackName(currentTask()).replace(/\.zip$/, ".pdf")
+      );
+    } catch (e) {
+      alert(e.message);
+    }
+  };
   $("downloadReport").onclick = async () => {
     if (!selected) return;
     try {

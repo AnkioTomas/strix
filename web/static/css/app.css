@@ -539,6 +539,25 @@ button, input, select, textarea {
   cursor: not-allowed;
   filter: none;
 }
+.btn.is-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  opacity: 0.75;
+}
+.btn.is-loading::before {
+  content: "";
+  width: 0.85rem;
+  height: 0.85rem;
+  flex: 0 0 auto;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: btn-loading-spin 0.7s linear infinite;
+}
+@keyframes btn-loading-spin {
+  to { transform: rotate(360deg); }
+}
 .btn.ghost {
   background: transparent;
   color: var(--text);

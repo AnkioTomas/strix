@@ -1363,7 +1363,30 @@
     updateAttachmentsHint();
   }
 
+  function setCreateTaskLoading(loading) {
+    const btn = $("createTask");
+    const cancel = $("cancelCreate");
+    if (loading) {
+      btn.dataset.idleLabel = btn.textContent;
+      btn.textContent = createDraft?.editId ? "正在保存…" : "正在创建…";
+      btn.disabled = true;
+      btn.classList.add("is-loading");
+      btn.setAttribute("aria-busy", "true");
+      cancel.disabled = true;
+      return;
+    }
+    btn.disabled = false;
+    btn.classList.remove("is-loading");
+    btn.removeAttribute("aria-busy");
+    cancel.disabled = false;
+    if (!$("createPanel").classList.contains("hidden") && btn.dataset.idleLabel) {
+      btn.textContent = btn.dataset.idleLabel;
+    }
+    delete btn.dataset.idleLabel;
+  }
+
   $("createTask").onclick = async () => {
+    if ($("createTask").disabled) return;
     if (createDraft?.editId) {
       const type = $("taskType").value;
       const body = {
@@ -1387,6 +1410,7 @@
           branch: $("gitBranch").value.trim() || null,
         };
       }
+      setCreateTaskLoading(true);
       try {
         await api.ensureSession();
         const task = await api.api(`/api/v1/tasks/${createDraft.editId}`, {
@@ -1399,6 +1423,8 @@
         selectTask(task.id);
       } catch (e) {
         alert(e.message);
+      } finally {
+        setCreateTaskLoading(false);
       }
       return;
     }
@@ -1448,6 +1474,7 @@
       form.append("action", createDraft.action || "retry");
     }
     files.forEach((file) => form.append("attachments", file));
+    setCreateTaskLoading(true);
     try {
       await api.ensureSession();
       const task = await api.apiForm("/api/v1/tasks", form);
@@ -1457,6 +1484,8 @@
       selectTask(task.id);
     } catch (e) {
       alert(e.message);
+    } finally {
+      setCreateTaskLoading(false);
     }
   };
 

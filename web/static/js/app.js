@@ -993,7 +993,7 @@
     // replace_findings + shipping full PoC bodies for every vuln.
     if (activeTab === "findings") await loadFindings();
     if (activeTab === "viewer") await loadViewer();
-    // Do not reload the report on the 8s poll — rebuild races with zip download
+    // Do not reload the report on refresh — rebuild races with zip download
     // ("Failed to fetch"). Report loads on tab switch / explicit refresh.
     if (activeTab === "artifacts") await loadArtifacts();
   }
@@ -1876,6 +1876,10 @@
   if (api.getKey()) {
     api.ensureSession().catch(() => {});
   }
+
+  // No auto-refresh: it re-rendered lists, yanked scroll positions, and kept
+  // hammering the API while the user was working. State changes are driven by
+  // user actions, and every action handler already calls refresh() itself;
+  // the manual refresh button covers "check on a running scan".
   refresh();
-  setInterval(refresh, 8000);
 })();

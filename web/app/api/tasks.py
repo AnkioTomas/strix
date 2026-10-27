@@ -38,6 +38,7 @@ from app.schemas import (
 )
 from app.api.viewer_proxy import attach_viewer_proxy_url
 from app.security.auth import require_api_key
+from app.services.agent_prompts import carryover_instruction
 from app.services.findings import empty_finding_counts
 from app.services.results import list_artifacts, resolve_artifact, resolve_task_log, workspace_run_dir
 from app.services.task_manager import TaskError, TaskManager, report_download_stem
@@ -255,11 +256,19 @@ async def task_retest_draft(task_id: str, manager: TaskManager = Depends(get_man
 
     try:
         data, name = await asyncio.to_thread(_task_report_zip, manager, task_id)
-        return await asyncio.to_thread(build_retest_draft, data, name, seeded=True)
+        draft = await asyncio.to_thread(build_retest_draft, data, name, seeded=True)
+        task = await asyncio.to_thread(manager.get_task, task_id)
     except TaskError as exc:
         return _error(exc)
     except DraftError as exc:
         return _error(TaskError("INVALID_REPORT", str(exc)))
+    # The zip only knows the report; accounts/passwords live in the original
+    # task's instruction. Pre-fill them so the user sees (and can edit) what
+    # the retest agent will be given.
+    carry = carryover_instruction(task.get("instruction"))
+    if carry:
+        draft["instruction"] = f"{draft['instruction']}\n\n[原任务提示词]\n{carry}"
+    return draft
 
 
 @router.post("/tasks/retest-draft")

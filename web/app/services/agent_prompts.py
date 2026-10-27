@@ -38,8 +38,40 @@ def retest_from_report_instruction(
 你不负责写报告：复测报告由系统根据你填写的漏洞结论自动生成，不要写报告正文、不要改标题/描述/严重度。
 你只填每条漏洞的 retest_status、fix_verification（简短复测步骤与结果）、screenshots。
 全部填完用 list_reports 核对，缺 retest_status 的补齐，再 finish_scan 一次，
-executive_summary 只用一两句话概括复测结论。凭证 / 环境变化见下方[附加说明]（如有）。
+executive_summary 只用一两句话概括复测结论。账号密码优先用下方[原任务提示词]中的凭证。
+凭证变化见下方[附加说明]。冲突时以附加说明为准。
 
 [原报告]
 {body}
 """
+
+
+_CARRY_MARKERS = ("[原任务提示词]", "[附加说明]")
+
+
+def _section(text: str, marker: str) -> str:
+    start = text.find(marker)
+    if start < 0:
+        return ""
+    body_start = start + len(marker)
+    next_section = text.find("\n[", body_start)
+    body = text[body_start : next_section if next_section >= 0 else len(text)]
+    return body.strip()
+
+
+def carryover_instruction(instruction: str | None) -> str:
+    """User context from a parent task that must survive into a retest.
+
+    A plain task's instruction is carried verbatim — accounts, passwords and
+    scope notes live there, and retests used to silently drop all of it. A
+    retest task's instruction is machine-built ([复测 — 强制] + embedded
+    report); only the human-supplied sections are carried on, so a
+    retest-of-retest neither loses credentials nor re-embeds the report.
+    """
+    text = (instruction or "").strip()
+    if not text:
+        return ""
+    if "[复测 — 强制]" not in text:
+        return text
+    parts = [section for marker in _CARRY_MARKERS if (section := _section(text, marker))]
+    return "\n\n".join(parts)

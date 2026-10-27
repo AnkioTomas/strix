@@ -25,6 +25,7 @@ from app.security.target import (
 )
 from app.services.attachments import copy_attachments, save_uploads
 from app.services.agent_prompts import (
+    carryover_instruction,
     retest_from_report_instruction,
 )
 from app.services.feishu import notify_status, notify_task
@@ -885,6 +886,9 @@ class TaskManager:
         if selected:
             ids = "\n".join(f"- {r.get('id')}: {r.get('title')}" for r in reports)
             note = f"{note}\n[本次只复测以下 id]\n{ids}"
+        carry = carryover_instruction(parent.get("instruction"))
+        if carry:
+            note = f"{note}\n\n[原任务提示词]\n{carry}"
         extra = (instruction or "").strip()
         if extra:
             note = f"{note}\n\n[附加说明]\n{extra}"

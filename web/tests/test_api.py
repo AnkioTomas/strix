@@ -1112,6 +1112,74 @@ def test_retest_embeds_mandatory_instruction(client: TestClient):
     assert "[附加说明]" in note2
 
 
+def test_retest_carries_parent_credentials(client: TestClient):
+    created = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com",
+            "scan_mode": "quick",
+            "instruction": "测试账号 admin，密码 Secret123!，只测 /admin",
+        },
+    ).json()
+    manager = client.app.state.manager
+    task = manager.get_task(created["id"])
+    workspace = Path(task["workspace"])
+    run_name = "retest_carry_1"
+    _write_min_vuln(workspace / "strix_runs" / run_name)
+    (workspace / "strix_runs" / run_name / "run.json").write_text(
+        json.dumps({"run_name": run_name, "status": "completed", "targets_info": []}),
+        encoding="utf-8",
+    )
+    manager.db.update_task(
+        created["id"],
+        status="completed",
+        finished_at="2026-01-01T00:00:00Z",
+        run_name=run_name,
+    )
+    manager._processes.pop(created["id"], None)
+
+    child = client.post(f"/api/v1/tasks/{created['id']}/retest")
+    assert child.status_code == 202, child.text
+    note = manager.get_task(child.json()["id"])["instruction"]
+    assert "[原任务提示词]" in note and "Secret123!" in note and "只测 /admin" in note
+
+
+def test_carryover_instruction_from_retest_keeps_only_user_sections():
+    from app.services.agent_prompts import carryover_instruction
+
+    assert carryover_instruction("账号 a，密码 b") == "账号 a，密码 b"
+    assert carryover_instruction("") == "" and carryover_instruction(None) == ""
+    parent = (
+        "[复测 — 强制]\n规则\n\n[原报告]\n报告全文不应再嵌一次\n\n"
+        "[原任务提示词]\n账号 admin，密码 Secret123!\n\n[附加说明]\n新密码 NewPass456"
+    )
+    carry = carryover_instruction(parent)
+    assert "Secret123!" in carry and "NewPass456" in carry
+    assert "报告全文不应再嵌一次" not in carry and "复测 — 强制" not in carry
+
+
+def test_retest_draft_carries_parent_credentials(client: TestClient):
+    created = client.post(
+        "/api/v1/tasks",
+        json={
+            "type": "pentest",
+            "target": "https://example.com",
+            "scan_mode": "quick",
+            "instruction": "账号 admin，密码 Secret123!",
+        },
+    ).json()
+    run_dir = get_settings().tasks_dir / created["id"] / "strix_runs" / "r1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "penetration_test_report.zip").write_bytes(_report_zip())
+    client.app.state.manager.db.update_task(created["id"], run_name="r1", status="completed")
+
+    draft = client.get(f"/api/v1/tasks/{created['id']}/retest-draft")
+    assert draft.status_code == 200, draft.text
+    body = draft.json()
+    assert "[原任务提示词]" in body["instruction"] and "Secret123!" in body["instruction"]
+
+
 def _seed_completed_task_with_vulns(client: TestClient) -> tuple[dict, Path]:
     created = client.post(
         "/api/v1/tasks",

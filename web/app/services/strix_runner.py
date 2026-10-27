@@ -501,7 +501,22 @@ def close_process_logs(_process: Any) -> None:
     return
 
 
+_STRIX_AVAILABLE_TTL_SECONDS = 60.0
+# {"available": bool, "checked_at": monotonic ts}; empty until first probe.
+_strix_available_cache: dict[str, Any] = {}
+
+
 def strix_available(settings: Settings) -> bool:
+    """Whether the strix CLI runs; cached so /health stays a cheap probe.
+
+    Spawning the CLI cold-starts a Python interpreter (seconds under load),
+    and the result cannot change while this process lives in any way that
+    matters — a 60s TTL is plenty fresh.
+    """
+    now = time.monotonic()
+    checked_at = _strix_available_cache.get("checked_at")
+    if checked_at is not None and now - checked_at < _STRIX_AVAILABLE_TTL_SECONDS:
+        return bool(_strix_available_cache["available"])
     import subprocess
 
     try:
@@ -512,9 +527,11 @@ def strix_available(settings: Settings) -> bool:
             check=False,
             timeout=10,
         )
+        available = result.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
+        available = False
+    _strix_available_cache.update(available=available, checked_at=now)
+    return available
 
 
 class DetachedScanHandle:

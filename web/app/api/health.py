@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Request
 
 from app.schemas import HealthResponse
@@ -23,7 +25,9 @@ async def health(request: Request) -> HealthResponse:
     admission = worker.admission_status() if hasattr(worker, "admission_status") else None
     return HealthResponse(
         status="ok" if db_ok and worker.healthy else "degraded",
-        strix=strix_available(manager.settings),
+        # to_thread: the uncached probe spawns the CLI (seconds under load);
+        # running it inline would freeze the event loop for every request.
+        strix=await asyncio.to_thread(strix_available, manager.settings),
         worker=worker.healthy,
         database=db_ok,
         running_tasks=manager.db.count_by_status("running")

@@ -89,6 +89,8 @@ def should_send(event: str, task: dict[str, Any], *, fingerprint: str | None = N
         return state.get("terminal") != key
     if key == "needs_user":
         return bool(fingerprint) and state.get("needs_user") != fingerprint
+    if key == "mail_failed":
+        return bool(fingerprint) and state.get("mail_failed") != fingerprint
     return True
 
 
@@ -104,11 +106,14 @@ def next_notify_state(
         state["started_run"] = task.get("run_name") or ""
         state.pop("terminal", None)
         state.pop("needs_user", None)
+        state.pop("mail_failed", None)
     elif key in _TERMINAL_EVENTS:
         state["terminal"] = key
         state.pop("needs_user", None)
     elif key == "needs_user" and fingerprint:
         state["needs_user"] = fingerprint
+    elif key == "mail_failed" and fingerprint:
+        state["mail_failed"] = fingerprint
     return state
 
 
@@ -119,6 +124,16 @@ def clear_needs_user_state(task: dict[str, Any]) -> dict[str, Any] | None:
         return None
     state = dict(state)
     state.pop("needs_user", None)
+    return state
+
+
+def clear_mail_failed_state(task: dict[str, Any]) -> dict[str, Any] | None:
+    """Drop the mail_failed fingerprint after a successful send."""
+    state = load_notify_state(task)
+    if "mail_failed" not in state:
+        return None
+    state = dict(state)
+    state.pop("mail_failed", None)
     return state
 
 

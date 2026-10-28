@@ -276,6 +276,7 @@
     $("taskNotes").value = "";
     $("taskMailTo").value = "";
     $("taskHeld").checked = false;
+    $("taskRetest").checked = false;
     $("earliestStart").value = "";
     $("taskType").value = "pentest";
     $("scanMode").value = "deep";
@@ -299,6 +300,7 @@
     $("taskNotes").value = t.notes || "";
     $("taskMailTo").value = t.mail_to || "";
     $("taskHeld").checked = false;
+    $("taskRetest").checked = t.action === "retest" && !createDraft?.parentId;
     $("earliestStart").value = "";
     $("taskType").value = t.type || "pentest";
     $("scanMode").value = t.scan_mode || "deep";
@@ -395,7 +397,9 @@
     $("editBtn").disabled = !held;
     $("renameBtn").disabled = !t;
     $("mailToBtn").disabled = !t;
-    $("resendMailBtn").disabled = !(t && t.mail_status === "failed");
+    $("resendMailBtn").disabled = !(
+      t && t.status === "completed" && t.mail_status !== "sending"
+    );
     $("saveNotesBtn").disabled = !t;
   }
 
@@ -476,8 +480,9 @@
   function mailStatusLabel(t) {
     if (!t.mail_to) return "（未设置收件人）";
     if (t.mail_status === "sent") return "已发送";
+    if (t.mail_status === "sending") return "发送中…";
     if (t.mail_status === "failed") return `发送失败：${t.mail_error || "未知错误"}`;
-    if (t.mail_status === "pending") return "待发送";
+    if (t.mail_status === "pending") return "待发送（可点「重发邮件」立即发送）";
     return t.mail_status || "—";
   }
 
@@ -1479,6 +1484,7 @@
     }
     if (createDraft?.retestReport) form.append("retest_report", createDraft.retestReport);
     if (createDraft?.retestTaskId) form.append("retest_report_task_id", createDraft.retestTaskId);
+    if ($("taskRetest").checked && !createDraft?.parentId) form.append("action", "retest");
     if (createDraft?.parentId) {
       form.append("parent_task_id", createDraft.parentId);
       form.append("action", createDraft.action || "retry");
@@ -1529,7 +1535,7 @@
 
   $("resendMailBtn").onclick = async () => {
     const t = currentTask();
-    if (!t || t.mail_status !== "failed") return;
+    if (!t || t.status !== "completed" || t.mail_status === "sending") return;
     const btn = $("resendMailBtn");
     btn.disabled = true;
     btn.textContent = "正在重发…";

@@ -43,6 +43,7 @@ async def lifespan(app: FastAPI):
     app.state.manager = manager
     app.state.worker = worker
     reattached = manager.reattach_running_scans()
+    manager.recover_interrupted_mail()
     await worker.start()
     logger.info(
         "Strix API listening data_dir=%s max_concurrent=%s reattached=%s",

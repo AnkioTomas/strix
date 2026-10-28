@@ -28,7 +28,12 @@ from app.services.agent_prompts import (
     carryover_instruction,
     retest_from_report_instruction,
 )
-from app.services.feishu import notify, notify_status, notify_task
+from app.services.feishu import (
+    clear_mail_failed_state,
+    dump_notify_state,
+    notify_status,
+    notify_task,
+)
 from app.services.findings import (
     apply_finding_flags,
     empty_finding_counts,
@@ -172,6 +177,10 @@ class TaskManager:
         self._processes: dict[str, DetachedScanHandle] = {}
         # Skip DELETE+INSERT of findings when vulnerabilities.json is unchanged.
         self._findings_disk_mtime: dict[str, float] = {}
+        # Report mails in flight in this process; guards against duplicate
+        # sends (auto thread + manual resend racing each other).
+        self._mail_lock = threading.Lock()
+        self._mail_inflight: set[str] = set()
 
     # --- create / list ---
 
@@ -1492,6 +1501,46 @@ class TaskManager:
         return results
 
     def send_report_mail(self, task_id: str) -> dict[str, Any]:
+        """Send the report mail once; a concurrent send for the task is a 409."""
+        with self._mail_lock:
+            if task_id in self._mail_inflight:
+                raise TaskError("MAIL_SENDING", "报告邮件正在发送中", status_code=409)
+            self._mail_inflight.add(task_id)
+        try:
+            return self._send_report_mail(task_id)
+        finally:
+            with self._mail_lock:
+                self._mail_inflight.discard(task_id)
+
+    def recover_interrupted_mail(self) -> int:
+        """Repair mail states a restart stranded; resume unsent report mails.
+
+        ``sending`` can only mean the previous process died mid-send (this
+        process tracks live sends in memory), so mark it failed and let the
+        user resend. ``pending`` on a completed task means the completion
+        trigger never ran (or the thread died) — send it now.
+        """
+        recovered = 0
+        for task in self.db.list_tasks(status="completed", limit=500, offset=0):
+            status = task.get("mail_status")
+            if status == "sending":
+                self.db.update_task(
+                    task["id"],
+                    mail_status="failed",
+                    mail_error="服务重启，邮件发送中断，请点击「重发邮件」",  # noqa: RUF001
+                )
+                recovered += 1
+            elif status == "pending" and self._mail_enabled():
+                threading.Thread(
+                    target=self._send_report_mail_safe,
+                    args=(str(task["id"]),),
+                    name=f"report-mail-{task['id']}",
+                    daemon=True,
+                ).start()
+                recovered += 1
+        return recovered
+
+    def _send_report_mail(self, task_id: str) -> dict[str, Any]:
         """Mail the Chinese report PDF to the owner, CC'ing STRIX_MAIL_CC.
 
         PDF only: the full zip (markdown + PDF + every raw screenshot) runs
@@ -1506,6 +1555,7 @@ class TaskManager:
             raise TaskError(
                 "RESULT_NOT_READY", "Task is not completed yet", status_code=409
             )
+        self.db.update_task(task_id, mail_status="sending", mail_error=None)
         recipients = [a for a in str(task.get("mail_to") or "").split(",") if a]
         try:
             package = self.get_report_pdf(task_id)
@@ -1574,15 +1624,24 @@ class TaskManager:
             # Delivery already retried transient SMTP errors in the mailer;
             # landing here means the report mail is not coming. Tell the
             # webhook channel — the auto-send path otherwise fails silently.
-            notify(
+            # notify_task dedupes on the error text: repeated resends failing
+            # the same way must not spam the group.
+            notify_task(
                 self.settings,
+                self.db,
                 "mail_failed",
                 task,
                 detail=f"收件人: {', '.join(recipients) or '(仅抄送)'}\n错误: {message}",
+                fingerprint=message,
             )
             raise TaskError("MAIL_FAILED", message, status_code=502) from exc
         updated = self.db.update_task(task_id, mail_status="sent", mail_error=None)
         assert updated is not None
+        cleared = clear_mail_failed_state(updated)
+        if cleared is not None:
+            dumped = dump_notify_state(cleared)
+            self.db.update_task(task_id, feishu_notify=dumped)
+            updated["feishu_notify"] = dumped
         return updated
 
     def _gitea_sync_issues(

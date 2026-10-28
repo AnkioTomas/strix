@@ -1747,11 +1747,11 @@ def test_retest_task_report_lists_fixed_by_title_only(client: TestClient, monkey
 
     report = client.get(f"/api/v1/tasks/{created['id']}/report").json()["content"]
     assert "复测报告" in report
-    assert "Drop Me（已修复）" in report
+    assert "【已修复】Drop Me" in report
     assert "should not appear" not in report
     assert "noise" not in report
-    assert "Keep Me（未修复）" in report
-    assert "### 复测步骤" in report
+    assert "【未修复】Keep Me" in report
+    assert "**复测步骤**" in report
     assert "重放请求，仍可复现" in report
     assert "example.com:443" in report
 
@@ -1977,6 +1977,49 @@ def test_retest_report_lists_untested_unless_scoped():
     assert "对 3 项漏洞进行了复测" in full and full.count("未复测") >= 2
     focused = render_retest_report(run_record={}, vulnerability_reports=vulns, scope_ids={"f1"})
     assert "对 1 项漏洞进行了复测" in focused and "T2" not in focused
+
+
+def test_retest_report_layout_and_opening_summary():
+    from app.services.retest_report import render_retest_report
+
+    vulns = [
+        {"id": "a", "title": "已修好", "severity": "high", "retest_status": "fixed"},
+        {"id": "b", "title": "还没修", "severity": "critical", "retest_status": "not_fixed",
+         "target": "https://example.com", "fix_verification": "重放仍成功"},
+        {"id": "c", "title": "修一半", "severity": "medium", "retest_status": "partial"},
+        {"id": "d", "title": "没测到", "severity": "low", "retest_status": ""},
+    ]
+    md = render_retest_report(run_record={}, vulnerability_reports=vulns)
+    # Opening verdict: what remains, by severity, before anything else.
+    assert "仍有 2 项未完全修复（严重 1 项、中危 1 项）" in md
+    assert "另有 1 项未复测" in md
+    # Results table carries the severity column.
+    assert "| 等级 | 漏洞 | 复测情况 | 地址 |" in md
+    assert "| 严重 | 还没修 | 未修复 |" in md
+    # One H1 only; sections are H2; findings are H3 in 【等级】【复测情况】title form.
+    assert sum(1 for ln in md.splitlines() if ln.startswith("# ")) == 1
+    assert "## 复测情况" in md and "## 复测详情" in md
+    assert "### 【高危】【已修复】已修好" in md
+    assert "### 【严重】【未修复】还没修" in md
+    assert "## 1." not in md and "### 复测步骤" not in md
+    assert "**复测步骤**" in md
+
+
+def test_create_task_can_be_marked_retest(client: TestClient):
+    res = client.post(
+        "/api/v1/tasks",
+        files={
+            "type": (None, "pentest"),
+            "target": (None, "https://example.com"),
+            "action": (None, "retest"),
+        },
+    )
+    assert res.status_code == 202, res.text
+    assert res.json()["action"] == "retest"
+    plain = client.post(
+        "/api/v1/tasks", json={"type": "pentest", "target": "https://example.com"}
+    )
+    assert plain.status_code == 202 and plain.json()["action"] is None
 
 
 def _fake_proxy(reply: bytes):
@@ -2529,8 +2572,8 @@ def test_report_mail_failure_notifies_webhook(
     monkeypatch.setattr("app.services.mailer.send_report_mail", boom)
     notified: dict = {}
     monkeypatch.setattr(
-        "app.services.task_manager.notify",
-        lambda settings, event, task, **kw: notified.update(event=event, **kw) or True,
+        "app.services.task_manager.notify_task",
+        lambda _settings, _db, event, _task, **kw: notified.update(event=event, **kw) or True,
     )
     manager.db.update_task(created["id"], mail_to="a@b.com")
 
@@ -2540,6 +2583,52 @@ def test_report_mail_failure_notifies_webhook(
     assert "a@b.com" in notified["detail"] and "smtp down" in notified["detail"]
     task = manager.get_task(created["id"])
     assert task["mail_status"] == "failed" and "smtp down" in task["mail_error"]
+
+
+def test_mail_failed_notify_dedupes_by_error_text():
+    from app.services.feishu import dump_notify_state, next_notify_state, should_send
+
+    task = {"id": "t1", "feishu_notify": ""}
+    assert should_send("mail_failed", task, fingerprint="smtp down")
+    state = next_notify_state("mail_failed", task, fingerprint="smtp down")
+    seen = {"id": "t1", "feishu_notify": dump_notify_state(state)}
+    assert not should_send("mail_failed", seen, fingerprint="smtp down")
+    assert should_send("mail_failed", seen, fingerprint="other error")
+
+
+def test_report_mail_recovers_interrupted_and_blocks_duplicate(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    created, _run_dir = _seed_completed_task_with_vulns(client)
+    manager = client.app.state.manager
+    # A restart mid-send strands "sending"; recovery turns it into a
+    # visible, resendable failure instead of a dead button.
+    manager.db.update_task(created["id"], mail_to="a@b.com", mail_status="sending")
+    assert manager.recover_interrupted_mail() == 1
+    task = manager.get_task(created["id"])
+    assert task["mail_status"] == "failed" and "中断" in task["mail_error"]
+
+    # A send already in flight in this process rejects a second attempt.
+    manager._mail_inflight.add(created["id"])
+    try:
+        res = client.post(f"/api/v1/tasks/{created['id']}/send-report-mail")
+        assert res.status_code == 409, res.text
+    finally:
+        manager._mail_inflight.discard(created["id"])
+
+    # From failed (and pending), resend goes through the full path again.
+    package = tmp_path / "report.pdf"
+    package.write_bytes(b"%PDF")
+    monkeypatch.setattr(manager, "get_report_pdf", lambda *_a, **_k: package)
+    monkeypatch.setattr(manager, "get_results", lambda _tid, *_a, **_k: [])
+    monkeypatch.setattr(manager, "attach_task_overlays", lambda tasks, **_k: tasks)
+    sent: dict = {}
+    monkeypatch.setattr(
+        "app.services.mailer.send_report_mail", lambda _settings, **kw: sent.update(kw)
+    )
+    res = client.post(f"/api/v1/tasks/{created['id']}/send-report-mail")
+    assert res.status_code == 200, res.text
+    assert res.json()["mail_status"] == "sent" and sent["to"] == ["a@b.com"]
 
 
 def test_batch_import_applies_proxy_and_headers(client: TestClient):

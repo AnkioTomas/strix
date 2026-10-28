@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import logging
 import smtplib
 import socket
 import ssl
+import time
 from email.message import EmailMessage
 import re
 from datetime import datetime
@@ -14,6 +16,9 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from app.config import Settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class MailError(RuntimeError):
@@ -326,43 +331,81 @@ def send_report_mail(
         message["X-Priority"] = "1 (Highest)"
         message["X-MSMail-Priority"] = "High"
     message.set_content(html, subtype="html")
+    subtype = Path(attachment_name).suffix.lstrip(".").lower() or "octet-stream"
     message.add_attachment(
         attachment.read_bytes(),
         maintype="application",
-        subtype="zip",
+        subtype=subtype,
         filename=attachment_name,
     )
 
     _deliver(settings, message, sender=sender, recipients=[*to, *cc])
 
 
+_DELIVER_ATTEMPTS = 5
+# Exponential backoff between attempts: 5s, 10s, 20s, 40s.
+_DELIVER_RETRY_DELAYS = (5.0, 10.0, 20.0, 40.0)
+
+
+def _is_transient_smtp_error(exc: BaseException) -> bool:
+    """Whether another attempt can plausibly succeed.
+
+    4xx replies and dropped connections are transient; 5xx replies (bad
+    credentials, refused recipients) and local config/proxy errors are not.
+    """
+    if isinstance(exc, smtplib.SMTPRecipientsRefused):
+        return False
+    if isinstance(exc, smtplib.SMTPResponseException):
+        return 400 <= exc.smtp_code < 500
+    return isinstance(exc, (OSError, smtplib.SMTPException))
+
+
 def _deliver(
+    settings: Settings, message: EmailMessage, *, sender: str, recipients: list[str]
+) -> None:
+    for attempt in range(_DELIVER_ATTEMPTS):
+        try:
+            _deliver_once(settings, message, sender=sender, recipients=recipients)
+        except (OSError, smtplib.SMTPException, MailError) as exc:
+            if attempt + 1 >= _DELIVER_ATTEMPTS or not _is_transient_smtp_error(exc):
+                raise MailError(f"邮件发送失败：{exc}") from exc
+            delay = _DELIVER_RETRY_DELAYS[min(attempt, len(_DELIVER_RETRY_DELAYS) - 1)]
+            logger.warning(
+                "mail delivery attempt %d/%d failed: %s; retrying in %.0fs",
+                attempt + 1,
+                _DELIVER_ATTEMPTS,
+                exc,
+                delay,
+            )
+            time.sleep(delay)
+        else:
+            return
+
+
+def _deliver_once(
     settings: Settings, message: EmailMessage, *, sender: str, recipients: list[str]
 ) -> None:
     host, port = settings.smtp_host.strip(), settings.smtp_port
     proxy = settings.smtp_proxy.strip()
-    try:
-        if settings.smtp_ssl:
-            context = ssl.create_default_context()
-            client: smtplib.SMTP = (
-                _ProxySMTPSSL(host, port, timeout=60, context=context, proxy=proxy)
-                if proxy
-                else smtplib.SMTP_SSL(host, port, timeout=60, context=context)
-            )
-        else:
-            client = (
-                _ProxySMTP(host, port, timeout=60, proxy=proxy)
-                if proxy
-                else smtplib.SMTP(host, port, timeout=60)
-            )
-        with client:
-            if not settings.smtp_ssl and client.has_extn("starttls"):
-                client.starttls(context=ssl.create_default_context())
-            if settings.smtp_user:
-                client.login(settings.smtp_user, settings.smtp_password)
-            client.send_message(message, from_addr=sender, to_addrs=recipients)
-    except (OSError, smtplib.SMTPException, MailError) as exc:
-        raise MailError(f"邮件发送失败：{exc}") from exc
+    if settings.smtp_ssl:
+        context = ssl.create_default_context()
+        client: smtplib.SMTP = (
+            _ProxySMTPSSL(host, port, timeout=60, context=context, proxy=proxy)
+            if proxy
+            else smtplib.SMTP_SSL(host, port, timeout=60, context=context)
+        )
+    else:
+        client = (
+            _ProxySMTP(host, port, timeout=60, proxy=proxy)
+            if proxy
+            else smtplib.SMTP(host, port, timeout=60)
+        )
+    with client:
+        if not settings.smtp_ssl and client.has_extn("starttls"):
+            client.starttls(context=ssl.create_default_context())
+        if settings.smtp_user:
+            client.login(settings.smtp_user, settings.smtp_password)
+        client.send_message(message, from_addr=sender, to_addrs=recipients)
 
 
 def smtp_target(settings: Settings) -> str:

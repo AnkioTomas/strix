@@ -1820,9 +1820,9 @@ def test_batch_import_creates_tasks_and_mails_report(
     assert task["tags"] == ["BU1"]
 
     manager = client.app.state.manager
-    package = tmp_path / "report.zip"
-    package.write_bytes(b"PK")
-    monkeypatch.setattr(manager, "get_report_package", lambda *_a, **_k: package)
+    package = tmp_path / "report.pdf"
+    package.write_bytes(b"%PDF")
+    monkeypatch.setattr(manager, "get_report_pdf", lambda *_a, **_k: package)
     sent: dict = {}
 
     def fake_send(settings, **kwargs):
@@ -1837,6 +1837,7 @@ def test_batch_import_creates_tasks_and_mails_report(
     assert done.json()["mail_status"] == "sent"
     assert sent["to"] == ["alice@corp.test"]
     assert sent["attachment"] == package
+    assert sent["attachment_name"].endswith(".pdf")
     assert sent["subject"] == "报告-门户（example.com:8443）-BU1"
     assert "门户（example.com:8443）" in sent["html"]
     assert sent["high_priority"] is False
@@ -2254,9 +2255,9 @@ def test_report_mail_lists_serious_findings_and_sets_priority(
         "/api/v1/tasks", json={"type": "pentest", "target": "https://example.com"}
     ).json()
     manager = client.app.state.manager
-    package = tmp_path / "report.zip"
-    package.write_bytes(b"PK")
-    monkeypatch.setattr(manager, "get_report_package", lambda *_a, **_k: package)
+    package = tmp_path / "report.pdf"
+    package.write_bytes(b"%PDF")
+    monkeypatch.setattr(manager, "get_report_pdf", lambda *_a, **_k: package)
     monkeypatch.setattr(
         manager,
         "get_results",
@@ -2315,6 +2316,188 @@ def test_send_report_mail_sets_importance_headers(monkeypatch: pytest.MonkeyPatc
         attachment_name="r.zip",
     )
     assert seen["msg"]["Importance"] is None
+
+
+def _fake_smtp_class(attempts: dict, fail_with):
+    class FakeSMTP:
+        def __init__(self, host, port, timeout):
+            attempts["n"] += 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def has_extn(self, name):
+            return False
+
+        def login(self, user, password):
+            pass
+
+        def send_message(self, message, from_addr, to_addrs):
+            exc = fail_with(attempts["n"])
+            if exc is not None:
+                raise exc
+
+    return FakeSMTP
+
+
+def test_deliver_retries_transient_smtp_errors(monkeypatch: pytest.MonkeyPatch):
+    import smtplib
+
+    from app.config import Settings
+    from app.services import mailer
+
+    attempts = {"n": 0}
+    fake = _fake_smtp_class(
+        attempts,
+        lambda n: smtplib.SMTPServerDisconnected("bye") if n < 3 else None,
+    )
+    monkeypatch.setattr(mailer.smtplib, "SMTP", fake)
+    monkeypatch.setattr(mailer, "_DELIVER_RETRY_DELAYS", (0, 0))
+    settings = Settings(
+        STRIX_SMTP_HOST="smtp.corp.test",
+        STRIX_SMTP_PORT=587,
+        STRIX_SMTP_SSL=False,
+        STRIX_SMTP_USER="u@corp.test",
+        STRIX_SMTP_PASSWORD="pw",
+        STRIX_SMTP_FROM="u@corp.test",
+    )
+    mailer.send_test_mail(settings, to=["a@b.com"])
+    assert attempts["n"] == 3
+
+
+def test_deliver_does_not_retry_permanent_smtp_errors(monkeypatch: pytest.MonkeyPatch):
+    import smtplib
+
+    from app.config import Settings
+    from app.services import mailer
+
+    attempts = {"n": 0}
+    fake = _fake_smtp_class(
+        attempts,
+        lambda n: smtplib.SMTPAuthenticationError(535, b"bad credentials"),
+    )
+    monkeypatch.setattr(mailer.smtplib, "SMTP", fake)
+    monkeypatch.setattr(mailer, "_DELIVER_RETRY_DELAYS", (0, 0))
+    settings = Settings(
+        STRIX_SMTP_HOST="smtp.corp.test",
+        STRIX_SMTP_PORT=587,
+        STRIX_SMTP_SSL=False,
+        STRIX_SMTP_USER="u@corp.test",
+        STRIX_SMTP_PASSWORD="pw",
+        STRIX_SMTP_FROM="u@corp.test",
+    )
+    with pytest.raises(mailer.MailError):
+        mailer.send_test_mail(settings, to=["a@b.com"])
+    assert attempts["n"] == 1
+
+
+def test_deliver_backs_off_exponentially(monkeypatch: pytest.MonkeyPatch):
+    import smtplib
+
+    from app.config import Settings
+    from app.services import mailer
+
+    attempts = {"n": 0}
+    fake = _fake_smtp_class(
+        attempts,
+        lambda n: smtplib.SMTPServerDisconnected("bye") if n < 3 else None,
+    )
+    monkeypatch.setattr(mailer.smtplib, "SMTP", fake)
+    delays: list[float] = []
+    monkeypatch.setattr(mailer.time, "sleep", delays.append)
+    settings = Settings(
+        STRIX_SMTP_HOST="smtp.corp.test",
+        STRIX_SMTP_PORT=587,
+        STRIX_SMTP_SSL=False,
+        STRIX_SMTP_USER="u@corp.test",
+        STRIX_SMTP_PASSWORD="pw",
+        STRIX_SMTP_FROM="u@corp.test",
+    )
+    mailer.send_test_mail(settings, to=["a@b.com"])
+    assert attempts["n"] == 3 and delays == [5.0, 10.0]
+
+
+def test_report_package_reuses_fresh_zip(tmp_path: Path):
+    from app.services.results import resolve_report_package
+
+    run_dir = tmp_path / "run"
+    (run_dir / "images").mkdir(parents=True)
+    md = run_dir / "penetration_test_report.md"
+    md.write_text("# 报告\n\n正文\n", encoding="utf-8")
+    (run_dir / "images" / "a.png").write_bytes(b"\x89PNG")
+
+    first = resolve_report_package(run_dir, md_arcname="客户报告.md")
+    assert first is not None and first.is_file()
+    sentinel = first.stat().st_mtime + 100
+    os.utime(first, (sentinel, sentinel))
+
+    again = resolve_report_package(run_dir, md_arcname="客户报告.md")
+    assert again == first and first.stat().st_mtime == sentinel
+
+    os.utime(md, (sentinel + 100, sentinel + 100))
+    rebuilt = resolve_report_package(run_dir, md_arcname="客户报告.md")
+    assert rebuilt is not None and rebuilt.stat().st_mtime != sentinel
+
+    renamed = resolve_report_package(run_dir, md_arcname="改名报告.md")
+    assert renamed is not None
+    with zipfile.ZipFile(renamed) as zf:
+        assert "改名报告.md" in zf.namelist()
+
+
+def test_report_pdf_fresh_checks_md_and_images(tmp_path: Path):
+    from app.services.results import report_pdf_fresh
+
+    md = tmp_path / "penetration_test_report.md"
+    md.write_text("# 报告\n", encoding="utf-8")
+    pdf = tmp_path / "penetration_test_report.pdf"
+    pdf.write_bytes(b"%PDF")
+    assert report_pdf_fresh(pdf, md)
+
+    os.utime(md, (pdf.stat().st_mtime + 100, pdf.stat().st_mtime + 100))
+    assert not report_pdf_fresh(pdf, md)
+
+    os.utime(md, (pdf.stat().st_mtime - 100, pdf.stat().st_mtime - 100))
+    images = tmp_path / "images"
+    images.mkdir()
+    shot = images / "a.png"
+    shot.write_bytes(b"\x89PNG")
+    os.utime(shot, (pdf.stat().st_mtime + 100, pdf.stat().st_mtime + 100))
+    assert not report_pdf_fresh(pdf, md)
+
+
+def test_report_mail_failure_notifies_webhook(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    from app.services.mailer import MailError
+
+    created, _run_dir = _seed_completed_task_with_vulns(client)
+    manager = client.app.state.manager
+    package = tmp_path / "report.pdf"
+    package.write_bytes(b"%PDF")
+    monkeypatch.setattr(manager, "get_report_pdf", lambda *_a, **_k: package)
+    monkeypatch.setattr(manager, "get_results", lambda _tid, *a, **k: [])
+    monkeypatch.setattr(manager, "attach_task_overlays", lambda tasks, **_k: tasks)
+
+    def boom(settings, **kw):
+        raise MailError("邮件发送失败：smtp down")
+
+    monkeypatch.setattr("app.services.mailer.send_report_mail", boom)
+    notified: dict = {}
+    monkeypatch.setattr(
+        "app.services.task_manager.notify",
+        lambda settings, event, task, **kw: notified.update(event=event, **kw) or True,
+    )
+    manager.db.update_task(created["id"], mail_to="a@b.com")
+
+    res = client.post(f"/api/v1/tasks/{created['id']}/send-report-mail")
+    assert res.status_code == 502, res.text
+    assert notified["event"] == "mail_failed"
+    assert "a@b.com" in notified["detail"] and "smtp down" in notified["detail"]
+    task = manager.get_task(created["id"])
+    assert task["mail_status"] == "failed" and "smtp down" in task["mail_error"]
 
 
 def test_batch_import_applies_proxy_and_headers(client: TestClient):

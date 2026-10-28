@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     # Feishu group bot webhook (empty = disabled). Events are web-side only.
     feishu_webhook: str = Field(default="", alias="STRIX_FEISHU_WEBHOOK")
     feishu_events: str = Field(
-        default="started,finished,failed,cancelled,needs_user",
+        default="started,finished,failed,cancelled,needs_user,mail_failed",
         alias="STRIX_FEISHU_EVENTS",
     )
     # Outbound proxy for Feishu webhook only (http/https). Empty = direct.

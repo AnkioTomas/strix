@@ -20,6 +20,7 @@ _EVENT_TITLES = {
     "failed": "扫描失败",
     "cancelled": "扫描已取消",
     "needs_user": "需要用户回复",
+    "mail_failed": "报告邮件发送失败",
 }
 
 # Feishu card header templates (bot webhook interactive cards).
@@ -29,6 +30,7 @@ _EVENT_TEMPLATES = {
     "failed": "red",
     "cancelled": "orange",
     "needs_user": "purple",
+    "mail_failed": "red",
 }
 
 _STATUS_TO_EVENT = {

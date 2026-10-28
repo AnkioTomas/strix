@@ -28,7 +28,7 @@ from app.services.agent_prompts import (
     carryover_instruction,
     retest_from_report_instruction,
 )
-from app.services.feishu import notify_status, notify_task
+from app.services.feishu import notify, notify_status, notify_task
 from app.services.findings import (
     apply_finding_flags,
     empty_finding_counts,
@@ -1492,7 +1492,13 @@ class TaskManager:
         return results
 
     def send_report_mail(self, task_id: str) -> dict[str, Any]:
-        """Mail the Chinese report zip to the owner, CC'ing STRIX_MAIL_CC."""
+        """Mail the Chinese report PDF to the owner, CC'ing STRIX_MAIL_CC.
+
+        PDF only: the full zip (markdown + PDF + every raw screenshot) runs
+        to tens of MB on screenshot-heavy reports, which is exactly what
+        SMTP size limits and flaky uplinks choke on. The PDF already embeds
+        the screenshots; the zip stays a console download.
+        """
         from app.services.mailer import MailError, render_template, send_report_mail
 
         task = self.get_task(task_id)
@@ -1502,7 +1508,7 @@ class TaskManager:
             )
         recipients = [a for a in str(task.get("mail_to") or "").split(",") if a]
         try:
-            package = self.get_report_package(task_id)
+            package = self.get_report_pdf(task_id)
             self.attach_task_overlays([task])
             counts = task.get("finding_counts") or {}
             name = task_display_title(task) or task_id
@@ -1559,12 +1565,21 @@ class TaskManager:
                 subject=subject,
                 html=html,
                 attachment=package,
-                attachment_name=f"{report_download_stem(task)}.zip",
+                attachment_name=f"{report_download_stem(task)}.pdf",
                 high_priority=bool(counts.get("critical") or counts.get("high")),
             )
         except (MailError, TaskError) as exc:
             message = exc.message if isinstance(exc, TaskError) else str(exc)
             self.db.update_task(task_id, mail_status="failed", mail_error=message)
+            # Delivery already retried transient SMTP errors in the mailer;
+            # landing here means the report mail is not coming. Tell the
+            # webhook channel — the auto-send path otherwise fails silently.
+            notify(
+                self.settings,
+                "mail_failed",
+                task,
+                detail=f"收件人: {', '.join(recipients) or '(仅抄送)'}\n错误: {message}",
+            )
             raise TaskError("MAIL_FAILED", message, status_code=502) from exc
         updated = self.db.update_task(task_id, mail_status="sent", mail_error=None)
         assert updated is not None
@@ -1706,6 +1721,10 @@ class TaskManager:
             raise TaskError("RESULT_NOT_READY", "Report not ready", status_code=409)
         english = str(lang or "").lower().startswith("en")
         out = run_dir / ("penetration_test_report.en.pdf" if english else "penetration_test_report.pdf")
+        from app.services.results import report_md_name, report_pdf_fresh
+
+        if out.is_file() and report_pdf_fresh(out, run_dir / report_md_name(lang)):
+            return out
         try:
             return render_pdf(content, run_dir, out, title=report_download_stem(task))
         except Exception as exc:

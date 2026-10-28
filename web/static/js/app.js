@@ -395,6 +395,7 @@
     $("editBtn").disabled = !held;
     $("renameBtn").disabled = !t;
     $("mailToBtn").disabled = !t;
+    $("resendMailBtn").disabled = !(t && t.mail_status === "failed");
     $("saveNotesBtn").disabled = !t;
   }
 
@@ -470,6 +471,14 @@
     if (action === "resume") return "续跑";
     if (action === "import") return "导入";
     return action;
+  }
+
+  function mailStatusLabel(t) {
+    if (!t.mail_to) return "（未设置收件人）";
+    if (t.mail_status === "sent") return "已发送";
+    if (t.mail_status === "failed") return `发送失败：${t.mail_error || "未知错误"}`;
+    if (t.mail_status === "pending") return "待发送";
+    return t.mail_status || "—";
   }
 
   function selectTask(id) {
@@ -609,6 +618,7 @@
       ["Viewer 代理", t.viewer_proxy_url || "（运行后生成）"],
       ["Agent 代理", t.proxy_display || t.proxy_url || "（未要求）"],
       ["附加请求头", t.request_headers ? `${t.request_headers.split("\n").length} 条` : "（未要求）"],
+      ["报告邮件", mailStatusLabel(t)],
       ["错误", t.error || "—"],
     ];
     $("overviewKv").innerHTML = rows
@@ -1514,6 +1524,26 @@
       await refresh();
     } catch (err) {
       alert(err.message);
+    }
+  };
+
+  $("resendMailBtn").onclick = async () => {
+    const t = currentTask();
+    if (!t || t.mail_status !== "failed") return;
+    const btn = $("resendMailBtn");
+    btn.disabled = true;
+    btn.textContent = "正在重发…";
+    try {
+      await api.ensureSession();
+      await api.api(`/api/v1/tasks/${t.id}/send-report-mail`, { method: "POST" });
+      await refresh();
+      selectTask(t.id);
+    } catch (err) {
+      alert(err.message);
+      await refresh();
+      selectTask(t.id);
+    } finally {
+      btn.textContent = "重发邮件";
     }
   };
 

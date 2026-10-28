@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import re
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
 
+from PIL import Image as PILImage
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 from reportlab.lib import colors
@@ -14,6 +16,7 @@ from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.platypus import (
@@ -104,6 +107,32 @@ def _inline_markup(children: list[Token]) -> str:
     return "".join(out)
 
 
+# ReportLab scales the *display* size but embeds the original bytes, so a
+# full-resolution PNG screenshot costs megabytes of PDF per finding. Past
+# this size, re-encode (downscaled JPEG) instead of embedding the original.
+_IMG_MAX_PX = 1600
+_IMG_REENCODE_BYTES = 512 * 1024
+
+
+def _embedded_image(path: Path) -> Image | None:
+    source: str | object = str(path)
+    try:
+        if path.stat().st_size > _IMG_REENCODE_BYTES:
+            buffer = BytesIO()
+            with PILImage.open(path) as opened:
+                opened.thumbnail((_IMG_MAX_PX, _IMG_MAX_PX))
+                rgb = opened if opened.mode == "RGB" else opened.convert("RGB")
+                rgb.save(buffer, format="JPEG", quality=82)
+            buffer.seek(0)
+            source = ImageReader(buffer)
+    except (OSError, ValueError):
+        source = str(path)
+    try:
+        return Image(source)  # type: ignore[arg-type]
+    except Exception:
+        return None
+
+
 def _images(children: list[Token], run_dir: Path) -> list[Flowable]:
     flowables: list[Flowable] = []
     for tok in children:
@@ -115,9 +144,8 @@ def _images(children: list[Token], run_dir: Path) -> list[Flowable]:
             continue
         if run_dir.resolve() not in path.parents or not path.is_file():
             continue
-        try:
-            img = Image(str(path))
-        except Exception:
+        img = _embedded_image(path)
+        if img is None:
             continue
         scale = min(1.0, _CONTENT_W / img.imageWidth, (_PAGE_H * 0.6) / img.imageHeight)
         img.drawWidth, img.drawHeight = img.imageWidth * scale, img.imageHeight * scale

@@ -339,6 +339,16 @@ def send_report_mail(
         filename=attachment_name,
     )
 
+    # Gateways drop oversize mail silently or bounce it after the fact; a
+    # doomed send also wastes the retry budget. Fail here, where the caller
+    # records mail_status=failed and fires the mail_failed webhook.
+    size_mb = len(message.as_bytes()) / (1024 * 1024)
+    if size_mb > settings.mail_max_mb:
+        raise MailError(
+            f"报告邮件约 {size_mb:.1f}MB，超过上限 {settings.mail_max_mb}MB"  # noqa: RUF001
+            "（STRIX_MAIL_MAX_MB），已停止发送，请在控制台下载报告后手动转发"  # noqa: RUF001
+        )
+
     _deliver(settings, message, sender=sender, recipients=[*to, *cc])
 
 

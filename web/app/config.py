@@ -109,6 +109,10 @@ class Settings(BaseSettings):
     mail_subject: str = Field(default="【安全测试报告】{name}", alias="STRIX_MAIL_SUBJECT")
     # Body is an HTML mail: built-in app/templates/mail_report.html, or your own file.
     mail_html_file: str = Field(default="", alias="STRIX_MAIL_HTML_FILE")
+    # Hard cap on the whole encoded message (MiB). Oversize report mails get
+    # silently dropped / bounced by corporate gateways (seen: 36MB limit), so
+    # refuse before SMTP instead. Keep below your server's advertised limit.
+    mail_max_mb: int = Field(default=30, alias="STRIX_MAIL_MAX_MB")
 
     def mail_cc_list(self) -> list[str]:
         return [p.strip() for p in re.split(r"[,;，；\s]+", self.mail_cc) if p.strip()]

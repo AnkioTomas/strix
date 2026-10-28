@@ -86,7 +86,7 @@ PYTHONPATH=. python -m app
 | `STRIX_SANDBOX_REAP_INTERVAL` | `60` | 每隔多少秒扫描 Docker，停掉「已结束任务」仍在跑的沙箱容器；`0`=关闭。只动本 Web 任务 `run.json` 里记下的 container_id |
 | `STRIX_FEISHU_WEBHOOK` | （空） | 飞书群机器人 Webhook；空=关闭。web 在跑时推送开始/结束/失败/取消/等人 |
 | `STRIX_FEISHU_EVENTS` | `started,finished,failed,cancelled,needs_user,mail_failed` | 启用的推送事件（逗号分隔）；`mail_failed`=报告邮件重试耗尽仍失败时通知。自定义过此列表的需自行补上 `mail_failed` |
-| `STRIX_SMTP_HOST` / `STRIX_SMTP_PORT` | （空）/ `465` | 报告邮件 SMTP；Host 为空=不发邮件。批量任务完成后自动把中文报告 PDF 发给负责人（只发 PDF：整包 ZIP 含全部原始截图可达数十 MB，易被 SMTP 大小限制和慢链路卡死；完整 ZIP 仍在控制台下载，且未变化时不再重复打包）。投递对瞬时错误（连接断开、SMTP 4xx）指数退避自动重试（5s/10s/20s/40s，共 5 次），认证失败、收件人被拒等永久错误不重试；最终失败记 `mail_status=failed` 并可 webhook 通知，控制台任务概览可看状态、点「重发邮件」手动再发 |
+| `STRIX_SMTP_HOST` / `STRIX_SMTP_PORT` | （空）/ `465` | 报告邮件 SMTP；Host 为空=不发邮件。批量任务完成后自动把中文报告 PDF 发给负责人（只发 PDF：整包 ZIP 含全部原始截图可达数十 MB，易被 SMTP 大小限制和慢链路卡死；完整 ZIP 仍在控制台下载，且未变化时不再重复打包）。投递对瞬时错误（连接断开、SMTP 4xx）指数退避自动重试（5s/10s/20s/40s，共 5 次），认证失败、收件人被拒等永久错误不重试；最终失败记 `mail_status=failed` 并可 webhook 通知，控制台任务概览可看状态、点「重发邮件」手动再发。PDF 内截图已降分辨率转 JPEG 压缩；整封邮件超过 `STRIX_MAIL_MAX_MB`（默认 30MB，企业网关实测 36MB 会屏蔽）时直接不发并按失败告警，避免被网关静默丢弃 |
 | `STRIX_SMTP_USER` / `STRIX_SMTP_PASSWORD` / `STRIX_SMTP_FROM` | （空） | SMTP 账号、密码、发件人（FROM 为空时用 USER） |
 | `STRIX_SMTP_PROXY` | （空） | SMTP 走 HTTP CONNECT 代理（`http://[user:pass@]host:port`）；空=直连。代理策略需放行 SMTP 端口 |
 | `STRIX_SMTP_SSL` | `true` | `true`=隐式 TLS（465）；`false`=明文/STARTTLS（587/25） |

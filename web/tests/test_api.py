@@ -2318,6 +2318,33 @@ def test_send_report_mail_sets_importance_headers(monkeypatch: pytest.MonkeyPatc
     assert seen["msg"]["Importance"] is None
 
 
+def test_send_report_mail_refuses_oversize_before_smtp(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    from app.config import Settings
+    from app.services import mailer
+
+    delivered: dict = {}
+
+    def _no_deliver(*_args: object, **_kwargs: object) -> None:
+        delivered.update(sent=True)
+
+    monkeypatch.setattr(mailer, "_deliver", _no_deliver)
+    attachment = tmp_path / "big.pdf"
+    attachment.write_bytes(b"%PDF" + b"x" * (2 * 1024 * 1024))
+    settings = Settings(
+        STRIX_SMTP_HOST="smtp.corp.test",
+        STRIX_SMTP_FROM="s@corp.test",
+        STRIX_MAIL_MAX_MB=1,
+    )
+    with pytest.raises(mailer.MailError, match="超过上限"):
+        mailer.send_report_mail(
+            settings, to=["a@b.com"], subject="s", html="<p>b</p>",
+            attachment=attachment, attachment_name="big.pdf",
+        )
+    assert not delivered
+
+
 def _fake_smtp_class(attempts: dict, fail_with):
     class FakeSMTP:
         def __init__(self, host, port, timeout):
@@ -2466,6 +2493,21 @@ def test_report_pdf_fresh_checks_md_and_images(tmp_path: Path):
     shot.write_bytes(b"\x89PNG")
     os.utime(shot, (pdf.stat().st_mtime + 100, pdf.stat().st_mtime + 100))
     assert not report_pdf_fresh(pdf, md)
+
+
+def test_pdf_reencodes_large_screenshots(tmp_path: Path):
+    from app.services.pdf_report import render_pdf
+    from PIL import Image as PILImage
+
+    run_dir = tmp_path / "run"
+    (run_dir / "images").mkdir(parents=True)
+    noise = PILImage.frombytes("RGB", (2400, 1800), os.urandom(2400 * 1800 * 3))
+    png_path = run_dir / "images" / "shot.png"
+    noise.save(png_path)
+
+    out = render_pdf("# 报告\n\n![s](images/shot.png)\n", run_dir, run_dir / "r.pdf")
+    # Original PNG bytes must not be embedded verbatim: downscaled JPEG only.
+    assert out.stat().st_size < png_path.stat().st_size * 0.5
 
 
 def test_report_mail_failure_notifies_webhook(

@@ -159,6 +159,10 @@ async def _parse_create_payload(
         elif parent_task_id:
             payload["parent_task_id"] = parent_task_id
             payload["action"] = _form_value(form, "action") or "retry"
+        elif _form_value(form, "action") == "retest":
+            # Plain create form "mark as retest": no parent findings to seed;
+            # the original findings come from the instruction / attachments.
+            payload["action"] = "retest"
         max_budget = _form_value(form, "max_budget")
         if max_budget:
             payload["max_budget"] = float(max_budget)

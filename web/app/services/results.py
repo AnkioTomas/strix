@@ -332,8 +332,8 @@ def read_retest_scope(run_dir: Path) -> set[str] | None:
 
 def _exclude_stamp(exclude_ids: set[str] | None, *, retest: bool = False) -> str:
     stamp = ",".join(sorted(exclude_ids or ()))
-    # "retest3": reports built before untested findings were listed must rebuild.
-    return f"retest3|{stamp}" if retest else stamp
+    # "retest4": reports built before the 【等级】【复测情况】 layout must rebuild.
+    return f"retest4|{stamp}" if retest else stamp
 
 
 def vulnerabilities_mtime(run_dir: Path) -> float:

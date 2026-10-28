@@ -19,9 +19,12 @@ _TEXT = {
         "overview": "复测概述",
         "summary": "复测情况",
         "details": "复测详情",
+        "col_severity": "等级",
         "col_finding": "漏洞",
-        "col_status": "状态",
+        "col_status": "复测情况",
         "col_address": "地址",
+        "brackets": ("【", "】"),
+        "title_join": "",
         "untitled": "未命名漏洞",
         "address": "**地址：**",
         "steps": "复测步骤",
@@ -30,7 +33,6 @@ _TEXT = {
         "screenshot": "复测截图",
         "remediation": "修复建议",
         "none": "本次没有复测的漏洞。",
-        "paren": ("（", "）"),
         "sep": "，",
     },
     "en": {
@@ -41,9 +43,12 @@ _TEXT = {
         "overview": "Retest Overview",
         "summary": "Retest Results",
         "details": "Retest Details",
+        "col_severity": "Severity",
         "col_finding": "Finding",
-        "col_status": "Status",
+        "col_status": "Retest Result",
         "col_address": "Address",
+        "brackets": ("[", "]"),
+        "title_join": " ",
         "untitled": "Untitled finding",
         "address": "**Address:**",
         "steps": "Retest Steps",
@@ -52,7 +57,6 @@ _TEXT = {
         "screenshot": "Retest screenshot",
         "remediation": "Remediation",
         "none": "No findings were retested.",
-        "paren": (" (", ")"),
         "sep": ", ",
     },
 }
@@ -95,42 +99,71 @@ def _screenshots(report: dict[str, Any]) -> list[str]:
     return [str(r) for r in rels if str(r).strip().startswith("images/")]
 
 
+_OPEN_STATUSES = ("not_fixed", "partial", "regressed")
+
+
 def _overview(
     reports: list[dict[str, Any]], executive_summary: str, t: dict[str, Any], lang: str
 ) -> str:
-    if executive_summary.strip():
-        return executive_summary.strip()
     if not reports:
         return t["none"]
-    counts: dict[str, int] = {}
+    fixed = sum(1 for r in reports if _status(r) == "fixed")
+    untested = sum(1 for r in reports if _status(r) not in t["status"])
+    open_by_severity: dict[str, int] = {}
     for report in reports:
-        label = _status_label(report, t)
-        counts[label] = counts.get(label, 0) + 1
+        if _status(report) in _OPEN_STATUSES:
+            key = str(report.get("severity") or "").lower()
+            if key not in _SEVERITY_ORDER:
+                key = "info"
+            open_by_severity[key] = open_by_severity.get(key, 0) + 1
+    open_total = sum(open_by_severity.values())
+    severity_bits = [
+        (key, open_by_severity[key])
+        for key in _SEVERITY_ORDER
+        if open_by_severity.get(key)
+    ]
     if lang == "zh":
-        detail = t["sep"].join(f"{label} {n} 项" for label, n in counts.items())
-        return f"本次对 {len(reports)} 项漏洞进行了复测：{detail}。"
-    detail = t["sep"].join(f"{label}: {n}" for label, n in counts.items())
-    return f"{len(reports)} finding(s) were retested — {detail}."
+        bits = [f"已修复 {fixed} 项"]
+        if open_total:
+            detail = "、".join(f"{t['severity'][key]} {n} 项" for key, n in severity_bits)
+            bits.append(f"仍有 {open_total} 项未完全修复（{detail}）")  # noqa: RUF001
+        if untested:
+            bits.append(f"另有 {untested} 项未复测")
+        lead = f"本次对 {len(reports)} 项漏洞进行了复测：{'，'.join(bits)}。"  # noqa: RUF001
+    else:
+        bits = [f"{fixed} fixed"]
+        if open_total:
+            detail = ", ".join(f"{t['severity'][key]}: {n}" for key, n in severity_bits)
+            bits.append(f"{open_total} not fully remediated ({detail})")
+        if untested:
+            bits.append(f"{untested} not retested")
+        lead = f"Retested {len(reports)} finding(s): {', '.join(bits)}."
+    if executive_summary.strip():
+        return f"{lead}\n\n{executive_summary.strip()}"
+    return lead
 
 
-def _finding_block(index: int, report: dict[str, Any], t: dict[str, Any]) -> list[str]:
+def _finding_block(report: dict[str, Any], t: dict[str, Any]) -> list[str]:
     title = str(report.get("title") or t["untitled"])
-    left, right = t["paren"]
-    status = f"{left}{_status_label(report, t)}{right}"
-    if _status(report) == "fixed":
-        return [f"## {index}. {title}{status}", ""]
-
     severity = t["severity"].get(str(report.get("severity") or "").lower(), t["severity"]["info"])
-    lines = [f"## {index}. [ {severity} ] {title}{status}", ""]
+    open_b, close_b = t["brackets"]
+    heading = (
+        f"### {open_b}{severity}{close_b}{open_b}{_status_label(report, t)}{close_b}"
+        f"{t['title_join']}{title}"
+    )
+    if _status(report) == "fixed":
+        return [heading, ""]
+
+    lines = [heading, ""]
     address = _address(report)
     if address:
         lines += [f"{t['address']} {address}", ""]
     steps = _text(report, "fix_verification", "poc_description")
-    lines += [f"### {t['steps']}", "", steps or t["no_steps"], ""]
+    lines += [f"**{t['steps']}**", "", steps or t["no_steps"], ""]
     evidence = _text(report, "evidence")
     shots = _screenshots(report)
     if evidence or shots:
-        lines += [f"### {t['evidence']}", ""]
+        lines += [f"**{t['evidence']}**", ""]
         if evidence:
             lines += [evidence, ""]
         lines += [f"![{t['screenshot']} {n}]({shot})" for n, shot in enumerate(shots, start=1)]
@@ -138,7 +171,7 @@ def _finding_block(index: int, report: dict[str, Any], t: dict[str, Any]) -> lis
             lines.append("")
     remediation = _text(report, "remediation_steps")
     if remediation:
-        lines += [f"### {t['remediation']}", "", remediation, ""]
+        lines += [f"**{t['remediation']}**", "", remediation, ""]
     return lines
 
 
@@ -180,23 +213,24 @@ def render_retest_report(
         RETEST_REPORT_MARKER,
         f"# {system}{suffix}" if system else f"# {t['title']}",
         "",
-        f"# {t['overview']}",
+        f"## {t['overview']}",
         "",
         _overview(reports, summary, t, lang),
         "",
     ]
     if reports:
         lines += [
-            f"# {t['summary']}",
+            f"## {t['summary']}",
             "",
-            f"| {t['col_finding']} | {t['col_status']} | {t['col_address']} |",
-            "| --- | --- | --- |",
+            f"| {t['col_severity']} | {t['col_finding']} | {t['col_status']} | {t['col_address']} |",
+            "| --- | --- | --- | --- |",
         ]
         lines += [
-            f"| {_cell(r.get('title'))} | {_status_label(r, t)} | {_cell(_address(r))} |"
+            f"| {t['severity'].get(str(r.get('severity') or '').lower(), t['severity']['info'])}"
+            f" | {_cell(r.get('title'))} | {_status_label(r, t)} | {_cell(_address(r))} |"
             for r in reports
         ]
-        lines += ["", f"# {t['details']}", ""]
-        for index, report in enumerate(reports, start=1):
-            lines += _finding_block(index, report, t)
+        lines += ["", f"## {t['details']}", ""]
+        for report in reports:
+            lines += _finding_block(report, t)
     return "\n".join(lines).rstrip() + "\n"

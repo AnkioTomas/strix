@@ -501,12 +501,54 @@ def build_translated_report_zip(run_dir: Path, en_path: Path, arcname: str) -> P
     return _atomic_zip_write(zip_path, _write)
 
 
-def resolve_report_package(run_dir: Path, *, md_arcname: str | None = None) -> Path | None:
-    """Return the report zip (md + pdf + images).
+def _report_zip_fresh(zip_path: Path, md_path: Path, arcname: str) -> bool:
+    """Whether an existing zip already matches the current md + images.
 
-    ``md_arcname`` is the name inside the zip. When set, the zip is always
-    rewritten so a renamed task does not keep the previous entry name.
+    Rebuilding means re-rendering the PDF and re-zipping every screenshot —
+    far too expensive to redo on every download of a large report. A renamed
+    task still gets a rebuild because its arcname won't be in the zip.
     """
+    try:
+        zip_mtime = zip_path.stat().st_mtime
+        if md_path.stat().st_mtime > zip_mtime:
+            return False
+        images_dir = md_path.parent / "images"
+        if images_dir.is_dir() and any(
+            item.is_file() and item.stat().st_mtime > zip_mtime
+            for item in images_dir.iterdir()
+        ):
+            return False
+        with zipfile.ZipFile(zip_path) as zf:
+            return arcname in zf.namelist()
+    except (OSError, zipfile.BadZipFile):
+        return False
+
+
+def report_pdf_fresh(pdf_path: Path, md_path: Path) -> bool:
+    """Whether an already-rendered PDF still matches its markdown + images.
+
+    Rendering a screenshot-heavy report takes seconds to minutes; doing it
+    on every download click makes large reports look network-slow when the
+    time is actually spent before the first byte.
+    """
+    try:
+        pdf_mtime = pdf_path.stat().st_mtime
+        if md_path.stat().st_mtime > pdf_mtime:
+            return False
+        images_dir = md_path.parent / "images"
+        return not (
+            images_dir.is_dir()
+            and any(
+                item.is_file() and item.stat().st_mtime > pdf_mtime
+                for item in images_dir.iterdir()
+            )
+        )
+    except OSError:
+        return False
+
+
+def resolve_report_package(run_dir: Path, *, md_arcname: str | None = None) -> Path | None:
+    """Return the report zip (md + pdf + images), rebuilding only when stale."""
     zip_path = run_dir / "penetration_test_report.zip"
     if md_arcname is None and zip_path.is_file():
         return zip_path
@@ -516,10 +558,13 @@ def resolve_report_package(run_dir: Path, *, md_arcname: str | None = None) -> P
         if not alt.is_file():
             return None
         md_path = alt
+    arcname = md_arcname or "penetration_test_report.md"
+    if zip_path.is_file() and _report_zip_fresh(zip_path, md_path, arcname):
+        return zip_path
     return _build_report_zip(
         run_dir,
         md_path,
-        md_arcname=md_arcname or "penetration_test_report.md",
+        md_arcname=arcname,
     )
 
 

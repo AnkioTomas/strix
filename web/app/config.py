@@ -1,9 +1,9 @@
-"""Runtime configuration for the local Strix Security API."""
+"""Runtime configuration for the Strix worker node."""
 
 from __future__ import annotations
 
 import logging
-import re
+import socket
 from functools import lru_cache
 from pathlib import Path
 from typing import Self
@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 def load_web_dotenv() -> Path | None:
     """Load ``web/.env`` (then repo ``.env``) into ``os.environ``.
 
-    Shell exports always win (``override=False``). This must run before Strix
-    scans: LLM keys live in the process env, not only in web ``Settings``.
+    Shell exports always win (``override=False``). LLM keys live in the process
+    env and are read by the Strix core, not only by web ``Settings``.
     """
     for path in (WEB_ROOT / ".env", REPO_ROOT / ".env"):
         if path.is_file():
@@ -33,7 +33,6 @@ def load_web_dotenv() -> Path | None:
     return None
 
 
-# Populate os.environ as soon as config is imported (before Settings / scans).
 load_web_dotenv()
 
 
@@ -48,74 +47,27 @@ class Settings(BaseSettings):
     api_key: str = Field(default="", alias="STRIX_API_KEY")
     auth_disabled: bool = Field(default=False, alias="STRIX_API_AUTH_DISABLED")
 
+    node_id: str = Field(default="", alias="STRIX_NODE_ID")
+
     data_dir: Path = Field(default=WEB_ROOT / "data", alias="STRIX_API_DATA_DIR")
-    # Hard ceiling; actual parallelism is packed from task CPU%/memory estimates.
     max_concurrent: int = Field(default=8, ge=1, alias="STRIX_MAX_CONCURRENT")
-    # Per-task resource estimate for admission packing (top-style CPU%: 100% = 1 core).
     task_cpu_percent: float = Field(default=30.0, gt=0.0, alias="STRIX_TASK_CPU_PERCENT")
     task_memory_gb: float = Field(default=2.0, gt=0.0, alias="STRIX_TASK_MEMORY_GB")
     cancel_grace_seconds: int = Field(default=15, ge=1, alias="STRIX_CANCEL_GRACE")
-    # How often (seconds) to scan Docker and stop sandboxes for finished tasks.
-    # 0 disables the reaper. Default 60.
     sandbox_reap_interval: int = Field(default=60, ge=0, alias="STRIX_SANDBOX_REAP_INTERVAL")
     strix_bin: str = Field(default="strix", alias="STRIX_BIN")
     default_scan_mode: str = Field(default="deep", alias="STRIX_DEFAULT_SCAN_MODE")
     default_max_budget: float | None = Field(default=None, alias="STRIX_DEFAULT_MAX_BUDGET")
 
-    # Comma-separated host/URL prefixes. Empty = no prefix allowlist.
     pentest_allowed_targets: str = Field(default="", alias="PENTEST_ALLOWED_TARGETS")
-    # Local lab API: allow private/loopback by default. Set 0 to harden.
     allow_private_targets: bool = Field(default=True, alias="STRIX_ALLOW_PRIVATE_TARGETS")
 
     allowed_source_root: Path | None = Field(default=None, alias="ALLOWED_SOURCE_ROOT")
-    # Gitea HTTPS clone + issues. Username and token must be set together.
     git_username: str = Field(default="", alias="STRIX_GIT_USERNAME")
     git_token: str = Field(default="", alias="STRIX_GIT_TOKEN")
-    # After a completed audit (git source), open one Issue per finding.
-    gitea_issues_enabled: bool = Field(default=False, alias="STRIX_GITEA_ISSUES")
+
     host: str = Field(default="127.0.0.1", alias="STRIX_API_HOST")
     port: int = Field(default=8787, alias="STRIX_API_PORT")
-
-    # Feishu group bot webhook (empty = disabled). Events are web-side only.
-    feishu_webhook: str = Field(default="", alias="STRIX_FEISHU_WEBHOOK")
-    feishu_events: str = Field(
-        default="started,finished,failed,cancelled,needs_user,mail_failed",
-        alias="STRIX_FEISHU_EVENTS",
-    )
-    # Outbound proxy for Feishu webhook only (http/https). Empty = direct.
-    feishu_proxy: str = Field(default="", alias="STRIX_FEISHU_PROXY")
-
-    # Seconds between progress check-ins on running scans (ask the agent for status,
-    # warn about stalls/loops, push a progress card to the webhook). 0 = off.
-    checkin_interval: int = Field(default=3600, alias="STRIX_CHECKIN_INTERVAL")
-
-    # Report mail (batch scans). Empty smtp_host = mail disabled.
-    smtp_host: str = Field(default="", alias="STRIX_SMTP_HOST")
-    smtp_port: int = Field(default=465, alias="STRIX_SMTP_PORT")
-    smtp_user: str = Field(default="", alias="STRIX_SMTP_USER")
-    smtp_password: str = Field(default="", alias="STRIX_SMTP_PASSWORD")
-    smtp_from: str = Field(default="", alias="STRIX_SMTP_FROM")
-    # true = implicit TLS (465); false = plain / STARTTLS when the server offers it.
-    smtp_ssl: bool = Field(default=True, alias="STRIX_SMTP_SSL")
-    # HTTP CONNECT proxy for SMTP (http://[user:pass@]host:port). Empty = direct.
-    smtp_proxy: str = Field(default="", alias="STRIX_SMTP_PROXY")
-    # Always CC'd on report mails (comma/semicolon separated).
-    mail_cc: str = Field(default="", alias="STRIX_MAIL_CC")
-    # Appended to a bare owner id (no "@") from the spreadsheet, e.g. example.com.
-    mail_domain: str = Field(default="", alias="STRIX_MAIL_DOMAIN")
-
-    # Subject template; placeholders: {name} {target} {total} {critical} {high} {medium}
-    # {low} {info} {bu} {owner} {task_id}. {name} is "应用名称（域名:端口）".
-    mail_subject: str = Field(default="【安全测试报告】{name}", alias="STRIX_MAIL_SUBJECT")
-    # Body is an HTML mail: built-in app/templates/mail_report.html, or your own file.
-    mail_html_file: str = Field(default="", alias="STRIX_MAIL_HTML_FILE")
-    # Hard cap on the whole encoded message (MiB). Oversize report mails get
-    # silently dropped / bounced by corporate gateways (seen: 36MB limit), so
-    # refuse before SMTP instead. Keep below your server's advertised limit.
-    mail_max_mb: int = Field(default=30, gt=0, alias="STRIX_MAIL_MAX_MB")
-
-    def mail_cc_list(self) -> list[str]:
-        return [p.strip() for p in re.split(r"[,;，；\s]+", self.mail_cc) if p.strip()]
 
     @model_validator(mode="after")
     def git_auth_pair(self) -> Self:
@@ -125,22 +77,18 @@ class Settings(BaseSettings):
             raise ValueError("STRIX_GIT_USERNAME and STRIX_GIT_TOKEN must be set together")
         return self
 
-    def feishu_event_set(self) -> set[str]:
-        raw = self.feishu_events.strip()
-        if not raw:
-            return set()
-        return {part.strip().lower() for part in raw.split(",") if part.strip()}
+    @property
+    def resolved_node_id(self) -> str:
+        custom = self.node_id.strip()
+        if custom:
+            return custom
+        return socket.gethostname()
 
     @property
-    def database_path(self) -> Path:
-        return self.data_dir / "database.sqlite"
-
-    @property
-    def tasks_dir(self) -> Path:
-        return self.data_dir / "tasks"
+    def jobs_dir(self) -> Path:
+        return self.data_dir / "jobs"
 
     def git_auth(self) -> tuple[str, str] | None:
-        """``(username, token)`` when both are set, else ``None``."""
         user = self.git_username.strip()
         token = self.git_token.strip()
         if user and token:
@@ -159,5 +107,5 @@ def get_settings() -> Settings:
     load_web_dotenv()
     settings = Settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
-    settings.tasks_dir.mkdir(parents=True, exist_ok=True)
+    settings.jobs_dir.mkdir(parents=True, exist_ok=True)
     return settings

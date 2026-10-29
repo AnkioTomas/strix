@@ -17,21 +17,13 @@ router = APIRouter()
 async def health(request: Request) -> HealthResponse:
     manager = request.app.state.manager
     worker = request.app.state.worker
-    db_ok = True
-    try:
-        manager.db.count_by_status("queued")
-    except Exception:
-        db_ok = False
-    admission = worker.admission_status() if hasattr(worker, "admission_status") else None
+    admission = worker.admission_status() if hasattr(worker, "admission_status") else manager.admission()
     return HealthResponse(
-        status="ok" if db_ok and worker.healthy else "degraded",
-        # to_thread: the uncached probe spawns the CLI (seconds under load);
-        # running it inline would freeze the event loop for every request.
+        status="ok" if worker.healthy else "degraded",
+        node_id=manager.settings.resolved_node_id,
         strix=await asyncio.to_thread(strix_available, manager.settings),
         worker=worker.healthy,
-        database=db_ok,
-        running_tasks=manager.db.count_by_status("running")
-        + manager.db.count_by_status("starting"),
-        queued_tasks=manager.db.count_by_status("queued"),
+        running_jobs=int(admission.get("running", 0)),
+        free_slots=int(admission.get("free_slots", 0)),
         admission=admission,
     )

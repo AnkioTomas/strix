@@ -1,46 +1,25 @@
-<p align="center">
-  <img src="static/android-chrome-192x192.png" alt="Strix" width="96" height="96">
-</p>
+# Strix Worker Node
 
-# Local Strix Security API
+分布式扫描执行节点。主控通过固定 Bearer Token 走 HTTP 下发任务、查询容量、投递指令、拉取结果。本节点**不做**任务目录、漏洞库、UI、邮件、复测。
 
-编排层，不是第二个 Agent。HTTP 管任务；**独立扫描子进程**跑 `run_strix_scan(interactive=True)` + viewer（API 重启不杀扫描）。
+## 角色
 
-品牌图标在 [`webapp/`](../webapp/)（源）与 [`static/`](static/)（控制台实际托管）：favicon、apple-touch、android-chrome、`site.webmanifest`。
+```text
+Master                         Worker (this package)
+  调度 / 目录 / UI               GET  /v1/node     容量 + 在跑任务
+  漏洞库 / 邮件 / 复测           POST /v1/jobs     接单（满载 503）
+                                POST /v1/jobs/{id}/steer
+                                GET  /v1/jobs/{id}/result
+                                DELETE /v1/jobs/{id}
+```
 
-## 能力
-
-1. 列出 / 创建任务（pentest + audit；创建时可上传附件挂到 `/workspace` 并告知模型）
-2. 按资源装箱排队（每任务约 `STRIX_TASK_CPU_PERCENT`% CPU + `STRIX_TASK_MEMORY_GB` GiB；满则留在 `queued`）
-3. 取消 / 重试 / 续跑 / 复测 / **删除已结束任务**
-4. **导入**旧版 CLI `strix_runs/`（`POST /api/v1/tasks/import`）
-5. 事件查询 + SSE
-6. 运行中通过 Live Viewer 与 Agent 交互（同源反代）
-7. 报告 / artifacts / **执行日志** 下载（同源）
-8. **按任务**查看漏洞列表与详情 `GET /api/v1/tasks/{id}/results`（不跨任务）
-9. **同源反代**官方 Live Viewer：`/api/v1/tasks/{id}/viewer/`
-
-## 鉴权
-
-固定 Token，无用户登录系统：
+鉴权：
 
 ```http
 Authorization: Bearer <STRIX_API_KEY>
 ```
 
-浏览器控制台还会调用 `POST /api/v1/session`，把同一 Token 写成 `HttpOnly` Cookie（`strix_web_session`），以便 **iframe / 图片** 无需带 Authorization。API 同时接受 Bearer 或该 Cookie。
-
-```bash
-export STRIX_API_KEY="replace-me"
-```
-
-仅本地调试可临时：`STRIX_API_AUTH_DISABLED=1`。
-
-私网 / localhost 目标**默认允许**（`STRIX_ALLOW_PRIVATE_TARGETS=1`）。若要对公网部署收紧，设 `STRIX_ALLOW_PRIVATE_TARGETS=0`。
-
 ## 启动
-
-推荐用仓库根目录的启动工具（自动处理 `.env`、依赖、`PYTHONPATH`）：
 
 ```bash
 # 仓库根目录
@@ -48,185 +27,63 @@ export STRIX_API_KEY="replace-me"
 # 或
 make web
 
-# 可选
-./scripts/start-web.sh --reload          # 开发热重载
-./scripts/start-web.sh --host 0.0.0.0 --port 8787
+export STRIX_API_KEY=dev-local
+export STRIX_LLM=...
+export LLM_API_KEY=...
 ```
 
-首次运行若没有 `web/.env`，脚本会从 `.env.example` 复制一份。**扫描真正依赖** `STRIX_LLM` + `LLM_API_KEY`（会灌进进程环境）；缺了它们 API 能起来，任务会挂。
+首次运行若没有 `web/.env`，脚本会从 `.env.example` 复制。扫描依赖 `STRIX_LLM` + `LLM_API_KEY`。
 
-等价手写启动：
-
-```bash
-cd web
-cp -n .env.example .env   # 首次
-# 编辑 web/.env
-
-pip install -r requirements.txt   # 或: uv pip install -r requirements.txt
-PYTHONPATH=. python -m app
-# → http://127.0.0.1:8787
-```
-
-`web/.env` 在启动时通过 `python-dotenv` 载入 **`os.environ`**（shell 已 export 的变量优先生效）。只靠 pydantic `env_file` 不够：`STRIX_LLM` 等是 Strix 内核读环境变量，不在 web `Settings` 里。
-
-常用环境变量（写进 `.env` 即可）：
-
-| 变量 | 默认 | 含义 |
-|------|------|------|
-| `STRIX_API_KEY` | （空） | Bearer Token；空且未关鉴权则拒绝 |
-| `STRIX_API_HOST` / `STRIX_API_PORT` | `127.0.0.1` / `8787` | 监听地址 |
-| `STRIX_LLM` | — | LiteLLM 模型 id（扫描必需） |
-| `LLM_API_KEY` | — | LLM 密钥（扫描必需） |
-| `OPENAI_API_BASE` / `LLM_API_BASE` | — | 本地/兼容 OpenAI 的 base URL |
-| `LLM_TIMEOUT` | 300 | 所有 AI/LLM 请求超时（秒） |
-| `STRIX_REPORT_LANGUAGE` | `zh` | 报告叙事/交付包语言（`zh`/`en`/`ja`/`Français`/…；空=不强制） |
-| `STRIX_MAX_CONCURRENT` | 8 | 同时跑的扫描硬上限 |
-| `STRIX_TASK_CPU_PERCENT` | 30 | 单任务 CPU 估算（top 风格：100%=1 核） |
-| `STRIX_TASK_MEMORY_GB` | 2 | 单任务内存估算（GiB）；用可用内存装箱 |
-| `STRIX_SANDBOX_REAP_INTERVAL` | `60` | 每隔多少秒扫描 Docker，停掉「已结束任务」仍在跑的沙箱容器；`0`=关闭。只动本 Web 任务 `run.json` 里记下的 container_id |
-| `STRIX_FEISHU_WEBHOOK` | （空） | 飞书群机器人 Webhook；空=关闭。web 在跑时推送开始/结束/失败/取消/等人 |
-| `STRIX_FEISHU_EVENTS` | `started,finished,failed,cancelled,needs_user,mail_failed` | 启用的推送事件（逗号分隔）；`mail_failed`=报告邮件重试耗尽仍失败时通知。自定义过此列表的需自行补上 `mail_failed` |
-| `STRIX_SMTP_HOST` / `STRIX_SMTP_PORT` | （空）/ `465` | 报告邮件 SMTP；Host 为空=不发邮件。批量任务完成后自动把中文报告 PDF 发给负责人（只发 PDF：整包 ZIP 含全部原始截图可达数十 MB，易被 SMTP 大小限制和慢链路卡死；完整 ZIP 仍在控制台下载，且未变化时不再重复打包）。投递对瞬时错误（连接断开、SMTP 4xx）指数退避自动重试（5s/10s/20s/40s，共 5 次），认证失败、收件人被拒等永久错误不重试；最终失败记 `mail_status=failed` 并可 webhook 通知，控制台任务概览可看状态、点「重发邮件」手动再发。PDF 内截图已降分辨率转 JPEG 压缩；整封邮件超过 `STRIX_MAIL_MAX_MB`（默认 30MB，企业网关实测 36MB 会屏蔽）时直接不发并按失败告警，避免被网关静默丢弃 |
-| `STRIX_SMTP_USER` / `STRIX_SMTP_PASSWORD` / `STRIX_SMTP_FROM` | （空） | SMTP 账号、密码、发件人（FROM 为空时用 USER） |
-| `STRIX_SMTP_PROXY` | （空） | SMTP 走 HTTP CONNECT 代理（`http://[user:pass@]host:port`）；空=直连。代理策略需放行 SMTP 端口 |
-| `STRIX_SMTP_SSL` | `true` | `true`=隐式 TLS（465）；`false`=明文/STARTTLS（587/25） |
-| `STRIX_MAIL_CC` | （空） | 报告邮件固定抄送，逗号/分号分隔 |
-| `STRIX_MAIL_SUBJECT` | `【安全测试报告】{name}` | 邮件标题模板；占位符 `{name} {target} {total} {critical} {high} {medium} {low} {info} {bu} {owner} {task_id}` |
-| `STRIX_MAIL_HTML_FILE` | 内置模板 | 自定义 HTML 邮件模板文件路径；内置 `app/templates/mail_report.html`，占位符形如 `{{title}}` |
-| `STRIX_MAIL_DOMAIN` | （空） | 表格里负责人不含 `@` 时自动补的邮箱域名 |
-| `STRIX_FEISHU_PROXY` | （空） | 仅飞书出站用的 HTTP(S) 代理，如 `http://127.0.0.1:7890`；空=直连（不吃系统 `HTTP_PROXY`） |
-| `STRIX_CHECKIN_INTERVAL` | `3600` | 运行中任务的巡检间隔（秒）；0=关闭。到点向 AI 询问进展并要求避免卡死/循环，同时向飞书 Webhook 推送进度卡片（已运行时长、Token、漏洞数；无新进展标红“疑似卡死”，重复动作标橙“疑似循环”） |
-| `STRIX_ALLOW_PRIVATE_TARGETS` | 1 | 是否允许扫私网/localhost |
-| `STRIX_GIT_USERNAME` / `STRIX_GIT_TOKEN` | （空） | Gitea HTTPS 机器人账号；必须成对出现。任务里填完整 `https://gitea…/org/repo.git`，凭证不入库、不进 URL。开 Issue 时 token 还需 issues 写权限 |
-| `STRIX_GITEA_ISSUES` | `0` | `1` 时：白盒 audit + git 源任务在 **扫描完成并入库后**，按漏洞清单自动在对应仓库创建 Issue（web 侧，不改 Strix 核心；按 finding id 去重） |
-
-浏览器根路径是控制台（`web/static/`：`index.html` + `css/` + `js/`）；静态资源在 `/static/*`。漏洞与报告页用 [Penna Markdown](https://penna.ankio.net/guide/getting-started) 只读渲染器（CDN `penna-markdown@0.2.5`）。OpenAPI 在 `/docs`。`GET /health` 返回 `admission`（当前是否放行、load/内存快照）。
-
-## 主要 API
+## API
 
 | Method | Path | 说明 |
 |--------|------|------|
-| POST | `/api/v1/session` | 写入会话 Cookie（需 Bearer） |
-| DELETE | `/api/v1/session` | 清除会话 Cookie |
-| POST | `/api/v1/tasks` | 创建任务（202，进入队列；也支持 multipart 附件；可选 `use_proxy`/`proxy_url`、`use_headers`/`request_headers`，启动时注入 Agent 指令） |
-| POST | `/api/v1/tasks/import` | 导入旧版 CLI `strix_runs/`（可 `dry_run`） |
-| GET | `/api/v1/tasks` | 列表 |
-| GET | `/api/v1/tasks/{id}` | 详情（含 `viewer_proxy_url`） |
-| PATCH | `/api/v1/tasks/{id}` | 重命名 / 更新备注 / 更新 `tags`（创建时也可传 `tags`；Excel 批量导入自动把 BU 作为 tag） |
-| POST | `/api/v1/tasks/{id}/hold` | 挂起（queued → held，不进执行队列） |
-| POST | `/api/v1/tasks/{id}/release` | 放行（held → queued） |
-| DELETE | `/api/v1/tasks/{id}` | 删除已结束或挂起任务（DB + workspace） |
-| POST | `/api/v1/tasks/{id}/cancel` | SIGTERM→SIGKILL |
-| POST | `/api/v1/tasks` + `parent_task_id`/`action` | UI 重试：可改配置后建子任务（复制父附件） |
-| POST | `/api/v1/tasks/{id}/retry` | 同配置立刻重跑（新 run，API 兼容） |
-| POST | `/api/v1/tasks/{id}/resume` | 原地续跑同一任务（同 `run_name`，需 `agents.json`） |
-| POST | `/api/v1/tasks/{id}/refresh-report` | 要求 Agent 按交付规范重写报告（resume 或 live 投递） |
-| POST | `/api/v1/tasks/{id}/retest` | 新建复测任务（附原报告 zip，原漏洞按原 id 预载入，Agent 只填 `retest_status` + 佐证，报告由代码生成；JSON `instruction` 可附凭证；`finding_ids` 可指定漏洞；跳过已标无效项；若存在待测标记则只测那些） |
-| PATCH | `/api/v1/tasks/{id}/findings/{fid}` | 漏洞审核：`review_status=active\|invalid`，`request_test`；无效项不进报告、不参与复测 |
-| POST | `/api/v1/tasks/{id}/findings/{fid}/test` | 对指定漏洞发起聚焦复测子任务 |
-| GET | `/api/v1/tasks/{id}/results` | 该任务 Finding（含 `review_status` / `request_test`）；`?summary=1` 省略 PoC/证据正文，列表页请用这个 |
-| GET | `/api/v1/tasks/{id}/findings/{fid}` | 单条 Finding 全文（详情页） |
-| GET | `/api/v1/tasks/{id}/report` | Markdown 报告 |
-| GET | `/api/v1/tasks/{id}/events` | Agent 事件 |
-| GET | `/api/v1/tasks/{id}/events/stream` | SSE |
-| GET | `/api/v1/tasks/{id}/messages` | 消息历史 |
-| POST | `/api/v1/tasks/{id}/messages` | 用户消息 / follow-up |
-| GET | `/api/v1/tasks/{id}/artifacts` | 产物列表 |
-| GET | `/api/v1/tasks/{id}/artifacts/{path}` | 下载工件（含报告截图） |
-| GET | `/api/v1/tasks/{id}/logs` | 执行日志列表（`scan_worker.*.log` 等） |
-| GET | `/api/v1/tasks/{id}/logs?download=1` | 打包下载执行日志 ZIP |
-| GET | `/api/v1/tasks/{id}/logs/{path}` | 下载单个日志文件 |
-| * | `/api/v1/tasks/{id}/viewer/...` | 同源反代 Live Viewer |
-| GET | `/api/v1/assets/pentests` | 资产系统对接：每个「资产（IP/域名+端口）× 任务」一条，含 `tags`、`pentest`（开始/结束时间、耗时）、`tokens`（input/output/cached/total/cost）、`finding_counts`；筛选 `status`（默认 completed）、`since`（按任务更新时间增量拉取）、`tag`、`q`、`limit`/`offset`。tag = 自动（渗透测试、扫描模式、复测、最高严重度/无漏洞）+ 手动 `tags`。`findings[].fix_status` = open/fixed/not_fixed/partial/regressed。新旧两种复测都能识别：旧的原地续跑直接写在原任务；新的复测子任务（`action=retest`）默认与原任务按资产合并为一条（`collapse=false` 看原始记录；返回 `origin_task_id`/`task_ids`），修复状态逐漏洞 id 累积，token/开始时间取最新任务（复测会克隆 run.json，数值已是累计）。token 为任务级，同一任务多个资产时重复出现 |
-| GET | `/api/v1/mail` | 邮件配置状态（是否启用、SMTP 地址、抄送） |
-| GET | `/api/v1/mail/preview` | 用示例数据渲染 HTML 报告邮件，浏览器直接打开预览 |
-| POST | `/api/v1/mail/test` | 发测试邮件验证 SMTP/代理/登录；`{"to": "a@b.com"}`，省略则依次取：第一个抄送 → 发件人 → SMTP 账号；页面左侧「测邮件」按钮同此 |
-| GET | `/health` | 健康 + 准入状态 |
+| GET | `/health` | 存活 + 槽位 |
+| GET | `/v1/node` | 节点 ID、容量、`free_slots`、在跑任务（主控调度依据） |
+| POST | `/v1/jobs` | 下发任务；满载 → `503 NODE_FULL` |
+| GET | `/v1/jobs` | 本机运行态列表（非产品目录） |
+| GET | `/v1/jobs/{id}` | 状态 |
+| POST | `/v1/jobs/{id}/cancel` | 取消 |
+| POST | `/v1/jobs/{id}/steer` | 运行中投递指令 `{"message":"..."}` |
+| GET | `/v1/jobs/{id}/result` | findings + report（读磁盘） |
+| GET | `/v1/jobs/{id}/events` | Agent 事件 |
+| GET | `/v1/jobs/{id}/artifacts` | 产物列表 |
+| GET | `/v1/jobs/{id}/artifacts/{path}` | 下载产物 |
+| GET | `/v1/jobs/{id}/logs` | 执行日志 |
+| DELETE | `/v1/jobs/{id}` | 清盘（须已结束） |
 
-创建任务示例：
+创建示例：
 
 ```bash
-# Black-box pentest
-curl -sS -X POST http://127.0.0.1:8787/api/v1/tasks \
+curl -sS -X POST http://127.0.0.1:8787/v1/jobs \
   -H "Authorization: Bearer $STRIX_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"type":"pentest","target":"http://127.0.0.1:3000","scan_mode":"quick"}'
-
-# White-box audit（本地目录）
-curl -sS -X POST http://127.0.0.1:8787/api/v1/tasks \
-  -H "Authorization: Bearer $STRIX_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"type":"audit","source":{"type":"local","path":"/path/to/app"},"scan_mode":"quick"}'
-
-# White-box audit（Gitea HTTPS；私有仓用 STRIX_GIT_*，URL 不要带 token）
-curl -sS -X POST http://127.0.0.1:8787/api/v1/tasks \
-  -H "Authorization: Bearer $STRIX_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"type":"audit","source":{"type":"git","url":"https://gitea.example.com/org/repo.git"},"scan_mode":"quick"}'
+  -d '{"id":"job_001","type":"pentest","target":"https://example.com","scan_mode":"quick"}'
 ```
 
-## Viewer 代理
+可选 `id`：主控指定关联键；省略则节点生成 `job_…`。
 
-```text
-浏览器 iframe → /api/v1/tasks/{id}/viewer/
-  → 校验 session/Bearer
-  → 仅允许上游 127.0.0.1/localhost
-  → 服务端注入 strix_viewer_session_{port}=viewer_token
-  → 对 index.html 注入 bootstrap：
-       · fetch 改写（/api/* → proxy 前缀）
-       · 隐藏 OSS Viewer 营销壳（侧栏 Strix/Local 顶栏、Past runs /
-         Feedback / PR Reviews / Integrations / Members、Local viewer 底栏、
-         「Run in the cloud」按钮、「Run this pentest with more depth」升级卡）
+## 本地存储
+
+- **无 SQLite 任务/漏洞库**
+- `data/jobs/<id>/job.json`：运行态
+- `data/jobs/<id>/strix_runs/`：扫描产物
+- 主控拉完结果后应 `DELETE`，或自行做 TTL
+
+## 满载策略
+
+节点不排队。`free_slots == 0` 时 `POST /v1/jobs` 返回：
+
+```json
+{"error":{"code":"NODE_FULL","message":"no free slots (...)"}}
 ```
 
-任务 JSON 字段：
+主控根据 `GET /v1/node` 决定换节点、等待或取消低优先级任务。
 
-- `viewer_url`：直连调试（含 token，勿外传）
-- `viewer_proxy_url`：控制台内嵌用的同源路径（不暴露 token）
+## 明确不做
 
-## 排队策略
-
-按「单任务成本」装箱，而不是死板只跑 1 个：
-
-```text
-创建任务 → status=queued
-         ↓
-Worker 每秒估算可跑槽位：
-  free_cpu% ≈ cpu_count*100 − load1*100     # top 风格：100% = 1 核
-  cpu_slots  = floor(free_cpu% / STRIX_TASK_CPU_PERCENT)
-  mem_slots  = floor(mem_available_GiB / STRIX_TASK_MEMORY_GB)
-  allowed    = min(STRIX_MAX_CONCURRENT, cpu_slots, mem_slots)
-         ↓
-运行中数量 < allowed 才 claim → starting → running
-否则继续排队
-```
-
-默认估算：每任务约 **30% CPU + 2 GiB**（可用 `STRIX_TASK_CPU_PERCENT` / `STRIX_TASK_MEMORY_GB` 调）。
-
-## 设计约束
-
-- 扫描在 **detached 子进程**（`python -m app.services.scan_worker`，`start_new_session=True`）；API 重启后通过 PID + `.web_scan_state.json` 重连，Viewer 反代仍指向原 loopback 端口
-- Worker 按 `STRIX_SANDBOX_REAP_INTERVAL`（默认 60s）扫一遍：已结束任务 workspace 下**所有** `strix_runs/*` 的沙箱 + 带 `strix-run-id` 标签且属于这些 run 的 running 容器；运行中任务与无关 CLI 容器不动
-- 不在 HTTP handler 里同步跑扫描；Worker 只负责排队/认领/收尸
-- 每任务独立 workspace：`web/data/tasks/<task_id>/`
-- 漏洞只按 `task_id` 暴露，不做全局汇聚
-- 固定 Bearer Token，不做账号体系
-- 不把 `viewer_token` 下发给浏览器
-- Gitea 私有仓凭证只走 `STRIX_GIT_USERNAME` / `STRIX_GIT_TOKEN`，任务填完整 HTTPS 仓库地址；凭证不进 `source_url` / 数据库 / `git clone` 命令行。clone / checkout / Issues API **固定忽略 SSL 校验**（内网自签）
-- `STRIX_GITEA_ISSUES=1` 时，仅对 `type=audit` 且 `source_type=git` 的**已完成**任务，在 `ingest_results` 后按 finding 开 Issue；标题含 `[Strix:{id}]`，正文含去重标记；已标无效的 finding 跳过；状态落在任务 workspace 的 `gitea_issues.json`
-
-## 交互（实话）
-
-`strix -n` **不会**开可 steer 的 HTTP。能双向对话的是同一进程里的 viewer：
-
-```text
-API Worker
-  → run_strix_scan(interactive=True) + AgentCoordinator
-  → viewer.serve(..., steer_handler=...)
-  → POST /api/agents/steer   （经本服务反代）
-```
-
-| 时机 | `POST /api/v1/tasks/{id}/messages` |
-|------|-------------------------------------|
-| 运行中 | 经 coordinator 实时投递（与 viewer steer 同源） |
-| 已结束 | 创建 follow-up 任务，消息并进 instruction |
+- UI / session Cookie
+- 邮件 / 飞书
+- 复测 / finding 审核
+- 资产聚合 / 批量导入 / Gitea Issue
+- Viewer 反代（主控用 `steer` + 自有 UI）

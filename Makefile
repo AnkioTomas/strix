@@ -18,7 +18,7 @@ help:
 	@echo "Development:"
 	@echo "  pre-commit    - Run pre-commit hooks on all files"
 	@echo "  viewer        - Rebuild the local-viewer SPA (commit the output)"
-	@echo "  web           - Start Local Strix Security API (web/)"
+	@echo "  web           - Start Strix worker node API (web/)"
 	@echo "  wheel         - Build a platform wheel with the bundled Go sidecar"
 	@echo "  clean         - Clean up cache files and artifacts"
 	@echo "  tui-build     - Build the Bubble Tea TUI"

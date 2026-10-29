@@ -1,8 +1,8 @@
-"""Periodically stop Docker sandboxes left running after terminal web tasks.
+"""Periodically stop Docker sandboxes left running after terminal jobs.
 
-Web-side only. Walks each finished task's ``strix_runs/*/run.json`` (not just
-the current ``run_name``) and also matches running containers by the
-``strix-run-id`` label, so orphaned sibling runs still get reaped.
+Walks each finished job's ``strix_runs/*/run.json`` (not just the current
+``run_name``) and also matches running containers by the ``strix-run-id``
+label, so orphaned sibling runs still get reaped.
 """
 
 from __future__ import annotations
@@ -12,20 +12,17 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from app.services.results import workspace_run_dir
+from app.services.artifacts import workspace_run_dir
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from app.db import Database
-
 
 logger = logging.getLogger(__name__)
 
-_ACTIVE = frozenset({"queued", "starting", "running", "cancelling"})
+_ACTIVE = frozenset({"starting", "running", "cancelling"})
 _TERMINAL = frozenset({"completed", "failed", "cancelled"})
-_TASK_SCAN_LIMIT = 5000
 _RUNS_DIRNAME = "strix_runs"
 _LABEL_RUN_ID = "strix-run-id"
 
@@ -165,14 +162,14 @@ def _stop_container_id(container_id: str) -> bool:
                 client.close()
 
 
-def reap_stopped_task_sandboxes(
-    db: Database,
+def reap_stopped_job_sandboxes(
+    jobs: list[dict[str, Any]],
     *,
     list_labeled: Callable[[], list[tuple[str, str]]] | None = None,
     stop_run_dir: Callable[[Path | None], bool] | None = None,
     stop_container: Callable[[str], bool] | None = None,
 ) -> dict[str, Any]:
-    """Stop running sandboxes owned by terminal web tasks. Never raises."""
+    """Stop running sandboxes owned by terminal jobs. Never raises."""
     from strix.runtime.session_manager import stop_sandbox_from_run_dir
 
     stop_dir = stop_run_dir or stop_sandbox_from_run_dir
@@ -185,32 +182,24 @@ def reap_stopped_task_sandboxes(
         "label_stopped": 0,
     }
 
-    try:
-        tasks = db.list_tasks(limit=_TASK_SCAN_LIMIT, offset=0)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("sandbox reaper: list_tasks failed: %s", exc)
-        result["errors"] = 1
-        return result
-
-    active_cids, active_run_ids, terminal_targets = _collect_task_sandboxes(tasks)
+    active_cids, active_run_ids, terminal_targets = _collect_task_sandboxes(jobs)
     terminal_run_ids = {
         run_dir.name
-        for task in tasks
-        if str(task.get("status") or "") in _TERMINAL
-        for run_dir in _iter_run_dirs(Path(str(task.get("workspace") or "")))
+        for job in jobs
+        if str(job.get("status") or "") in _TERMINAL
+        for run_dir in _iter_run_dirs(Path(str(job.get("workspace") or "")))
     }
-    # DB run_name may point at a dir we already walked; keep explicit names too.
-    for task in tasks:
-        if str(task.get("status") or "") not in _TERMINAL:
+    for job in jobs:
+        if str(job.get("status") or "") not in _TERMINAL:
             continue
-        name = task.get("run_name")
+        name = job.get("run_name")
         if isinstance(name, str) and name.strip():
             terminal_run_ids.add(name.strip())
 
     result["checked"] = len(terminal_targets)
     stopped_cids: set[str] = set()
 
-    for task_id, cid, run_dir in terminal_targets:
+    for job_id, cid, run_dir in terminal_targets:
         if _id_in_set(cid, active_cids):
             result["skipped_active"] += 1
             continue
@@ -219,8 +208,8 @@ def reap_stopped_task_sandboxes(
         except Exception as exc:  # noqa: BLE001
             result["errors"] += 1
             logger.warning(
-                "sandbox reaper: stop failed task=%s container=%s: %s",
-                task_id,
+                "sandbox reaper: stop failed job=%s container=%s: %s",
+                job_id,
                 cid[:12],
                 exc,
             )
@@ -229,16 +218,14 @@ def reap_stopped_task_sandboxes(
             result["stopped"] += 1
             stopped_cids.add(cid)
             logger.info(
-                "sandbox reaper: stopped container %s for terminal task %s (run=%s)",
+                "sandbox reaper: stopped container %s for terminal job %s (run=%s)",
                 cid[:12],
-                task_id,
+                job_id,
                 run_dir.name,
             )
         else:
             result["errors"] += 1
 
-    # Second pass: running containers labeled strix-run-id whose run belongs to
-    # a finished task but never got (or lost) sandbox.container_id in run.json.
     labeled = _list_labeled_running(list_labeled=list_labeled)
     if labeled is None:
         result["errors"] += 1
@@ -272,3 +259,7 @@ def reap_stopped_task_sandboxes(
         result["errors"],
     )
     return result
+
+
+# Back-compat alias for older tests/imports.
+reap_stopped_task_sandboxes = reap_stopped_job_sandboxes

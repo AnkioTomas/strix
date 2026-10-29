@@ -5,6 +5,7 @@ from __future__ import annotations
 import socket
 import threading
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -34,6 +35,26 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
     with TestClient(app) as test_client:
         yield test_client
     get_settings.cache_clear()
+
+
+@pytest.fixture()
+def mock_start(monkeypatch: pytest.MonkeyPatch):
+    handle = MagicMock()
+    handle.pid = 1
+    handle.run_name = "run_fake"
+    handle.viewer_url = None
+    handle.viewer_token = None
+    handle._error = None
+    handle.poll.return_value = None
+    handle.wait_ready.return_value = True
+    handle.refresh_run_name.return_value = "run_fake"
+
+    def _start(job, *, settings, target, on_ready=None):
+        if on_ready is not None:
+            on_ready(handle)
+        return handle
+
+    monkeypatch.setattr("app.services.job_manager.start_strix", _start)
 
 
 @pytest.fixture()
@@ -150,7 +171,6 @@ def test_check_tcp_reachable_dead_proxy() -> None:
 
 
 def test_check_tcp_reachable_fails_closed_port() -> None:
-    # Bind then close to pick a free port that is not listening.
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     probe.bind(("127.0.0.1", 0))
     port = int(probe.getsockname()[1])
@@ -160,54 +180,26 @@ def test_check_tcp_reachable_fails_closed_port() -> None:
     assert exc.value.code == "TARGET_UNREACHABLE"
 
 
-def test_create_task_holds_unreachable_target(client: TestClient) -> None:
+def test_create_job_rejects_unreachable_target(client: TestClient) -> None:
+    """Worker node fails fast — no local hold queue for dead targets."""
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     probe.bind(("127.0.0.1", 0))
     port = int(probe.getsockname()[1])
     probe.close()
     resp = client.post(
-        "/api/v1/tasks",
-        json={
-            "type": "pentest",
-            "target": f"http://127.0.0.1:{port}/",
-            "scan_mode": "quick",
-            "notes": "用户备注",
-        },
-    )
-    assert resp.status_code == 202, resp.text
-    body = resp.json()
-    assert body["status"] == "held"
-    assert "用户备注" in (body.get("notes") or "")
-    assert "[连通性]" in (body.get("notes") or "")
-    assert "TARGET_UNREACHABLE" not in resp.text
-
-
-def test_release_unreachable_stays_held(client: TestClient) -> None:
-    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    probe.bind(("127.0.0.1", 0))
-    port = int(probe.getsockname()[1])
-    probe.close()
-    created = client.post(
-        "/api/v1/tasks",
+        "/v1/jobs",
         json={
             "type": "pentest",
             "target": f"http://127.0.0.1:{port}/",
             "scan_mode": "quick",
         },
     )
-    assert created.status_code == 202, created.text
-    task_id = created.json()["id"]
-    released = client.post(f"/api/v1/tasks/{task_id}/release")
-    assert released.status_code == 400, released.text
-    assert released.json()["error"]["code"] == "TARGET_UNREACHABLE"
-    got = client.get(f"/api/v1/tasks/{task_id}")
-    assert got.status_code == 200
-    assert got.json()["status"] == "held"
-    assert "[连通性]" in (got.json().get("notes") or "")
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["error"]["code"] == "TARGET_UNREACHABLE"
 
 
-def test_create_task_preflight_follows_outbound_proxy(
-    client: TestClient, listening_port: int
+def test_create_job_preflight_follows_outbound_proxy(
+    client: TestClient, listening_port: int, mock_start
 ) -> None:
     seen: list[str] = []
     proxy = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -248,19 +240,17 @@ def test_create_task_preflight_follows_outbound_proxy(
     thread.start()
     try:
         resp = client.post(
-            "/api/v1/tasks",
+            "/v1/jobs",
             json={
                 "type": "pentest",
                 "target": f"http://127.0.0.1:{listening_port}/",
                 "scan_mode": "quick",
-                "held": True,
                 "use_proxy": True,
                 "proxy_url": f"http://127.0.0.1:{proxy_port}",
             },
         )
         assert resp.status_code == 202, resp.text
-        assert resp.json()["status"] == "held"
-        assert "[连通性]" not in (resp.json().get("notes") or "")
+        assert resp.json()["status"] == "running"
         assert seen and seen[0].startswith("CONNECT 127.0.0.1:")
     finally:
         stop.set()
@@ -268,17 +258,16 @@ def test_create_task_preflight_follows_outbound_proxy(
         thread.join(timeout=1)
 
 
-def test_create_task_accepts_reachable_target(
-    client: TestClient, listening_port: int
+def test_create_job_accepts_reachable_target(
+    client: TestClient, listening_port: int, mock_start
 ) -> None:
     resp = client.post(
-        "/api/v1/tasks",
+        "/v1/jobs",
         json={
             "type": "pentest",
             "target": f"http://127.0.0.1:{listening_port}/",
             "scan_mode": "quick",
-            "held": True,
         },
     )
     assert resp.status_code == 202, resp.text
-    assert resp.json()["status"] == "held"
+    assert resp.json()["status"] == "running"

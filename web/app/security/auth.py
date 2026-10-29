@@ -1,15 +1,12 @@
-"""API authentication: Bearer token or session cookie."""
+"""API authentication: fixed Bearer token only."""
 
 from __future__ import annotations
 
 import secrets
 
-from fastapi import Cookie, Header, HTTPException, status
+from fastapi import Header, HTTPException, status
 
 from app.config import get_settings
-
-
-SESSION_COOKIE_NAME = "strix_web_session"
 
 
 def unauthorized(message: str = "Missing or invalid credentials") -> HTTPException:
@@ -46,7 +43,6 @@ def token_matches(candidate: str | None, expected: str) -> bool:
 
 def require_api_key(
     authorization: str | None = Header(default=None),
-    strix_web_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> None:
     expected = expected_api_key()
     if expected is None:
@@ -56,8 +52,5 @@ def require_api_key(
         token = authorization.removeprefix("Bearer ").strip()
         if token_matches(token, expected):
             return
-
-    if token_matches(strix_web_session, expected):
-        return
 
     raise unauthorized()

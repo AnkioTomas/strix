@@ -1,25 +1,20 @@
-"""Local Strix Security API entrypoint."""
+"""Strix worker-node API entrypoint."""
 
 from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from app.api.health import router as health_router
-from app.api.mail import router as mail_router
-from app.api.session import router as session_router
-from app.api.assets import router as assets_router
-from app.api.tasks import router as tasks_router
-from app.api.viewer_proxy import router as viewer_proxy_router
+from app.api.jobs import router as jobs_router
+from app.api.node import router as node_router
 from app.config import get_settings
-from app.db import Database
-from app.services.task_manager import TaskManager
+from app.job_store import JobStore
+from app.services.job_manager import JobManager
 from app.workers.pool import WorkerPool
 
 
@@ -27,32 +22,29 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
-logger = logging.getLogger("strix-api")
-
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+logger = logging.getLogger("strix-node")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    db = Database(settings.database_path)
-    manager = TaskManager(db, settings)
+    store = JobStore(settings.jobs_dir)
+    manager = JobManager(store, settings)
     worker = WorkerPool(manager)
     app.state.settings = settings
-    app.state.db = db
+    app.state.store = store
     app.state.manager = manager
     app.state.worker = worker
     reattached = manager.reattach_running_scans()
-    manager.recover_interrupted_mail()
     await worker.start()
     logger.info(
-        "Strix API listening data_dir=%s max_concurrent=%s reattached=%s",
+        "Strix worker node listening node_id=%s data_dir=%s max_concurrent=%s reattached=%s",
+        settings.resolved_node_id,
         settings.data_dir,
         settings.max_concurrent,
         reattached,
     )
     yield
-    # Stop the scheduler only — detached scan workers keep running.
     await worker.stop()
     logger.info(
         "API shutting down; %s detached scan(s) left running",
@@ -60,39 +52,16 @@ async def lifespan(app: FastAPI):
     )
 
 
-class RevalidatedStatic(StaticFiles):
-    """Always revalidate (ETag) so a deploy is picked up without a hard refresh."""
-
-    async def get_response(self, path, scope):
-        response = await super().get_response(path, scope)
-        response.headers["Cache-Control"] = "no-cache"
-        return response
-
-
 app = FastAPI(
-    title="Local Strix Security API",
-    version="0.1.0",
-    description="Task orchestration layer over local Strix CLI scans.",
+    title="Strix Worker Node",
+    version="0.2.0",
+    description="Distributed scan worker controlled by a master over HTTP.",
     lifespan=lifespan,
 )
 
 app.include_router(health_router)
-app.include_router(session_router)
-app.include_router(tasks_router)
-app.include_router(assets_router)
-app.include_router(mail_router)
-app.include_router(viewer_proxy_router)
-app.mount("/static", RevalidatedStatic(directory=STATIC_DIR), name="static")
-
-
-@app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
-
-
-@app.get("/favicon.ico", include_in_schema=False)
-async def favicon() -> FileResponse:
-    return FileResponse(STATIC_DIR / "favicon.ico")
+app.include_router(node_router)
+app.include_router(jobs_router)
 
 
 @app.exception_handler(ValidationError)
@@ -101,7 +70,7 @@ async def validation_error_handler(_request: Request, exc: ValidationError):
         status_code=422,
         content={
             "error": {
-                "code": "INVALID_TASK_TYPE",
+                "code": "INVALID_REQUEST",
                 "message": str(exc.errors()),
             }
         },

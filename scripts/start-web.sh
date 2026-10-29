@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start the Local Strix Security API (web/).
+# Start the Strix worker node API (web/).
 #
 # Usage:
 #   ./scripts/start-web.sh
@@ -20,7 +20,7 @@ PORT_OVERRIDE=""
 
 usage() {
   cat <<'EOF'
-Start Local Strix Security API (web/)
+Start Strix worker node API (web/)
 
 Usage:
   ./scripts/start-web.sh [options]

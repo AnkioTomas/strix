@@ -1,34 +1,24 @@
-"""Background worker pool with concurrency + host admission control."""
+"""Background loop: finalize finished scans + reap orphan sandboxes."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from app.db import utc_now
-from app.services.feishu import (
-    clear_needs_user_state,
-    dump_notify_state,
-    needs_user_fingerprint,
-    notify_status,
-    notify_task,
-)
-from app.services.sandbox_reaper import reap_stopped_task_sandboxes
+from app.services.sandbox_reaper import reap_stopped_job_sandboxes
 from app.services.system_load import effective_concurrency, sample_system
-from app.services.task_manager import TaskError
 
 
 if TYPE_CHECKING:
-    from app.services.task_manager import TaskManager
+    from app.services.job_manager import JobManager
 
 logger = logging.getLogger(__name__)
 
 
 class WorkerPool:
-    def __init__(self, manager: TaskManager) -> None:
+    def __init__(self, manager: JobManager) -> None:
         self.manager = manager
         self.settings = manager.settings
         self._task: asyncio.Task[None] | None = None
@@ -37,6 +27,8 @@ class WorkerPool:
         self._last_sandbox_reap = 0.0
         self._last_admission: dict[str, Any] = {
             "allowed_slots": self.settings.max_concurrent,
+            "free_slots": self.settings.max_concurrent,
+            "running": 0,
             "reason": "ok:init",
             "system": {},
         }
@@ -53,7 +45,7 @@ class WorkerPool:
             return
         self._stop.clear()
         self._running = True
-        self._task = asyncio.create_task(self._loop(), name="strix-api-worker")
+        self._task = asyncio.create_task(self._loop(), name="strix-node-worker")
 
     async def stop(self) -> None:
         self._stop.set()
@@ -81,19 +73,17 @@ class WorkerPool:
         logger.info("worker pool stopped")
 
     async def _tick(self) -> None:
-        for task_id, process in list(self.manager._processes.items()):
+        for job_id, process in list(self.manager._processes.items()):
             code = process.poll()
             if code is None:
                 name = process.refresh_run_name()
                 if name:
-                    self.manager.db.update_task(task_id, run_name=name)
+                    self.manager.store.update(job_id, run_name=name)
                 continue
-            task = self.manager.db.get_task(task_id)
-            cancelled = bool(task and task["status"] == "cancelling")
-            await asyncio.to_thread(self.manager.finish_process, task_id, cancelled=cancelled)
+            job = self.manager.store.get(job_id)
+            cancelled = bool(job and job["status"] == "cancelling")
+            await asyncio.to_thread(self.manager.finish_process, job_id, cancelled=cancelled)
 
-        await asyncio.to_thread(self._poll_needs_user)
-        await asyncio.to_thread(self._poll_checkins)
         await self._maybe_reap_sandboxes()
 
         snap = sample_system()
@@ -103,8 +93,11 @@ class WorkerPool:
             task_memory_gb=self.settings.task_memory_gb,
             snapshot=snap,
         )
+        running = self.manager.active_process_count()
         self._last_admission = {
             "allowed_slots": allowed,
+            "running": running,
+            "free_slots": max(0, allowed - running),
             "reason": reason,
             "task_cpu_percent": self.settings.task_cpu_percent,
             "task_memory_gb": self.settings.task_memory_gb,
@@ -112,76 +105,7 @@ class WorkerPool:
             "system": snap.as_dict(),
         }
 
-        running = self.manager.active_process_count()
-        slots = allowed - running
-        if slots <= 0:
-            if allowed == 0 and self.manager.db.count_by_status("queued") > 0:
-                logger.info("admission paused; queued tasks waiting (%s)", reason)
-            return
-
-        for _ in range(slots):
-            claimed = await asyncio.to_thread(self.manager.db.claim_next_queued)
-            if not claimed:
-                break
-            await self._launch(claimed)
-
-    def _poll_needs_user(self) -> None:
-        """Edge-detect agents.json wait_kinds=user; dedupe via tasks.feishu_notify."""
-        if not self.settings.feishu_webhook.strip():
-            return
-        if "needs_user" not in self.settings.feishu_event_set():
-            return
-
-        from app.services.results import workspace_run_dir
-        from strix.core.paths import RUNTIME_STATE_DIR_NAME
-
-        for task_id in list(self.manager._processes.keys()):
-            task = self.manager.db.get_task(task_id)
-            if not task or task.get("status") != "running":
-                continue
-            run_dir = workspace_run_dir(Path(task["workspace"]), task.get("run_name"))
-            if run_dir is None:
-                continue
-            agents_path = run_dir / RUNTIME_STATE_DIR_NAME / "agents.json"
-            fingerprint = needs_user_fingerprint(agents_path)
-            if fingerprint is None:
-                cleared = clear_needs_user_state(task)
-                if cleared is not None:
-                    self.manager.db.update_task(
-                        task_id, feishu_notify=dump_notify_state(cleared)
-                    )
-                continue
-            notify_task(
-                self.settings,
-                self.manager.db,
-                "needs_user",
-                task,
-                detail=f"等待 Agent: {fingerprint}",
-                fingerprint=fingerprint,
-            )
-
-    def _poll_checkins(self) -> None:
-        """Hourly (configurable) status question + webhook progress card."""
-        interval = int(self.settings.checkin_interval)
-        if interval <= 0:
-            return
-        from app.services.checkin import checkin_due, run_checkin
-        from app.services.feishu import _console_url
-
-        for task_id in list(self.manager._processes.keys()):
-            task = self.manager.db.get_task(task_id)
-            if not task or task.get("status") != "running":
-                continue
-            try:
-                if checkin_due(task, interval):
-                    run_checkin(
-                        self.manager, task, console_url=_console_url(self.settings)
-                    )
-            except Exception:
-                logger.exception("checkin failed task=%s", task_id)
-
     async def _maybe_reap_sandboxes(self) -> None:
-        """Stop Docker sandboxes for finished tasks (throttled)."""
         interval = int(self.settings.sandbox_reap_interval)
         if interval <= 0:
             return
@@ -189,40 +113,5 @@ class WorkerPool:
         if now - self._last_sandbox_reap < interval:
             return
         self._last_sandbox_reap = now
-        await asyncio.to_thread(reap_stopped_task_sandboxes, self.manager.db)
-
-    async def _launch(self, task: dict) -> None:
-        task_id = task["id"]
-        try:
-            target = await asyncio.to_thread(self.manager.prepare_target, task)
-            task = self.manager.get_task(task_id)
-            process = await asyncio.to_thread(self.manager.start_process, task, target)
-            logger.info("task %s running pid=%s", task_id, process.pid)
-        except TaskError as exc:
-            if self.manager.get_task(task_id)["status"] == "completed":
-                return
-            logger.error("task %s failed to start: %s", task_id, exc.message)
-            failed = self.manager.db.update_task(
-                task_id,
-                status="failed",
-                error=exc.message,
-                finished_at=utc_now(),
-            )
-            if failed:
-                await asyncio.to_thread(
-                    notify_status, self.settings, self.manager.db, failed, "failed"
-                )
-        except Exception as exc:
-            if self.manager.get_task(task_id)["status"] == "completed":
-                return
-            logger.exception("task %s crashed during start", task_id)
-            failed = self.manager.db.update_task(
-                task_id,
-                status="failed",
-                error=str(exc),
-                finished_at=utc_now(),
-            )
-            if failed:
-                await asyncio.to_thread(
-                    notify_status, self.settings, self.manager.db, failed, "failed"
-                )
+        jobs = await asyncio.to_thread(self.manager.store.list_jobs)
+        await asyncio.to_thread(reap_stopped_job_sandboxes, jobs)

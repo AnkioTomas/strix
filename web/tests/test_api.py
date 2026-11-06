@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -211,3 +212,30 @@ def test_create_job_request_shape():
     assert req.type == "pentest"
     with pytest.raises(Exception):
         CreateJobRequest.model_validate({"type": "pentest", "scan_mode": "quick"})
+
+
+def test_master_pushed_config(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    for key in ("STRIX_LLM", "LLM_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    res = client.put(
+        "/v1/config",
+        json={
+            "env": {"STRIX_LLM": "openai/m1", "LLM_API_KEY": "sk-secret"},
+            "settings": {"max_concurrent": 5},
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["env"] == {"STRIX_LLM": "openai/m1", "LLM_API_KEY": "***"}
+    assert client.get("/v1/node").json()["capacity"]["max_concurrent"] == 5
+    assert os.environ["LLM_API_KEY"] == "sk-secret"
+
+    client.put("/v1/config", json={"env": {"LLM_API_KEY": None}})
+    assert "LLM_API_KEY" not in os.environ
+    assert "LLM_API_KEY" not in client.get("/v1/config").json()["env"]
+
+
+@pytest.mark.parametrize("key", ["PATH", "LD_PRELOAD", "STRIX_API_KEY", "STRIX_BIN"])
+def test_config_rejects_unsafe_env(client: TestClient, key: str):
+    res = client.put("/v1/config", json={"env": {key: "x"}})
+    assert res.status_code == 422

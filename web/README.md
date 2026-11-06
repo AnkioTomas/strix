@@ -40,6 +40,7 @@ export LLM_API_KEY=...
 |--------|------|------|
 | GET | `/health` | 存活 + 槽位 |
 | GET | `/v1/node` | 节点 ID、容量、`free_slots`、在跑任务（主控调度依据） |
+| GET / PUT | `/v1/config` | 主控下发/读取运行配置（见下）；GET 中密钥只显示 `***` |
 | POST | `/v1/jobs` | 下发任务；满载 → `503 NODE_FULL` |
 | GET | `/v1/jobs` | 本机运行态列表（非产品目录） |
 | GET | `/v1/jobs/{id}` | 状态 |
@@ -69,6 +70,21 @@ curl -sS -X POST http://127.0.0.1:8787/v1/jobs \
 - `data/jobs/<id>/job.json`：运行态
 - `data/jobs/<id>/strix_runs/`：扫描产物
 - 主控拉完结果后应 `DELETE`，或自行做 TTL
+
+## 运行配置由主控下发
+
+节点本地 `.env` 只需引导项（`STRIX_API_KEY` / `STRIX_API_HOST` / `STRIX_API_PORT` / `STRIX_NODE_ID`）。模型、代理、并发、Git 凭据等一律由主控 `PUT /v1/config` 推送，节点落盘到 `data/node-config.json`（0600），重启自动恢复，新任务立即生效（已在跑的任务不受影响）。
+
+```bash
+curl -sS -X PUT http://NODE:8787/v1/config -H "Authorization: ******" \
+  -H "Content-Type: application/json" \
+  -d '{"env":{"STRIX_LLM":"openai/xxx","LLM_API_KEY":"sk-...","OPENAI_API_BASE":"https://..."},
+       "settings":{"max_concurrent":4,"task_cpu_percent":30,"task_memory_gb":2}}'
+```
+
+- 合并语义：`env` 中值为 `null` 表示删除该项；未出现的键保持不变。
+- `env` 仅允许 `STRIX_* / LLM_* / OPENAI_* / ANTHROPIC_* / AZURE_* / GEMINI_* / VERTEX_* / AWS_* / PERPLEXITY_*` 与 `HTTP(S)_PROXY / NO_PROXY / ALL_PROXY`；`STRIX_API_*`、`STRIX_BIN`、`STRIX_NODE_ID` 不可改。
+- `settings` 可含：`max_concurrent`、`task_cpu_percent`、`task_memory_gb`、`default_scan_mode`、`default_max_budget`、`sandbox_reap_interval`、`allow_private_targets`、`pentest_allowed_targets`、`git_username` + `git_token`。
 
 ## 满载策略
 

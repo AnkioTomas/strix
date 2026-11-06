@@ -34,6 +34,12 @@ export LLM_API_KEY=...
 
 首次运行若没有 `web/.env`，脚本会从 `.env.example` 复制。扫描依赖 `STRIX_LLM` + `LLM_API_KEY`。
 
+## 一键部署并注册到主控
+
+在主控「执行服务器 → 新增服务器」复制安装命令，到全新服务器以 root 执行。脚本 `web/deploy/install.sh` 会：安装 uv 与 Python 依赖（含 x86-64-v2 兼容的 `numpy<2.4`）、准备沙箱镜像、写 systemd 服务、配置 HTTPS（有 1Panel OpenResty 则走反向代理，否则节点自签 TLS）、开放防火墙，最后把节点地址、API Key 和证书 POST 到主控 `/agent/register`。节点只做引导，模型 / 并发等配置之后由主控下发。
+
+可选环境变量：`STRIX_PROXY`（访问 GitHub / ghcr.io / PyPI 的代理）、`STRIX_NODE_URL`（主控访问本节点的地址，默认按到主控的路由自动推断）、`STRIX_PUBLIC_PORT`（默认 8787）、`STRIX_NODE_NAME`。需预先安装 docker、curl、openssl。
+
 ## API
 
 | Method | Path | 说明 |

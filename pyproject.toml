@@ -55,6 +55,9 @@ dependencies = [
   # force the headless build via [tool.uv].override-dependencies below.
   "rapidocr-onnxruntime>=1.3.0",
   "pillow>=10.0.0",
+  # NumPy >=2.4 requires an x86-64-v2 CPU (SSE4.2/POPCNT) and aborts on import
+  # otherwise (e.g. QEMU "Virtual CPU" guests). Keep OCR deps importable there.
+  "numpy>=2.0,<2.4",
   "onnxruntime>=1.16.0",
   "opencv-python-headless>=4.5.1.48",
 ]

@@ -68,6 +68,11 @@ class Settings(BaseSettings):
 
     host: str = Field(default="127.0.0.1", alias="STRIX_API_HOST")
     port: int = Field(default=8787, alias="STRIX_API_PORT")
+    tls_cert: str | None = Field(default=None, alias="STRIX_API_TLS_CERT")
+    tls_key: str | None = Field(default=None, alias="STRIX_API_TLS_KEY")
+    # auto: 未提供证书时在 data/tls 下自签并复用；off: 明文 HTTP
+    tls: str = Field(default="off", alias="STRIX_API_TLS")
+    tls_sans: str = Field(default="", alias="STRIX_API_TLS_SANS")
 
     @model_validator(mode="after")
     def git_auth_pair(self) -> Self:

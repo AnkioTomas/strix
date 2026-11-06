@@ -85,11 +85,22 @@ def main() -> None:
     import uvicorn
 
     settings = get_settings()
+    tls: dict[str, str] = {}
+    if settings.tls_cert and settings.tls_key:
+        tls = {"ssl_certfile": settings.tls_cert, "ssl_keyfile": settings.tls_key}
+    elif settings.tls == "auto":
+        from pathlib import Path
+
+        from app.tls import ensure_self_signed
+
+        cert, key = ensure_self_signed(Path(settings.data_dir) / "tls", settings.tls_sans)
+        tls = {"ssl_certfile": cert, "ssl_keyfile": key}
     uvicorn.run(
         "app.main:app",
         host=settings.host,
         port=settings.port,
         reload=False,
+        **tls,
     )
 
 

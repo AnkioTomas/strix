@@ -86,6 +86,16 @@ curl -sS -X PUT http://NODE:8787/v1/config -H "Authorization: ******" \
 - `env` 仅允许 `STRIX_* / LLM_* / OPENAI_* / ANTHROPIC_* / AZURE_* / GEMINI_* / VERTEX_* / AWS_* / PERPLEXITY_*` 与 `HTTP(S)_PROXY / NO_PROXY / ALL_PROXY`；`STRIX_API_*`、`STRIX_BIN`、`STRIX_NODE_ID` 不可改。
 - `settings` 可含：`max_concurrent`、`task_cpu_percent`、`task_memory_gb`、`default_scan_mode`、`default_max_budget`、`sandbox_reap_interval`、`allow_private_targets`、`pentest_allowed_targets`、`git_username` + `git_token`。
 
+## HTTPS（反向代理，与 1Panel 一致）
+
+节点只监听回环明文端口，TLS 由 1Panel 的 OpenResty 终结：
+
+```bash
+bash deploy/1panel-proxy.sh [公网端口=8787] [上游端口=18787] [站点名=strix-node]
+```
+
+脚本会在 `/opt/1panel/www/conf.d/<站点>.conf` 写入反代站点、在 `sites/<站点>/ssl/` 生成自签证书（可在 1Panel 面板里替换为正式证书）、把节点改为 `127.0.0.1:<上游端口>`、`nginx -t` 后 reload。主控用 `fullchain.pem` 作为信任证书。
+
 ## 满载策略
 
 节点不排队。`free_slots == 0` 时 `POST /v1/jobs` 返回：

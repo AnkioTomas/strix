@@ -50,6 +50,11 @@ async def respond_to_user(ctx: RunContextWrapper, message: str = "") -> str:
             only need to wait: that text has already reached them, and
             repeating it makes them read the same answer twice.
     """
+    return await park_for_user(ctx, message)
+
+
+async def park_for_user(ctx: RunContextWrapper, message: str = "") -> str:
+    """Park the calling agent until the user replies (shared by the yield/wait tools)."""
     inner = _ctx(ctx)
     coordinator = coordinator_from_context(inner)
     me = inner.get("agent_id")

@@ -37,6 +37,7 @@ from strix.tools.notes.tools import (
     list_notes,
     update_note,
 )
+from strix.tools.notify.tools import notify_user, wait_for_user
 from strix.tools.nullish import is_nullish
 from strix.tools.ocr.tool import ocr_image
 from strix.tools.output_store import bound_and_store, bound_text
@@ -503,7 +504,7 @@ def _make_shell_configurator(*, chat_completions: bool, strict_schemas: bool) ->
 
 
 # Tools that hand control away by parking the agent rather than ending the scan.
-_PARKING_TOOLS: frozenset[str] = frozenset({"respond_to_user", "wait_for_agents"})
+_PARKING_TOOLS: frozenset[str] = frozenset({"respond_to_user", "wait_for_user", "wait_for_agents"})
 
 
 def _lifecycle_tool_completed(tool_name: str, output: Any) -> bool:
@@ -582,6 +583,7 @@ _BASE_TOOLS: tuple[Tool, ...] = (
     web_search,
     web_get_contents,
     ocr_image,
+    notify_user,
     create_vulnerability_report,
     create_dependency_report,
     update_vulnerability_report,
@@ -690,6 +692,7 @@ def build_strix_agent(
     if interactive:
         # Yielding to the user is only meaningful when one is attached.
         agent_tools.append(respond_to_user)
+        agent_tools.append(wait_for_user)
     if is_root:
         tools: list[Tool] = [*_BASE_TOOLS, *agent_tools, finish_scan]
     else:

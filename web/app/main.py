@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from app import runtime_config
 from app.api.config import router as config_router
+from app.api.forms import router as forms_router
 from app.api.health import router as health_router
 from app.api.jobs import router as jobs_router
 from app.api.node import router as node_router
@@ -66,6 +67,7 @@ app.include_router(health_router)
 app.include_router(node_router)
 app.include_router(config_router)
 app.include_router(jobs_router)
+app.include_router(forms_router)
 
 
 @app.exception_handler(ValidationError)

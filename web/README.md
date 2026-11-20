@@ -119,3 +119,10 @@ bash deploy/1panel-proxy.sh [公网端口=8787] [上游端口=18787] [站点名=
 - 复测 / finding 审核
 - 资产聚合 / 批量导入 / Gitea Issue
 - Viewer 反代（主控用 `steer` + 自有 UI）
+
+## 人工协同与巡检（节点环境变量）
+
+- `STRIX_FEISHU_WEBHOOK` / `STRIX_FEISHU_SECRET`：飞书机器人（secret 为签名校验，可选）。未配置时 `notify_user` 返回未配置，看门狗不启动。
+- `STRIX_PUBLIC_URL`：本节点对外基址；Agent 发出的表单链接为 `{基址}/forms/{run}/{id}`（无需 API Key，一次性）。
+- `STRIX_WATCHDOG_PROGRESS_SECONDS`（默认 3600，0 关闭）：扫描内独立线程，每隔该时长要求 Agent 用 `notify_user` 汇报。
+- `STRIX_WATCHDOG_STALL_SECONDS`（默认 7200，0 关闭）：token 用量无变化则读取 `strix.log` 尾部，命中余额关键词报“疑似没钱”，否则报“可能卡住”并附日志原文。

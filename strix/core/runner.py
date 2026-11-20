@@ -43,6 +43,7 @@ from strix.core.inputs import (
 )
 from strix.core.paths import run_dir_for, runtime_state_dir
 from strix.core.sessions import open_agent_session
+from strix.core.watchdog import ScanWatchdog
 from strix.logging_setup import set_scan_id, setup_scan_logging
 from strix.report.state import get_global_report_state
 from strix.runtime import session_manager
@@ -319,6 +320,7 @@ async def run_strix_scan(
     else:
         root_id = uuid.uuid4().hex[:8]
 
+    watchdog: ScanWatchdog | None = None
     logger.info("Bringing up sandbox session for scan %s", scan_id)
     bundle = await session_manager.create_or_reuse(
         scan_id,
@@ -580,6 +582,15 @@ async def run_strix_scan(
         async with coordinator._lock:
             root_status = coordinator.statuses.get(root_id)
 
+        watchdog = ScanWatchdog(
+            loop=asyncio.get_running_loop(),
+            coordinator=coordinator,
+            report_state=get_global_report_state(),
+            run_dir=run_dir,
+            scan_id=scan_id,
+        )
+        watchdog.start()
+
         result = await run_agent_loop(
             agent=root_agent,
             initial_input=initial_input,
@@ -648,6 +659,8 @@ async def run_strix_scan(
                 await coordinator.set_status(root_id, "failed")
         raise
     finally:
+        if watchdog is not None:
+            watchdog.stop()
         configure_spill_writer(None)
         # Settle descendants before closing sessions: on a clean finish a child
         # can still be mid-turn, and closing its session underneath it crashes it.

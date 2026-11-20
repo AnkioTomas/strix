@@ -86,10 +86,7 @@ def count_disk_findings(run_dir: Path) -> dict[str, int]:
 
 
 def report_exists(run_dir: Path) -> bool:
-    return any(
-        (run_dir / name).is_file()
-        for name in ("penetration_test_report.md", "report.md")
-    )
+    return any((run_dir / name).is_file() for name in ("penetration_test_report.md", "report.md"))
 
 
 def read_report_markdown(run_dir: Path) -> str | None:
@@ -201,9 +198,11 @@ def list_artifacts(run_dir: Path) -> list[dict[str, Any]]:
                 artifacts.append({"name": name, "path": name, "size": path.stat().st_size})
             except OSError:
                 continue
-    images = run_dir / "images"
-    if images.is_dir():
-        for path in sorted(images.rglob("*")):
+    for sub in ("images", "traffic"):
+        subdir = run_dir / sub
+        if not subdir.is_dir():
+            continue
+        for path in sorted(subdir.rglob("*")):
             if not path.is_file():
                 continue
             try:

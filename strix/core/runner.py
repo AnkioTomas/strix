@@ -51,6 +51,7 @@ from strix.tools.output_store import (
     WORKSPACE_SPILL_DIR,
     configure_spill_writer,
 )
+from strix.tools.proxy import export as traffic_export
 
 
 if TYPE_CHECKING:
@@ -667,6 +668,13 @@ async def run_strix_scan(
         if root_id is not None:
             with contextlib.suppress(Exception):
                 await coordinator.cancel_descendants(root_id)
+        caido_client = bundle.get("caido_client")
+        if traffic_export.enabled() and caido_client is not None:
+            try:
+                summary = await traffic_export.export_traffic(caido_client, run_dir)
+                logger.info("Exported traffic: %s", summary)
+            except Exception:  # noqa: BLE001
+                logger.warning("Traffic export failed", exc_info=True)
         for s in sessions_to_close:
             with contextlib.suppress(Exception):
                 s.close()

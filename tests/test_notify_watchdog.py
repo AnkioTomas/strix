@@ -7,6 +7,7 @@ from pathlib import Path
 from strix.agents import factory
 from strix.core.watchdog import classify_log
 from strix.notify import forms
+from strix.tools.proxy.export import _har_entry
 
 
 def test_classify_out_of_credit() -> None:
@@ -53,3 +54,26 @@ def test_preset_forms_build_fields() -> None:
     assert rest == []
     html, _ = forms.build_fields("decision", [], ["A", "B"], [])
     assert html.count('type="radio"') == 2
+
+
+def test_traffic_har_entry() -> None:
+    meta = {
+        "id": "1",
+        "host": "a.com",
+        "port": 443,
+        "method": "POST",
+        "path": "/x",
+        "query": "q=1",
+        "is_tls": True,
+        "created_at": "2026-01-01T00:00:00Z",
+        "roundtrip_ms": 5,
+    }
+    entry = _har_entry(
+        meta,
+        b"POST /x?q=1 HTTP/1.1\r\nHost: a.com\r\nContent-Type: text/plain\r\n\r\nhi",
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<b>ok</b>",
+    )
+    assert entry["request"]["url"] == "https://a.com:443/x?q=1"
+    assert entry["request"]["postData"]["text"] == "hi"
+    assert entry["response"]["status"] == 200
+    assert entry["response"]["content"]["text"] == "<b>ok</b>"

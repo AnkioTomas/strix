@@ -126,3 +126,7 @@ bash deploy/1panel-proxy.sh [公网端口=8787] [上游端口=18787] [站点名=
 - `STRIX_PUBLIC_URL`：本节点对外基址；Agent 发出的表单链接为 `{基址}/forms/{run}/{id}`（无需 API Key，一次性）。
 - `STRIX_WATCHDOG_PROGRESS_SECONDS`（默认 3600，0 关闭）：扫描内独立线程，每隔该时长要求 Agent 用 `notify_user` 汇报。
 - `STRIX_WATCHDOG_STALL_SECONDS`（默认 7200，0 关闭）：token 用量无变化则读取 `strix.log` 尾部，命中余额关键词报“疑似没钱”，否则报“可能卡住”并附日志原文。
+
+## 流量导出（事后分析）
+
+设置 `STRIX_EXPORT_TRAFFIC=1`（可由主控下发）后，扫描结束时把 Caido 捕获的全部流量写入 `strix_runs/<run>/traffic/`：`traffic.har`（HAR 1.2，可导入 Chrome/Burp）和 `requests.jsonl`（原始请求/响应 base64，无损）。上限 `STRIX_EXPORT_TRAFFIC_MAX`（默认 20000 条）。导出文件会出现在 `/v1/jobs/{id}/artifacts` 列表中，可直接下载。

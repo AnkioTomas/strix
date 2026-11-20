@@ -1,6 +1,6 @@
 """Export Caido's captured traffic to disk so it can be analysed after the scan.
 
-Opt-in via ``STRIX_EXPORT_TRAFFIC``. Writes, under ``<run_dir>/traffic/``:
+Always runs at scan end. Writes, under ``<run_dir>/traffic/``:
 
 - ``requests.jsonl``: one JSON object per exchange with the raw request and
   response bytes base64-encoded (lossless).
@@ -28,16 +28,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-EXPORT_ENV = "STRIX_EXPORT_TRAFFIC"
 MAX_ENTRIES_ENV = "STRIX_EXPORT_TRAFFIC_MAX"
 DEFAULT_MAX_ENTRIES = 20000
 MAX_BODY_BYTES = 5 * 1024 * 1024
 PAGE_SIZE = 100
 TRAFFIC_DIR = "traffic"
-
-
-def enabled() -> bool:
-    return (os.environ.get(EXPORT_ENV) or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _max_entries() -> int:

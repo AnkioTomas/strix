@@ -669,7 +669,7 @@ async def run_strix_scan(
             with contextlib.suppress(Exception):
                 await coordinator.cancel_descendants(root_id)
         caido_client = bundle.get("caido_client")
-        if traffic_export.enabled() and caido_client is not None:
+        if caido_client is not None:
             try:
                 summary = await traffic_export.export_traffic(caido_client, run_dir)
                 logger.info("Exported traffic: %s", summary)

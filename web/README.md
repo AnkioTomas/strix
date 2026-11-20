@@ -129,4 +129,4 @@ bash deploy/1panel-proxy.sh [公网端口=8787] [上游端口=18787] [站点名=
 
 ## 流量导出（事后分析）
 
-设置 `STRIX_EXPORT_TRAFFIC=1`（可由主控下发）后，扫描结束时把 Caido 捕获的全部流量写入 `strix_runs/<run>/traffic/`：`traffic.har`（HAR 1.2，可导入 Chrome/Burp）和 `requests.jsonl`（原始请求/响应 base64，无损）。上限 `STRIX_EXPORT_TRAFFIC_MAX`（默认 20000 条）。导出文件会出现在 `/v1/jobs/{id}/artifacts` 列表中，可直接下载。
+每次扫描结束时（无需开关）把 Caido 捕获的全部流量写入 `strix_runs/<run>/traffic/`：`traffic.har`（HAR 1.2，可导入 Chrome/Burp）和 `requests.jsonl`（原始请求/响应 base64，无损）。上限 `STRIX_EXPORT_TRAFFIC_MAX`（默认 20000 条）。导出文件会出现在 `/v1/jobs/{id}/artifacts` 列表中，可直接下载。

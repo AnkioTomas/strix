@@ -12,8 +12,10 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import docker
 from agents.sandbox.entries import BaseEntry, File, LocalDir
 from agents.sandbox.manifest import Environment, Manifest
+from docker import errors as docker_errors
 
 from strix.config import load_settings
 from strix.core.paths import run_dir_for, workspace_dir
@@ -371,8 +373,10 @@ async def create_or_reuse(  # noqa: PLR0915
     backends.
 
     For the docker backend, ``strix_runs/<scan_id>/workspace`` is always
-    bind-mounted at ``/workspace``. On cleanup the container is stopped (not
-    removed) and its id is kept in ``run.json`` so ``--resume`` can attach.
+    bind-mounted at ``/workspace``. Containers are never reused: every start
+    (including ``--resume``) creates a fresh one and cleanup removes it. The
+    container id is recorded in ``run.json`` only so it can be reaped if the
+    owning process dies.
     """
 
     def report(phase: str) -> None:
@@ -395,7 +399,6 @@ async def create_or_reuse(  # noqa: PLR0915
     backend = get_backend(backend_name)
 
     staging_dir: Path | None = None
-    reuse_container_id: str | None = None
     if backend_supports_bind_mounts(backend_name):
         bind_mounts = [
             build_run_workspace_mount(host_workspace),
@@ -413,15 +416,6 @@ async def create_or_reuse(  # noqa: PLR0915
             bind_mounts.extend(
                 build_extra_file_bind_mounts(extra_files, staging_dir, local_sources)
             )
-        prior = read_sandbox_record(run_dir)
-        if (
-            isinstance(prior, dict)
-            and prior.get("backend") == backend_name
-            and prior.get("image") == image
-            and isinstance(prior.get("container_id"), str)
-            and prior["container_id"]
-        ):
-            reuse_container_id = str(prior["container_id"])
     else:
         bind_mounts = []
         entries = build_manifest_entries(local_sources)
@@ -457,11 +451,10 @@ async def create_or_reuse(  # noqa: PLR0915
 
     logger.info(
         "Creating sandbox session for scan %s (backend=%s, image=%s, "
-        "reuse_container=%s, workspace=%s, bind_mounts=%s)",
+        "workspace=%s, bind_mounts=%s)",
         scan_id,
         backend_name,
         image,
-        (reuse_container_id[:12] if reuse_container_id else None),
         host_workspace,
         "; ".join(f"{m['source']}->{m['target']}" for m in bind_mounts) or "none",
     )
@@ -472,7 +465,6 @@ async def create_or_reuse(  # noqa: PLR0915
             image=image,
             manifest=manifest,
             bind_mounts=bind_mounts,
-            reuse_container_id=reuse_container_id,
         )
 
         # Stock remote images: fix /workspace ownership (root host → pentester)
@@ -538,11 +530,10 @@ async def create_or_reuse(  # noqa: PLR0915
         # Until the bundle is cached, cleanup(scan_id) cannot find the
         # staging dir, so it is removed here.
         logger.exception(
-            "Sandbox session setup failed for scan %s (backend=%s, image=%s, reuse=%s)",
+            "Sandbox session setup failed for scan %s (backend=%s, image=%s)",
             scan_id,
             backend_name,
             image,
-            reuse_container_id[:12] if reuse_container_id else None,
         )
         _remove_staging_dir(staging_dir)
         raise
@@ -560,32 +551,8 @@ async def _start_backend_session(
     image: str,
     manifest: Manifest,
     bind_mounts: list[dict[str, Any]],
-    reuse_container_id: str | None,
 ) -> tuple[Any, Any]:
-    """Attach to ``reuse_container_id`` when possible; otherwise create a new container."""
-    if reuse_container_id:
-        logger.info(
-            "Attempting to reuse sandbox container %s (image=%s)",
-            reuse_container_id[:12],
-            image,
-        )
-        try:
-            return await backend(
-                image=image,
-                manifest=manifest,
-                exposed_ports=(_CONTAINER_CAIDO_PORT,),
-                bind_mounts=bind_mounts,
-                container_id=reuse_container_id,
-            )
-        except Exception as exc:  # noqa: BLE001
-            # NotFound / image mismatch / attach failures → create fresh.
-            logger.warning(
-                "Could not reuse container %s (%s: %s); creating a new sandbox",
-                reuse_container_id[:12],
-                type(exc).__name__,
-                exc,
-                exc_info=True,
-            )
+    """Create a brand-new sandbox container (containers are never reused)."""
     logger.info("Creating a new sandbox container (image=%s)", image)
     return await backend(
         image=image,
@@ -601,10 +568,9 @@ def _remove_staging_dir(staging_dir: Path | None) -> None:
 
 
 async def cleanup(scan_id: str) -> None:
-    """Stop ``scan_id``'s container (retain it) and drop its process cache entry.
+    """Stop and remove ``scan_id``'s container and drop its process cache entry.
 
-    Best-effort: any error during ``client.stop`` is logged and swallowed.
-    The container id stays in ``run.json`` so a later resume can attach.
+    Best-effort: any error during ``client.delete`` is logged and swallowed.
     Staging dirs and the Caido handle are still torn down.
     """
     bundle = _SESSION_CACHE.pop(scan_id, None)
@@ -622,18 +588,12 @@ async def cleanup(scan_id: str) -> None:
             logger.debug("cleanup(%s): caido_client.aclose() raised", scan_id, exc_info=True)
 
     client = bundle["client"]
-    stop = getattr(client, "stop", None)
     try:
-        if callable(stop):
-            await stop(bundle["session"])
-            logger.info("Stopped sandbox session for scan %s (container retained)", scan_id)
-        else:
-            # Non-docker / legacy backends without stop() still tear down fully.
-            await client.delete(bundle["session"])
-            logger.info("Cleaned up sandbox session for scan %s", scan_id)
+        await client.delete(bundle["session"])
+        logger.info("Removed sandbox container for scan %s", scan_id)
     except Exception:
         logger.exception(
-            "cleanup(%s): client stop/delete raised; container may need manual reaping",
+            "cleanup(%s): client delete raised; container may need manual reaping",
             scan_id,
         )
 
@@ -646,12 +606,12 @@ async def cleanup(scan_id: str) -> None:
 
 
 def stop_sandbox_from_run_dir(run_dir: Path | None) -> bool:
-    """Best-effort stop of a retained sandbox using ``run.json``'s container id.
+    """Best-effort stop-and-remove of a sandbox using ``run.json``'s container id.
 
     The in-process ``cleanup(scan_id)`` path only works inside the scan worker.
     When the API reaps a parked interactive worker (or the worker crashes), that
-    cache is gone — this still stops the container so it does not leak.
-    Container is stopped, not removed, so resume can attach later.
+    cache is gone — this still removes the container so it does not leak.
+    Already-stopped or already-missing containers count as success.
     """
     if run_dir is None:
         return False
@@ -661,46 +621,23 @@ def stop_sandbox_from_run_dir(run_dir: Path | None) -> bool:
     container_id = record.get("container_id")
     if not isinstance(container_id, str) or not container_id.strip():
         return False
-    try:
-        import docker
-    except ImportError:
-        logger.warning("stop_sandbox_from_run_dir: docker package unavailable")
-        return False
+    return remove_container_by_id(container_id)
+
+
+def remove_container_by_id(container_id: str) -> bool:
+    """Force-remove a container by id (stops it first). Never raises."""
     client = None
     try:
         client = docker.from_env(timeout=60)
-        container = client.containers.get(container_id)
-        container.reload()
-        if container.status != "running":
-            logger.info(
-                "Sandbox container %s already %s (retained)",
-                container_id[:12],
-                container.status,
-            )
-            return True
-        # Entrypoint can be wedged on ``certutil -N`` (100% CPU). ``stop`` sends
-        # SIGTERM then SIGKILL after timeout — enough to reap stuck certutil.
-        try:
-            container.stop(timeout=10)
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "stop_sandbox_from_run_dir: stop failed for %s; killing",
-                container_id[:12],
-                exc_info=True,
-            )
-            with contextlib.suppress(Exception):
-                container.kill()
-        logger.info(
-            "Stopped sandbox container %s from run record (retained for resume)",
-            container_id[:12],
-        )
+        client.containers.get(container_id).remove(force=True)
+        logger.info("Removed sandbox container %s", container_id[:12])
+    except docker_errors.NotFound:
         return True
-    except Exception:  # noqa: BLE001
-        logger.exception(
-            "stop_sandbox_from_run_dir: failed for container %s",
-            container_id[:12],
-        )
+    except Exception:
+        logger.exception("remove_container_by_id: failed for container %s", container_id[:12])
         return False
+    else:
+        return True
     finally:
         if client is not None:
             with contextlib.suppress(Exception):

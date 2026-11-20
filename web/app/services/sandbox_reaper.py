@@ -104,7 +104,7 @@ def _list_labeled_running(
     *,
     list_labeled: Callable[[], list[tuple[str, str]]] | None = None,
 ) -> list[tuple[str, str]] | None:
-    """Return ``[(container_id, strix-run-id), ...]`` for running sandboxes."""
+    """Return ``[(container_id, strix-run-id), ...]`` for sandboxes, stopped ones included."""
     if list_labeled is not None:
         return list(list_labeled())
     try:
@@ -117,7 +117,7 @@ def _list_labeled_running(
         client = docker.from_env(timeout=30)
         out: list[tuple[str, str]] = []
         for container in client.containers.list(
-            all=False,
+            all=True,
             filters={"label": _LABEL_RUN_ID},
         ):
             labels = container.labels or {}
@@ -135,31 +135,10 @@ def _list_labeled_running(
 
 
 def _stop_container_id(container_id: str) -> bool:
-    """Best-effort stop by id (retain container). Never raises."""
-    try:
-        import docker
-    except ImportError:
-        return False
-    client = None
-    try:
-        client = docker.from_env(timeout=60)
-        container = client.containers.get(container_id)
-        container.reload()
-        if container.status != "running":
-            return True
-        try:
-            container.stop(timeout=10)
-        except Exception:  # noqa: BLE001
-            with contextlib.suppress(Exception):
-                container.kill()
-        return True
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("sandbox reaper: stop by id failed %s: %s", container_id[:12], exc)
-        return False
-    finally:
-        if client is not None:
-            with contextlib.suppress(Exception):
-                client.close()
+    """Best-effort stop-and-remove by id. Never raises."""
+    from strix.runtime.session_manager import remove_container_by_id
+
+    return remove_container_by_id(container_id)
 
 
 def reap_stopped_job_sandboxes(

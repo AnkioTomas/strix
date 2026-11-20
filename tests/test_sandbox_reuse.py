@@ -180,7 +180,7 @@ async def test_stop_does_not_remove_container() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cleanup_prefers_stop_over_delete() -> None:
+async def test_cleanup_removes_container() -> None:
     staging = session_manager.extra_file_staging_dir("scan-stop")
     (staging / "0").mkdir()
 
@@ -198,14 +198,14 @@ async def test_cleanup_prefers_stop_over_delete() -> None:
 
     await session_manager.cleanup("scan-stop")
 
-    client.stop.assert_awaited_once()
-    client.delete.assert_not_awaited()
+    client.delete.assert_awaited_once()
+    client.stop.assert_not_awaited()
     assert not staging.exists()
     assert "scan-stop" not in session_manager._SESSION_CACHE
 
 
 @pytest.mark.asyncio
-async def test_create_or_reuse_attaches_when_sandbox_record_present(
+async def test_create_or_reuse_never_reuses_recorded_container(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -254,56 +254,9 @@ async def test_create_or_reuse_attaches_when_sandbox_record_present(
     assert bundle["session"] is fake_session
     backend.assert_awaited()
     kwargs = backend.await_args.kwargs
-    assert kwargs["container_id"] == "existing-cid"
+    assert "container_id" not in kwargs
     assert kwargs["bind_mounts"][0]["target"] == "/workspace"
     cjk_mounts = [m for m in kwargs["bind_mounts"] if m["target"] == "/usr/local/share/fonts/strix-cjk"]
     assert len(cjk_mounts) == 1
     assert cjk_mounts[0]["read_only"] is True
     assert (workspace_dir(run_dir)).is_dir()
-
-
-@pytest.mark.asyncio
-async def test_create_or_reuse_falls_back_when_attach_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.chdir(tmp_path)
-    scan_id = "reuse-fail"
-    run_dir = run_dir_for(scan_id)
-    write_sandbox_record(
-        run_dir,
-        {
-            "backend": "docker",
-            "container_id": "gone-cid",
-            "image": "strix:test",
-            "workspace": str(workspace_dir(run_dir)),
-        },
-    )
-
-    fake_session = MagicMock()
-    fake_session._inner.state.container_id = "new-cid"
-    fake_session.resolve_exposed_port = AsyncMock(
-        return_value=MagicMock(host="127.0.0.1", port=48080, tls=False)
-    )
-    fake_client = MagicMock()
-
-    async def backend(**kwargs: Any) -> tuple[Any, Any]:
-        if kwargs.get("container_id"):
-            raise docker_errors.NotFound("gone")
-        return fake_client, fake_session
-
-    monkeypatch.setattr(
-        session_manager, "load_settings", lambda: MagicMock(runtime=MagicMock(backend="docker"))
-    )
-    monkeypatch.setattr(session_manager, "get_backend", lambda _name: backend)
-    monkeypatch.setattr(session_manager, "backend_supports_bind_mounts", lambda _name: True)
-    monkeypatch.setattr(session_manager, "bootstrap_caido", AsyncMock(return_value=MagicMock()))
-
-    session_manager._SESSION_CACHE.pop(scan_id, None)
-    try:
-        await session_manager.create_or_reuse(scan_id, image="strix:test", local_sources=[])
-    finally:
-        session_manager._SESSION_CACHE.pop(scan_id, None)
-
-    record = read_sandbox_record(run_dir)
-    assert record is not None
-    assert record["container_id"] == "new-cid"
